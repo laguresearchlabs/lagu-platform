@@ -1,0 +1,60 @@
+[versions]
+spring-boot             = "4.1.0"
+spring-dep-mgmt         = "1.1.7"
+lombok                  = "1.18.38"
+mapstruct               = "1.6.3"
+springdoc               = "3.0.0"
+logstash-logback        = "8.0"
+flyway                  = "11.0.0"
+testcontainers          = "1.21.0"
+jackson                 = "2.19.0"
+opensearch-client       = "2.19.0"
+
+[libraries]
+# Spring Boot starters
+spring-boot-web             = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-data-jpa        = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
+spring-boot-security        = { module = "org.springframework.boot:spring-boot-starter-security" }
+spring-boot-validation      = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-actuator        = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-data-redis      = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
+spring-boot-aop             = { module = "org.springframework.boot:spring-boot-starter-aop" }
+aspectjweaver               = { module = "org.aspectj:aspectjweaver" }
+spring-boot-kafka           = { module = "org.springframework.kafka:spring-kafka" }
+spring-boot-test            = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-kafka-test           = { module = "org.springframework.kafka:spring-kafka-test" }
+
+# Database
+postgresql                  = { module = "org.postgresql:postgresql" }
+flyway-core                 = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql           = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+
+# Jackson
+jackson-databind            = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-datatype-jsr310     = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+
+# Code generation
+lombok                      = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+mapstruct                   = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
+mapstruct-processor         = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
+
+# Observability
+micrometer-prometheus       = { module = "io.micrometer:micrometer-registry-prometheus" }
+logstash-logback            = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-logback" }
+
+# API docs
+springdoc-openapi           = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+
+# Search (Phase 4)
+opensearch-client           = { module = "org.opensearch.client:opensearch-java", version.ref = "opensearch-client" }
+opensearch-rest-client      = { module = "org.opensearch.client:opensearch-rest-client", version.ref = "opensearch-client" }
+
+# Testing
+testcontainers-junit        = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-postgresql   = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-kafka        = { module = "org.testcontainers:kafka", version.ref = "testcontainers" }
+testcontainers-redis        = { module = "com.redis:testcontainers-redis", version = "2.2.2" }
+
+[plugins]
+spring-boot     = { id = "org.springframework.boot", version.ref = "spring-boot" }
+spring-dep-mgmt = { id = "io.spring.dependency-management", version.ref = "spring-dep-mgmt" }

@@ -1,28 +1,36 @@
 plugins {
-	java
-	id("org.springframework.boot") version "4.1.0"
-	id("io.spring.dependency-management") version "1.1.7"
+    alias(libs.plugins.spring.boot) apply false
+    alias(libs.plugins.spring.dep.mgmt) apply false
 }
 
-group = "com.lagu"
-version = "0.0.1-SNAPSHOT"
+subprojects {
+    apply(plugin = "java")
+    apply(plugin = "io.spring.dependency-management")
 
-java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(25)
-	}
-}
+    group = "com.lagu.platform"
+    version = "0.0.1-SNAPSHOT"
 
-repositories {
-	mavenCentral()
-}
+    extensions.configure<JavaPluginExtension> {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+    }
 
-dependencies {
-	implementation("org.springframework.boot:spring-boot-starter")
-	testImplementation("org.springframework.boot:spring-boot-starter-test")
-	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-}
+    the<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension>().apply {
+        imports {
+            mavenBom("org.springframework.boot:spring-boot-dependencies:${rootProject.libs.versions.spring.boot.get()}")
+        }
+    }
 
-tasks.withType<Test> {
-	useJUnitPlatform()
+    repositories {
+        mavenCentral()
+    }
+
+    tasks.withType<JavaCompile> {
+        options.compilerArgs.addAll(listOf("-parameters"))
+    }
+
+    tasks.withType<Test> {
+        useJUnitPlatform()
+    }
 }

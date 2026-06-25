@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://search.maven.org/solrsearch/select?q=g:org.springframework.cloud+AND+a:spring-cloud-dependencies&rows=10&wt=json\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(d['latestVersion'], d.get\\('v',''\\)\\) for d in data['response']['docs']]\")"
+    ]
+  }
+}
