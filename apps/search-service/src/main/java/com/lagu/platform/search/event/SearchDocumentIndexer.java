@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -22,19 +23,19 @@ public class SearchDocumentIndexer {
     private final OpenSearchClient     osClient;
     private final IndexMappingBuilder  mappingBuilder;
 
-    @KafkaListener(topics = PlatformTopics.RECORD_EVENTS, groupId = "search-service")
-    public void handle(RecordEvent event) {
-        try {
-            switch (event.getEventType()) {
-                case "CREATED", "UPDATED" -> indexFull(event);
-                case "STATUS_CHANGED"     -> partialUpdate(event);
-                case "DELETED"            -> delete(event);
-                default -> { /* ignore */ }
-            }
-        } catch (Exception e) {
-            log.error("SearchDocumentIndexer error for event {}/{}: {}",
-                    event.getEventType(), event.getRecordId(), e.getMessage(), e);
+    @KafkaListener(
+            topics = PlatformTopics.RECORD_EVENTS,
+            groupId = "search-service",
+            properties = {"spring.json.value.default.type=com.lagu.platform.events.RecordEvent"}
+    )
+    public void handle(RecordEvent event, Acknowledgment ack) throws IOException {
+        switch (event.getEventType()) {
+            case "CREATED", "UPDATED" -> indexFull(event);
+            case "STATUS_CHANGED"     -> partialUpdate(event);
+            case "DELETED"            -> delete(event);
+            default -> { /* ignore */ }
         }
+        ack.acknowledge();
     }
 
     private void indexFull(RecordEvent event) throws IOException {

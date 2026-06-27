@@ -9,6 +9,8 @@ import com.lagu.platform.workflow.dto.*;
 import com.lagu.platform.workflow.event.WorkflowEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,8 +28,10 @@ public class StateMachineEngine {
     private final WorkflowTransitionRepository txRepo;
     private final RecordWorkflowStateRepository rwsRepo;
     private final TransitionHistoryRepository   histRepo;
-    private final ApprovalEngine                approvalEngine;
     private final WorkflowEventPublisher        publisher;
+
+    @Lazy @Autowired
+    private ApprovalEngine approvalEngine;
 
     /**
      * Processes a STATUS_TRANSITION_REQUESTED event from record-service.

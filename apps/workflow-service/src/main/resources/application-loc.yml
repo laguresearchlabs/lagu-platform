@@ -1,0 +1,28 @@
+spring:
+  config:
+    activate:
+      on-profile: loc
+
+  datasource:
+    url: jdbc:postgresql://localhost:5435/platformdb
+    username: postgres
+    password: postgres
+
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+server:
+  port: 8085
+
+logging:
+  level:
+    com.lagu.platform: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE

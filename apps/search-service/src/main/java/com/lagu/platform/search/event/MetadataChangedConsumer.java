@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -16,18 +17,20 @@ public class MetadataChangedConsumer {
 
     private final CacheManager cacheManager;
 
-    @KafkaListener(topics = PlatformTopics.METADATA_CHANGED, groupId = "search-service-metadata")
-    public void handle(MetadataChangedEvent event) {
-        // When an ObjectType/Attribute schema changes, evict the cached schema so the
-        // next indexing operation re-fetches it and creates an updated mapping.
-        if (!"OBJECT_TYPE".equals(event.getResourceKind()) && !"ATTRIBUTE".equals(event.getResourceKind())) {
-            return;
+    @KafkaListener(
+            topics = PlatformTopics.METADATA_CHANGED,
+            groupId = "search-service-metadata",
+            properties = {"spring.json.value.default.type=com.lagu.platform.events.MetadataChangedEvent"}
+    )
+    public void handle(MetadataChangedEvent event, Acknowledgment ack) {
+        if ("OBJECT_TYPE".equals(event.getResourceKind()) || "ATTRIBUTE".equals(event.getResourceKind())) {
+            var cache = cacheManager.getCache(MetadataClient.SCHEMA_CACHE);
+            if (cache != null) {
+                cache.clear();
+                log.info("Evicted search schema cache due to {} change: {}",
+                        event.getResourceKind(), event.getResourceName());
+            }
         }
-
-        var cache = cacheManager.getCache(MetadataClient.SCHEMA_CACHE);
-        if (cache != null) {
-            cache.clear();
-            log.info("Evicted search schema cache due to {} change: {}", event.getResourceKind(), event.getResourceName());
-        }
+        ack.acknowledge();
     }
 }

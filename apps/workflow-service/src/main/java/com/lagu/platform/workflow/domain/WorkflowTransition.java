@@ -1,9 +1,9 @@
 package com.lagu.platform.workflow.domain;
 
-import com.lagu.platform.common.converter.JsonbConverter;
-import com.lagu.platform.common.converter.JsonbListConverter;
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.List;
 import java.util.Map;
@@ -34,7 +34,7 @@ public class WorkflowTransition {
     @Column(name = "trigger_label", length = 200)
     private String triggerLabel;
 
-    @Convert(converter = JsonbListConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "allowed_roles", columnDefinition = "jsonb")
     private List<String> allowedRoles;
 
@@ -45,7 +45,7 @@ public class WorkflowTransition {
     @JoinColumn(name = "approval_def_id")
     private ApprovalDefinition approvalDefinition;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> conditions;
 }

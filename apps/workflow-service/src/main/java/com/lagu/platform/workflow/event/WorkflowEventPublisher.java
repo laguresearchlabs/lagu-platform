@@ -86,7 +86,8 @@ public class WorkflowEventPublisher {
     }
 
     private void send(String key, WorkflowEvent event) {
-        kafka.send(PlatformTopics.WORKFLOW_EVENTS, key, event)
+        String partitionKey = event.getRecordId() != null ? key + ":" + event.getRecordId() : key;
+        kafka.send(PlatformTopics.WORKFLOW_EVENTS, partitionKey, event)
                 .whenComplete((result, ex) -> {
                     if (ex != null) log.error("Failed to publish WorkflowEvent {}", event.getEventType(), ex);
                 });

@@ -103,10 +103,12 @@ public class ApprovalEngine {
         }
     }
 
-    public List<ApprovalInstanceResponse> getPendingForUser(Set<String> roles) {
+    public List<ApprovalInstanceResponse> getPendingForUser(Set<String> roles, Integer olderThanMinutes) {
         List<String> roleList = List.copyOf(roles);
-        return instanceRepo.findPendingForRoles(roleList).stream()
-                .map(this::toResponse).toList();
+        List<ApprovalInstance> instances = olderThanMinutes != null
+                ? instanceRepo.findPendingForRolesOlderThan(roleList, OffsetDateTime.now().minusMinutes(olderThanMinutes))
+                : instanceRepo.findPendingForRoles(roleList);
+        return instances.stream().map(this::toResponse).toList();
     }
 
     public ApprovalInstanceResponse getById(UUID id) {

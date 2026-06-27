@@ -1,17 +1,21 @@
 spring:
   application:
     name: workflow-service
+  profiles:
+    active: loc
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5435/platformdb}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       schema: workflow
       maximum-pool-size: 10
       minimum-idle: 2
 
   jpa:
+    hibernate:
+      ddl-auto: create
     properties:
       hibernate:
         default_schema: workflow
@@ -25,7 +29,7 @@ spring:
     baseline-on-migrate: true
 
   kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
     consumer:
       group-id: workflow-service
       auto-offset-reset: earliest
@@ -35,6 +39,8 @@ spring:
         spring.json.trusted.packages: "com.lagu.platform.events"
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.lagu.platform.events.RecordEvent
+    listener:
+      ack-mode: MANUAL
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer

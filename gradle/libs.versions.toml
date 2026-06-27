@@ -20,7 +20,8 @@ spring-boot-actuator        = { module = "org.springframework.boot:spring-boot-s
 spring-boot-data-redis      = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 spring-boot-aop             = { module = "org.springframework.boot:spring-boot-starter-aop" }
 aspectjweaver               = { module = "org.aspectj:aspectjweaver" }
-spring-boot-kafka           = { module = "org.springframework.kafka:spring-kafka" }
+spring-boot-kafka           = { module = "org.springframework.boot:spring-boot-starter-kafka" }
+spring-boot-mail            = { module = "org.springframework.boot:spring-boot-starter-mail" }
 spring-boot-test            = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-kafka-test           = { module = "org.springframework.kafka:spring-kafka-test" }
 
@@ -28,6 +29,8 @@ spring-kafka-test           = { module = "org.springframework.kafka:spring-kafka
 postgresql                  = { module = "org.postgresql:postgresql" }
 flyway-core                 = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-postgresql           = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+spring-boot-flyway          = { module = "org.springframework.boot:spring-boot-starter-flyway" }
+spring-boot-jackson2        = { module = "org.springframework.boot:spring-boot-jackson2" }
 
 # Jackson
 jackson-databind            = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
@@ -44,6 +47,12 @@ logstash-logback            = { module = "net.logstash.logback:logstash-logback-
 
 # API docs
 springdoc-openapi           = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+
+# Retry / resilience (Phase 5)
+spring-retry                = { module = "org.springframework.retry:spring-retry", version = "2.0.12" }
+resilience4j-cb             = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version = "2.2.0" }
+resilience4j-retry          = { module = "io.github.resilience4j:resilience4j-retry", version = "2.2.0" }
+resilience4j-micrometer     = { module = "io.github.resilience4j:resilience4j-micrometer", version = "2.2.0" }
 
 # Search (Phase 4)
 opensearch-client           = { module = "org.opensearch.client:opensearch-java", version.ref = "opensearch-client" }

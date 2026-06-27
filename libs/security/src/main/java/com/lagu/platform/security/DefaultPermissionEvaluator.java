@@ -25,10 +25,20 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
             return isConfigResource(resource);
         }
 
+        // Notifications: any authenticated user can read/manage their own
+        if ("NOTIFICATION".equals(resource)) return true;
+
+        // Documents: any authenticated user can upload/read their own;
+        // REVIEW action (verify/reject) requires ORG_MANAGER or ORG_OWNER
+        if ("DOCUMENT".equals(resource)) {
+            if ("REVIEW".equals(action)) return ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER");
+            return true;
+        }
+
         // Org members can read any resource within their org
         if (ctx.isOrgMember() && "READ".equals(action)) return true;
 
-        // ORG_MANAGER and above can create/update/delete records
+        // ORG_MANAGER and above can create/update/delete/transition records
         if (ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER") && isRecordAction(action)) return true;
 
         return false;
@@ -36,7 +46,8 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
 
     private boolean isConfigResource(String resource) {
         return switch (resource) {
-            case "ATTRIBUTE", "ENTITY", "OBJECT_TYPE", "RELATIONSHIP", "ROLE", "PERMISSION", "GROUP", "WORKFLOW", "*"
+            case "ATTRIBUTE", "ENTITY", "OBJECT_TYPE", "RELATIONSHIP",
+                 "ROLE", "PERMISSION", "GROUP", "WORKFLOW", "TRIGGER", "*"
                     -> true;
             default -> false;
         };

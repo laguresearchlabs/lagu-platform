@@ -17,4 +17,12 @@ public interface ApprovalInstanceRepository extends JpaRepository<ApprovalInstan
             WHERE ai.status = 'PENDING' AND s.approverRole IN :roles
             """)
     List<ApprovalInstance> findPendingForRoles(List<String> roles);
+
+    @Query("""
+            SELECT ai FROM ApprovalInstance ai
+            JOIN FETCH ai.approvalDefinition ad
+            JOIN ad.steps s
+            WHERE ai.status = 'PENDING' AND s.approverRole IN :roles AND ai.createdAt < :cutoff
+            """)
+    List<ApprovalInstance> findPendingForRolesOlderThan(List<String> roles, java.time.OffsetDateTime cutoff);
 }

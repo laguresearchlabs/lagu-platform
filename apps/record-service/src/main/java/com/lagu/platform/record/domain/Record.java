@@ -1,9 +1,10 @@
 package com.lagu.platform.record.domain;
 
-import com.lagu.platform.common.converter.JsonbConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -34,7 +35,7 @@ public class Record {
     @Column(nullable = false, length = 50)
     private String status = "DRAFT";
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> data = new HashMap<>();
 

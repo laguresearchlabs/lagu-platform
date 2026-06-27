@@ -1,9 +1,10 @@
 package com.lagu.platform.metadata.domain;
 
-import com.lagu.platform.common.converter.JsonbConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -46,7 +47,7 @@ public class ObjectTypeDefinition {
     @Column(name = "is_active")
     private boolean active = true;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> config;
 

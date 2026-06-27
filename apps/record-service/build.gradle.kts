@@ -29,4 +29,6 @@ dependencies {
     testImplementation(rootProject.libs.spring.boot.test)
     testImplementation(rootProject.libs.testcontainers.junit)
     testImplementation(rootProject.libs.testcontainers.postgresql)
+    testImplementation(rootProject.libs.testcontainers.redis)
+    testImplementation(rootProject.libs.spring.kafka.test)
 }

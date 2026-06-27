@@ -1,17 +1,21 @@
 spring:
   application:
     name: record-service
+  profiles:
+    active: loc
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5435/platformdb}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       schema: records
       maximum-pool-size: 15
       minimum-idle: 3
 
   jpa:
+    hibernate:
+      ddl-auto: create
     properties:
       hibernate:
         default_schema: records
@@ -26,12 +30,12 @@ spring:
 
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6380}
+      host: ${SPRING_DATA_REDIS_HOST}
+      port: ${SPRING_DATA_REDIS_PORT}
       timeout: 2000ms
 
   kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -48,13 +52,17 @@ spring:
         spring.json.trusted.packages: "com.lagu.platform.events"
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.lagu.platform.events.WorkflowEvent
+    listener:
+      ack-mode: MANUAL
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 platform:
   metadata-service:
-    url: ${METADATA_SERVICE_URL:http://localhost:8100}
+    url: ${METADATA_SERVICE_URL}
+  image-service:
+    url: ${IMAGE_SERVICE_URL}
 
 management:
   endpoints:

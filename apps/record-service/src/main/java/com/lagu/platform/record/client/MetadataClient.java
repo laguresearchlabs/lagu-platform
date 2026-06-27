@@ -36,6 +36,20 @@ public class MetadataClient {
         return response.getData();
     }
 
+    public RelationshipDefinitionDto getRelationshipDefinition(String name) {
+        log.debug("Fetching relationship definition name={}", name);
+        try {
+            ApiResponse<RelationshipDefinitionDto> response = metadataRestClient.get()
+                    .uri("/api/v1/relationship-definitions/by-name/{name}", name)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            return (response != null && response.isSuccess()) ? response.getData() : null;
+        } catch (Exception e) {
+            log.warn("Relationship definition '{}' not found in metadata-service: {}", name, e.getMessage());
+            return null;
+        }
+    }
+
     public record ObjectTypeSchemaDto(String objectType, List<FieldSchemaDto> fields) {}
 
     public record FieldSchemaDto(
@@ -50,5 +64,14 @@ public class MetadataClient {
             List<String> enumValues,
             Map<String, Object> validation,
             Map<String, Object> config
+    ) {}
+
+    public record RelationshipDefinitionDto(
+            String name,
+            String sourceObjectType,
+            String targetObjectType,
+            String relationshipType,
+            boolean required,
+            boolean cascadeDelete
     ) {}
 }

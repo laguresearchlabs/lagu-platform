@@ -21,16 +21,16 @@ public class TransitionEventConsumer {
 
     @KafkaListener(topics = PlatformTopics.RECORD_EVENTS, groupId = "workflow-service")
     public void onRecordEvent(@Payload RecordEvent event,
-                              @Header(KafkaHeaders.RECEIVED_KEY) String key) {
-        if (!"STATUS_TRANSITION_REQUESTED".equals(event.getEventType())) return;
+                              @Header(KafkaHeaders.RECEIVED_KEY) String key,
+                              Acknowledgment ack) {
+        if (!"STATUS_TRANSITION_REQUESTED".equals(event.getEventType())) {
+            ack.acknowledge();
+            return;
+        }
 
         log.info("Processing transition request for record {} trigger={}",
                 event.getRecordId(), event.getTriggerName());
-        try {
-            engine.processTransitionRequest(event);
-        } catch (Exception ex) {
-            log.error("Failed to process transition for record {}: {}", event.getRecordId(), ex.getMessage(), ex);
-            // In production: route to Dead Letter Topic via @DltHandler
-        }
+        engine.processTransitionRequest(event);  // exceptions propagate → DLT after 3 retries
+        ack.acknowledge();
     }
 }

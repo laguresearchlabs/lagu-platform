@@ -9,4 +9,5 @@ public final class PlatformTopics {
     public static final String WORKFLOW_EVENTS    = "platform.workflow.events";
     public static final String TEAM_EVENTS        = "platform.team.events";
     public static final String AUTOMATION_EVENTS  = "platform.automation.events";
+    public static final String DOCUMENT_EVENTS    = "platform.document.events";
 }

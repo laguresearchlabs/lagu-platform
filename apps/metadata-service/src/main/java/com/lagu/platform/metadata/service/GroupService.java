@@ -4,6 +4,7 @@ import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.metadata.domain.team.*;
 import com.lagu.platform.metadata.dto.*;
+import com.lagu.platform.metadata.event.TeamEventPublisher;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +21,7 @@ public class GroupService {
 
     private final GroupDefinitionRepository groupRepo;
     private final GroupMemberRepository memberRepo;
+    private final TeamEventPublisher teamEventPublisher;
 
     public List<GroupResponse> listGroups() {
         UUID orgId = orgId();
@@ -72,7 +74,9 @@ public class GroupService {
         member.setOrgId(group.getOrgId());
         member.setUserId(req.getUserId());
         member.setRoleName(req.getRoleName());
-        return toMemberResponse(memberRepo.save(member));
+        MemberResponse saved = toMemberResponse(memberRepo.save(member));
+        teamEventPublisher.publishMemberAdded(group.getOrgId(), groupId, req.getUserId(), req.getRoleName());
+        return saved;
     }
 
     @Transactional
@@ -80,14 +84,18 @@ public class GroupService {
         GroupMember member = memberRepo.findByGroupIdAndUserId(groupId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Member", userId.toString()));
         member.setRoleName(req.getRoleName());
-        return toMemberResponse(memberRepo.save(member));
+        MemberResponse saved = toMemberResponse(memberRepo.save(member));
+        teamEventPublisher.publishRoleAssigned(member.getOrgId(), groupId, userId, req.getRoleName());
+        return saved;
     }
 
     @Transactional
     public void removeMember(UUID groupId, UUID userId) {
         GroupMember member = memberRepo.findByGroupIdAndUserId(groupId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Member", userId.toString()));
+        UUID orgId = member.getOrgId();
         memberRepo.delete(member);
+        teamEventPublisher.publishMemberRemoved(orgId, groupId, userId);
     }
 
     private GroupDefinition findGroupForOrg(UUID id) {

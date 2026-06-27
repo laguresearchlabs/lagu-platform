@@ -1,15 +1,23 @@
 spring:
   application:
     name: search-service
+  profiles:
+    active: loc
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      - org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration
+      - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
 
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6380}
+      host: ${SPRING_DATA_REDIS_HOST}
+      port: ${SPRING_DATA_REDIS_PORT}
       timeout: 2000ms
 
   kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
     consumer:
       group-id: search-service
       auto-offset-reset: earliest
@@ -18,17 +26,19 @@ spring:
       properties:
         spring.json.trusted.packages: "com.lagu.platform.events"
         spring.json.use.type.headers: false
+    listener:
+      ack-mode: MANUAL
 
 opensearch:
-  host: ${OPENSEARCH_HOST:localhost}
-  port: ${OPENSEARCH_PORT:9200}
+  host: ${OPENSEARCH_HOST}
+  port: ${OPENSEARCH_PORT}
   index-prefix: ${OPENSEARCH_INDEX_PREFIX:platform}
 
 platform:
   metadata-service:
-    url: ${METADATA_SERVICE_URL:http://localhost:8100}
+    url: ${METADATA_SERVICE_URL}
   record-service:
-    url: ${RECORD_SERVICE_URL:http://localhost:8101}
+    url: ${RECORD_SERVICE_URL}
 
 server:
   port: ${SERVER_PORT:8080}

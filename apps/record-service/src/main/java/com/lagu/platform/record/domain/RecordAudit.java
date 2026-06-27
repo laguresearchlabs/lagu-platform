@@ -1,9 +1,10 @@
 package com.lagu.platform.record.domain;
 
-import com.lagu.platform.common.converter.JsonbConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -26,11 +27,11 @@ public class RecordAudit {
     @Column(nullable = false, length = 20)
     private String action;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "old_data", columnDefinition = "jsonb")
     private Map<String, Object> oldData;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "new_data", columnDefinition = "jsonb")
     private Map<String, Object> newData;
 

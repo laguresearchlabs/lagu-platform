@@ -21,10 +21,21 @@ public class RecordServiceConfig {
     @Value("${platform.metadata-service.url:http://localhost:8100}")
     private String metadataServiceUrl;
 
+    @Value("${platform.image-service.url:http://localhost:8200}")
+    private String imageServiceUrl;
+
     @Bean
     public RestClient metadataRestClient() {
         return RestClient.builder()
                 .baseUrl(metadataServiceUrl)
+                .defaultHeader("X-Internal-Service", "record-service")
+                .build();
+    }
+
+    @Bean
+    public RestClient imageRestClient() {
+        return RestClient.builder()
+                .baseUrl(imageServiceUrl)
                 .defaultHeader("X-Internal-Service", "record-service")
                 .build();
     }

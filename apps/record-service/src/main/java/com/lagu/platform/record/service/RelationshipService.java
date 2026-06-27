@@ -2,6 +2,7 @@ package com.lagu.platform.record.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.record.client.MetadataClient;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordRelationship;
 import com.lagu.platform.record.domain.RecordRelationshipRepository;
@@ -24,6 +25,7 @@ public class RelationshipService {
 
     private final RecordRelationshipRepository relRepo;
     private final RecordRepository recordRepo;
+    private final MetadataClient metadataClient;
 
     public List<RelationshipResponse> list(UUID sourceId, String relationshipName) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
@@ -52,6 +54,27 @@ public class RelationshipService {
         }
 
         String relName = req.getRelationshipName().toUpperCase();
+
+        // Validate against definition when available
+        MetadataClient.RelationshipDefinitionDto relDef = metadataClient.getRelationshipDefinition(relName);
+        if (relDef != null) {
+            if (!source.getObjectType().equalsIgnoreCase(relDef.sourceObjectType())) {
+                throw new ValidationException("Source record type '" + source.getObjectType()
+                        + "' does not match relationship definition source type '" + relDef.sourceObjectType() + "'");
+            }
+            if (!target.getObjectType().equalsIgnoreCase(relDef.targetObjectType())) {
+                throw new ValidationException("Target record type '" + target.getObjectType()
+                        + "' does not match relationship definition target type '" + relDef.targetObjectType() + "'");
+            }
+            if ("ONE_TO_ONE".equals(relDef.relationshipType())) {
+                List<RecordRelationship> existing =
+                        relRepo.findByOrgIdAndSourceRecordIdAndRelationshipName(orgId, sourceId, relName);
+                if (!existing.isEmpty()) {
+                    throw new ValidationException("A ONE_TO_ONE relationship '" + relName + "' already exists for this record");
+                }
+            }
+        }
+
         relRepo.findByRelationshipNameAndSourceRecordIdAndTargetRecordId(relName, sourceId, target.getId())
                 .ifPresent(r -> { throw new ValidationException("Relationship already exists"); });
 

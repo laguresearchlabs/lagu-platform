@@ -1,12 +1,74 @@
 spring:
   application:
     name: automation-service
+  profiles:
+    active: loc
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      schema: automation
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: automation
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    schemas: automation
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: automation-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: MANUAL
+
+platform:
+  workflow-service:
+    url: ${WORKFLOW_SERVICE_URL}
+  record-service:
+    url: ${RECORD_SERVICE_URL}
+  automation:
+    webhook-timeout-seconds: ${WEBHOOK_TIMEOUT_SECONDS:10}
+    webhook-retry-attempts: ${WEBHOOK_RETRY_ATTEMPTS:3}
+    approval-timeout-check-interval-ms: ${APPROVAL_TIMEOUT_CHECK_MS:60000}
 
 server:
-  port: ${SERVER_PORT:8084}
+  port: ${SERVER_PORT:8080}
 
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,info,prometheus
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"

@@ -1,10 +1,10 @@
 package com.lagu.platform.metadata.domain;
 
-import com.lagu.platform.common.converter.JsonbConverter;
-import com.lagu.platform.common.converter.JsonbListConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -59,15 +59,15 @@ public class AttributeDefinition {
     @Column(name = "default_value")
     private String defaultValue;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "validation_rules", columnDefinition = "jsonb")
     private Map<String, Object> validationRules;
 
-    @Convert(converter = JsonbListConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "enum_values", columnDefinition = "jsonb")
     private List<String> enumValues;
 
-    @Convert(converter = JsonbConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> config;
 

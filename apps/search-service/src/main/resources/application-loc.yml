@@ -1,0 +1,32 @@
+spring:
+  config:
+    activate:
+      on-profile: loc
+
+  data:
+    redis:
+      host: localhost
+      port: 6380
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+opensearch:
+  host: localhost
+  port: 9200
+  index-prefix: platform
+
+platform:
+  metadata-service:
+    url: http://localhost:8083
+  record-service:
+    url: http://localhost:8080
+
+server:
+  port: 8082
+
+logging:
+  level:
+    com.lagu.platform: DEBUG
+    org.springframework.kafka: INFO
+    org.springframework.data.redis: DEBUG

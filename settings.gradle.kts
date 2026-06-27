@@ -8,5 +8,7 @@ include(
     "apps:record-service",
     "apps:workflow-service",
     "apps:search-service",
-    "apps:automation-service"
+    "apps:automation-service",
+    "apps:notification-service",
+    "apps:document-service"
 )

@@ -23,10 +23,11 @@ public class ApprovalController {
     private final ApprovalEngine engine;
 
     @GetMapping("/pending")
-    public ResponseEntity<ApiResponse<List<ApprovalInstanceResponse>>> pending() {
+    public ResponseEntity<ApiResponse<List<ApprovalInstanceResponse>>> pending(
+            @RequestParam(required = false) Integer olderThanMinutes) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         Set<String> roles = ctx != null ? ctx.getRoles() : Set.of();
-        return ResponseEntity.ok(ApiResponse.ok(engine.getPendingForUser(roles)));
+        return ResponseEntity.ok(ApiResponse.ok(engine.getPendingForUser(roles, olderThanMinutes)));
     }
 
     @GetMapping("/{id}")
