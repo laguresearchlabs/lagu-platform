@@ -1,0 +1,185 @@
+name: Lagu Platform — CI/CD
+
+# NOTE: apps/booking-service is intentionally excluded — it isn't registered in
+# settings.gradle.kts yet and has no Dockerfile. Add it to the `services` list
+# below (and to settings.gradle.kts) once it's ready to build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GCP_REGION: asia-south1
+  GCP_PROJECT: ascendant-might-248610
+  REGISTRY: asia-south1-docker.pkg.dev/ascendant-might-248610/app-images
+
+jobs:
+  # ─── Detect which services changed ──────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.matrix.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared: &shared
+              - 'libs/common/**'
+              - 'libs/events/**'
+              - 'libs/security/**'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - 'gradle/libs.versions.toml'
+            schema-registry:
+              - *shared
+              - 'apps/schema-registry/**'
+            metadata-service:
+              - *shared
+              - 'apps/metadata-service/**'
+            record-service:
+              - *shared
+              - 'apps/record-service/**'
+            workflow-service:
+              - *shared
+              - 'apps/workflow-service/**'
+            search-service:
+              - *shared
+              - 'apps/search-service/**'
+            automation-service:
+              - *shared
+              - 'apps/automation-service/**'
+            notification-service:
+              - *shared
+              - 'apps/notification-service/**'
+            document-service:
+              - *shared
+              - 'apps/document-service/**'
+            vendor-service:
+              - *shared
+              - 'apps/vendor-service/**'
+            listing-service:
+              - *shared
+              - 'apps/listing-service/**'
+
+      - name: Build service matrix
+        id: matrix
+        env:
+          SCHEMA_REGISTRY: ${{ steps.filter.outputs.schema-registry }}
+          METADATA_SERVICE: ${{ steps.filter.outputs.metadata-service }}
+          RECORD_SERVICE: ${{ steps.filter.outputs.record-service }}
+          WORKFLOW_SERVICE: ${{ steps.filter.outputs.workflow-service }}
+          SEARCH_SERVICE: ${{ steps.filter.outputs.search-service }}
+          AUTOMATION_SERVICE: ${{ steps.filter.outputs.automation-service }}
+          NOTIFICATION_SERVICE: ${{ steps.filter.outputs.notification-service }}
+          DOCUMENT_SERVICE: ${{ steps.filter.outputs.document-service }}
+          VENDOR_SERVICE: ${{ steps.filter.outputs.vendor-service }}
+          LISTING_SERVICE: ${{ steps.filter.outputs.listing-service }}
+        run: |
+          services=()
+          [[ "$SCHEMA_REGISTRY" == "true" ]] && services+=("schema-registry")
+          [[ "$METADATA_SERVICE" == "true" ]] && services+=("metadata-service")
+          [[ "$RECORD_SERVICE" == "true" ]] && services+=("record-service")
+          [[ "$WORKFLOW_SERVICE" == "true" ]] && services+=("workflow-service")
+          [[ "$SEARCH_SERVICE" == "true" ]] && services+=("search-service")
+          [[ "$AUTOMATION_SERVICE" == "true" ]] && services+=("automation-service")
+          [[ "$NOTIFICATION_SERVICE" == "true" ]] && services+=("notification-service")
+          [[ "$DOCUMENT_SERVICE" == "true" ]] && services+=("document-service")
+          [[ "$VENDOR_SERVICE" == "true" ]] && services+=("vendor-service")
+          [[ "$LISTING_SERVICE" == "true" ]] && services+=("listing-service")
+
+          if [ ${#services[@]} -eq 0 ]; then
+            json="[]"
+          else
+            json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -sc .)
+          fi
+          echo "services=$json" >> "$GITHUB_OUTPUT"
+          echo "Changed services: $json"
+
+  # ─── Build & test (matrix over changed services) ────────────────────────────
+  build:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure gradlew is executable
+        run: chmod +x gradlew
+
+      - name: Build & test
+        run: ./gradlew :apps:${{ matrix.service }}:build --no-daemon
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-test-results
+          path: apps/${{ matrix.service }}/build/reports/tests/
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-jar
+          path: apps/${{ matrix.service }}/build/libs/*-SNAPSHOT.jar
+
+  # ─── Build & push Docker images (main branch only, matrix over changed services) ─
+  docker:
+    needs: [changes, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.service }}-jar
+          path: apps/${{ matrix.service }}/build/libs/
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
+
+      - name: Build and push ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.service }}
+          file: apps/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/lagu-platform-${{ matrix.service }}:latest
+            ${{ env.REGISTRY }}/lagu-platform-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
