@@ -47,10 +47,6 @@ spring:
       max-file-size: 20MB
       max-request-size: 25MB
 
-platform:
-  image-service:
-    url: ${IMAGE_SERVICE_URL}
-
 server:
   port: ${SERVER_PORT:8080}
 

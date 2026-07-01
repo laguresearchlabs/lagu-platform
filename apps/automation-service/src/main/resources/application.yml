@@ -49,10 +49,6 @@ spring:
       ack-mode: MANUAL
 
 platform:
-  workflow-service:
-    url: ${WORKFLOW_SERVICE_URL}
-  record-service:
-    url: ${RECORD_SERVICE_URL}
   automation:
     webhook-timeout-seconds: ${WEBHOOK_TIMEOUT_SECONDS:10}
     webhook-retry-attempts: ${WEBHOOK_RETRY_ATTEMPTS:3}

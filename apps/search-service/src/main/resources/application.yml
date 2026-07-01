@@ -38,12 +38,6 @@ opensearch:
   port: ${OPENSEARCH_PORT}
   index-prefix: ${OPENSEARCH_INDEX_PREFIX:platform}
 
-platform:
-  metadata-service:
-    url: ${METADATA_SERVICE_URL}
-  record-service:
-    url: ${RECORD_SERVICE_URL}
-
 server:
   port: ${SERVER_PORT:8080}
 

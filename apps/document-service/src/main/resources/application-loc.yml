@@ -17,10 +17,6 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
 
-platform:
-  image-service:
-    url: http://localhost:8200
-
 server:
   port: 8081
 

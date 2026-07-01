@@ -22,12 +22,6 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
 
-platform:
-  metadata-service:
-    url: http://localhost:8083
-  image-service:
-    url: http://localhost:8200
-
 server:
   port: 8080
 

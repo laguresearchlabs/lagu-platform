@@ -16,12 +16,6 @@ opensearch:
   port: 9200
   index-prefix: platform
 
-platform:
-  metadata-service:
-    url: http://localhost:8083
-  record-service:
-    url: http://localhost:8080
-
 server:
   port: 8082
 

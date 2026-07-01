@@ -73,12 +73,6 @@ eureka:
     lease-renewal-interval-in-seconds: 10
     lease-expiration-duration-in-seconds: 30
 
-platform:
-  metadata-service:
-    url: ${METADATA_SERVICE_URL}
-  image-service:
-    url: ${IMAGE_SERVICE_URL}
-
 management:
   endpoints:
     web:
