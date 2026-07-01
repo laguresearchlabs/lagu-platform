@@ -4,7 +4,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cache.annotation.EnableCaching;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {
+        "com.lagu.platform.schema",
+        "com.lagu.platform.common",
+        "com.lagu.platform.security"
+})
 @EnableCaching
 public class SchemaRegistryApplication {
     public static void main(String[] args) {
