@@ -51,6 +51,29 @@ public class RecordServiceClient {
         }
     }
 
+    public void revokeVerification(String recordId, String notes) {
+        try {
+            restClient.post()
+                    .uri("/api/v1/records/{id}/verification/revoke", recordId)
+                    .body(Map.of("notes", notes != null ? notes : "Automated revocation"))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            log.error("Failed to revoke verification for record {}: {}", recordId, e.getMessage());
+        }
+    }
+
+    public void expireOverdueVerifications() {
+        try {
+            restClient.post()
+                    .uri("/api/v1/records/verification/expire-overdue")
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            log.error("Failed to trigger expire-overdue verifications: {}", e.getMessage());
+        }
+    }
+
     public void requestStatusTransition(String recordId, String orgId, String triggerName, String comment) {
         try {
             restClient.post()

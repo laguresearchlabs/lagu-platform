@@ -334,6 +334,94 @@ services:
       kafka:
         condition: service_healthy
 
+  schema-registry:
+    build:
+      context: .
+      dockerfile: apps/schema-registry/Dockerfile
+    container_name: platform-schema-registry
+    profiles: [apps, full]
+    ports:
+      - "8107:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PLATFORM_SEEDER_ENABLED: "true"
+      OTEL_SERVICE_NAME: schema-registry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  vendor-service:
+    build:
+      context: .
+      dockerfile: apps/vendor-service/Dockerfile
+    container_name: platform-vendor
+    profiles: [apps, full]
+    ports:
+      - "8108:8080"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/platformdb
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      KAFKA_BOOTSTRAP: kafka:9092
+      SERVER_PORT: 8080
+      SPRING_FLYWAY_SCHEMAS: vendor
+      SPRING_DATASOURCE_HIKARI_SCHEMA: vendor
+      RECORD_SERVICE_URL: http://record-service:8080
+      METADATA_SERVICE_URL: http://metadata-service:8080
+      IAM_SERVICE_URL: ${IAM_SERVICE_URL:-http://iam-service:8080}
+      OTEL_SERVICE_NAME: vendor-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      record-service:
+        condition: service_started
+
+  listing-service:
+    build:
+      context: .
+      dockerfile: apps/listing-service/Dockerfile
+    container_name: platform-listing
+    profiles: [apps, full]
+    ports:
+      - "8109:8080"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/platformdb
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      KAFKA_BOOTSTRAP: kafka:9092
+      SERVER_PORT: 8080
+      SPRING_FLYWAY_SCHEMAS: listing
+      SPRING_DATASOURCE_HIKARI_SCHEMA: listing
+      RECORD_SERVICE_URL: http://record-service:8080
+      METADATA_SERVICE_URL: http://metadata-service:8080
+      SEARCH_SERVICE_URL: http://search-service:8080
+      OTEL_SERVICE_NAME: listing-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      record-service:
+        condition: service_started
+
 volumes:
   postgres-data:
   redis-data:

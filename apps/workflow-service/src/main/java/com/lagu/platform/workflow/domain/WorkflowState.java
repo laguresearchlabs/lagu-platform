@@ -35,4 +35,8 @@ public class WorkflowState {
 
     @Column(length = 20)
     private String color;
+
+    /** When true, PATCH requests on records in this state must go through ChangeSet review. */
+    @Column(name = "requires_change_approval", nullable = false)
+    private boolean requiresChangeApproval = false;
 }

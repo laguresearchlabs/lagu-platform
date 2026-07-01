@@ -1,5 +1,6 @@
 package com.lagu.platform.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,17 +34,21 @@ public class ServiceSecurityConfig {
                                                     GatewayHeaderFilter gatewayHeaderFilter) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .exceptionHandling(e -> e.authenticationEntryPoint(
+                        (req, res, ex) -> res.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(gatewayHeaderFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(
-                                "/actuator/health",
-                                "/actuator/info",
-                                "/actuator/prometheus",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/v3/api-docs/**"
-                        ).permitAll()
+                        .requestMatchers(req -> {
+                            String p = req.getServletPath();
+                            return p.startsWith("/swagger-ui") ||
+                                   p.startsWith("/v3/api-docs") ||
+                                   p.equals("/actuator/health") ||
+                                   p.equals("/actuator/info") ||
+                                   p.equals("/actuator/prometheus");
+                        }).permitAll()
                         .anyRequest().authenticated()
                 )
                 .build();

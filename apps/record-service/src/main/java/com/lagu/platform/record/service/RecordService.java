@@ -6,6 +6,7 @@ import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordAudit;
 import com.lagu.platform.record.domain.RecordAuditRepository;
 import com.lagu.platform.record.domain.RecordRepository;
+import com.lagu.platform.record.domain.RecordVerificationRepository;
 import com.lagu.platform.record.dto.CreateRecordRequest;
 import com.lagu.platform.record.dto.RecordResponse;
 import com.lagu.platform.record.dto.StatusTransitionRequest;
@@ -30,6 +31,7 @@ public class RecordService {
 
     private final RecordRepository recordRepository;
     private final RecordAuditRepository auditRepository;
+    private final RecordVerificationRepository verificationRepository;
     private final RecordValidator validator;
     private final RecordEventPublisher eventPublisher;
 
@@ -158,7 +160,7 @@ public class RecordService {
     }
 
     public RecordResponse toResponse(Record r) {
-        return RecordResponse.builder()
+        RecordResponse.RecordResponseBuilder builder = RecordResponse.builder()
                 .id(r.getId())
                 .orgId(r.getOrgId())
                 .objectType(r.getObjectType())
@@ -167,8 +169,14 @@ public class RecordService {
                 .createdBy(r.getCreatedBy())
                 .updatedBy(r.getUpdatedBy())
                 .createdAt(r.getCreatedAt())
-                .updatedAt(r.getUpdatedAt())
-                .build();
+                .updatedAt(r.getUpdatedAt());
+
+        verificationRepository.findByRecordId(r.getId()).ifPresent(v -> builder
+                .verificationTier(v.getTier())
+                .verificationStatus(v.getStatus())
+                .verificationExpiresAt(v.getExpiresAt()));
+
+        return builder.build();
     }
 
     private Record toRecord(RecordAudit audit) {

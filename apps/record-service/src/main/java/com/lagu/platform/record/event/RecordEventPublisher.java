@@ -2,6 +2,7 @@ package com.lagu.platform.record.event;
 
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.RecordEvent;
+import com.lagu.platform.events.VerificationEvent;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
@@ -83,6 +84,29 @@ public class RecordEventPublisher {
                 .changedBy(record.getUpdatedBy())
                 .occurredAt(Instant.now())
                 .build());
+    }
+
+    public void publishVerificationChanged(Record record, String previousTier, String newTier,
+                                           PlatformSecurityContext ctx) {
+        String eventType = "EXPIRED".equals(newTier) || "REVOKED".equals(newTier)
+                ? newTier : "TIER_CHANGED";
+        VerificationEvent event = VerificationEvent.builder()
+                .eventType(eventType)
+                .recordId(record.getId())
+                .orgId(record.getOrgId())
+                .objectType(record.getObjectType())
+                .previousTier(previousTier)
+                .newTier(newTier)
+                .changedBy(ctx != null ? ctx.getUserId() : null)
+                .occurredAt(Instant.now())
+                .build();
+        kafkaTemplate.send(PlatformTopics.VERIFICATION_EVENTS, recordKey(record), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("Failed to publish VerificationEvent type={} recordId={}",
+                                eventType, record.getId(), ex);
+                    }
+                });
     }
 
     private void publish(String key, RecordEvent event) {

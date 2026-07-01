@@ -29,6 +29,7 @@ public class StateMachineEngine {
     private final RecordWorkflowStateRepository rwsRepo;
     private final TransitionHistoryRepository   histRepo;
     private final WorkflowEventPublisher        publisher;
+    private final TransitionGuard               transitionGuard;
 
     @Lazy @Autowired
     private ApprovalEngine approvalEngine;
@@ -64,6 +65,13 @@ public class StateMachineEngine {
         if (!isRoleAllowed(transition.getAllowedRoles(), userRoles)) {
             publisher.publishTransitionRejected(wf, rws, transition, actorId,
                     "User does not have permission to trigger " + trigger);
+            return;
+        }
+
+        // Guard: evaluate transition preconditions against event context
+        if (!transitionGuard.evaluate(transition, event.getContext())) {
+            publisher.publishTransitionRejected(wf, rws, transition, actorId,
+                    "Transition preconditions not met for trigger " + trigger);
             return;
         }
 

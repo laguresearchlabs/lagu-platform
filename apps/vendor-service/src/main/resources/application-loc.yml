@@ -1,0 +1,42 @@
+spring:
+  config:
+    activate:
+      on-profile: loc
+
+  datasource:
+    url: jdbc:postgresql://localhost:5435/platformdb
+    username: postgres
+    password: postgres
+    hikari:
+      schema: vendor
+
+  flyway:
+    schemas: vendor
+    default-schema: vendor
+
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        default_schema: vendor
+
+  data:
+    redis:
+      host: localhost
+      port: 6380
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+platform:
+  record-service.url: http://localhost:8101
+  metadata-service.url: http://localhost:8103
+  iam-service.url: http://localhost:8080
+
+server:
+  port: 8107
+
+logging:
+  level:
+    com.lagu.platform: DEBUG

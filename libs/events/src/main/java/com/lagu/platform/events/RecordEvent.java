@@ -33,6 +33,13 @@ public class RecordEvent implements PlatformEvent {
     private String triggerName;
     private String comment;
 
+    /**
+     * Optional runtime context for TransitionGuard evaluation.
+     * Callers supply key/value pairs matching condition field names
+     * (e.g. verificationTier, activeBookings, country).
+     */
+    private Map<String, Object> context;
+
     private UUID   changedBy;
     private Instant occurredAt;
 }

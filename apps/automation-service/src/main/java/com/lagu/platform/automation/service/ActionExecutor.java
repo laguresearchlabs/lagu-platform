@@ -41,7 +41,9 @@ public class ActionExecutor {
                 case "ARCHIVE_RECORD"    -> updateStatusDirect("ARCHIVED", ctx);
                 case "CALL_WEBHOOK"      -> callWebhook(action.getConfig(), ctx);
                 case "CREATE_RECORD"     -> createRecord(action.getConfig(), ctx);
-                case "LOG_ACTIVITY"      -> logActivity(action.getConfig(), ctx);
+                case "LOG_ACTIVITY"         -> logActivity(action.getConfig(), ctx);
+                case "EXPIRE_VERIFICATION"  -> expireVerification(action.getConfig(), ctx);
+                case "REVOKE_VERIFICATION"  -> revokeVerification(action.getConfig(), ctx);
                 default -> log.warn("Unknown action type: {}", action.getActionType());
             }
             return true;
@@ -131,6 +133,21 @@ public class ActionExecutor {
         log.info("[ACTIVITY] org={} record={} event={}: {}",
                 ctx.getOrgId(), ctx.getRecordId(), ctx.getEventType(), message);
         publishActionEvent("LOG_ACTIVITY", Map.of("message", message), null, ctx);
+    }
+
+    private void expireVerification(Map<String, Object> config, AutomationEventContext ctx) {
+        // Bulk-expire all overdue verifications (scheduled automation use-case)
+        recordClient.expireOverdueVerifications();
+        publishActionEvent("EXPIRE_VERIFICATION", Map.of(), null, ctx);
+    }
+
+    private void revokeVerification(Map<String, Object> config, AutomationEventContext ctx) {
+        String recordId = ctx.getRecordId() != null ? ctx.getRecordId().toString()
+                : (String) config.get("recordId");
+        if (recordId == null) { log.warn("REVOKE_VERIFICATION: no recordId in context or config"); return; }
+        String notes = renderer.render((String) config.getOrDefault("notes", "Automated revocation"), ctx);
+        recordClient.revokeVerification(recordId, notes);
+        publishActionEvent("REVOKE_VERIFICATION", Map.of("recordId", recordId), null, ctx);
     }
 
     private void publishActionEvent(String actionType, Map<String, Object> payload,

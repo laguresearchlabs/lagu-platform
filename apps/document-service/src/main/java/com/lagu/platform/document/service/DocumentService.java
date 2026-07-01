@@ -29,19 +29,10 @@ import java.util.*;
 @Transactional(readOnly = true)
 public class DocumentService {
 
-    /** Document types with required flag and display label. */
-    private static final List<DocumentConfig> DOCUMENT_TYPES = List.of(
-            new DocumentConfig("RESUME",               "Resume / CV",                              true),
-            new DocumentConfig("IDENTITY_PROOF",       "Government-issued Identity Proof",         true),
-            new DocumentConfig("PHOTOGRAPH",           "Passport-size Photograph",                 true),
-            new DocumentConfig("ACADEMIC_CERTIFICATE", "Academic Certificates / Mark Sheets",      false),
-            new DocumentConfig("ADDRESS_PROOF",        "Address Proof",                            false),
-            new DocumentConfig("OTHER",                "Additional Documents (requested by HR)",   false)
-    );
-
     private final DocumentRepository     repository;
     private final DocumentStorageService storageService;
     private final DocumentEventPublisher publisher;
+    private final DocumentTypeRegistry   docTypeRegistry;
 
     @Transactional
     public DocumentDto upload(MultipartFile file,
@@ -96,8 +87,8 @@ public class DocumentService {
         boolean allRequiredSubmitted = true;
         boolean allRequiredVerified  = true;
 
-        for (DocumentConfig cfg : DOCUMENT_TYPES) {
-            Document doc = latestByType.get(cfg.type());
+        for (DocumentTypeRegistry.DocumentConfig cfg : docTypeRegistry.all()) {
+            Document doc = latestByType.get(cfg.code());
             String effectiveStatus = doc != null ? doc.getStatus() : "MISSING";
 
             if (cfg.required()) {
@@ -110,7 +101,7 @@ public class DocumentService {
             }
 
             statuses.add(DocumentTypeStatus.builder()
-                    .documentType(cfg.type())
+                    .documentType(cfg.code())
                     .label(cfg.label())
                     .required(cfg.required())
                     .status(effectiveStatus)
@@ -199,9 +190,7 @@ public class DocumentService {
     }
 
     private void validateDocumentType(String documentType, String identitySubType) {
-        Set<String> validTypes = Set.of(
-                "RESUME", "IDENTITY_PROOF", "PHOTOGRAPH",
-                "ACADEMIC_CERTIFICATE", "ADDRESS_PROOF", "OTHER");
+        Set<String> validTypes = docTypeRegistry.validCodes();
 
         if (!validTypes.contains(documentType.toUpperCase())) {
             throw new com.lagu.platform.common.exception.ValidationException(
@@ -217,5 +206,4 @@ public class DocumentService {
         }
     }
 
-    private record DocumentConfig(String type, String label, boolean required) {}
 }

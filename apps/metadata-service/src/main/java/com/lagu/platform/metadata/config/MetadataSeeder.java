@@ -20,6 +20,10 @@ public class MetadataSeeder implements ApplicationRunner {
     private final EntityDefinitionRepository         entityRepo;
     private final ObjectTypeDefinitionRepository     objectTypeRepo;
     private final RelationshipDefinitionRepository   relDefRepo;
+    private final DocumentTypeDefinitionRepository   docTypeRepo;
+    private final TierConfigurationRepository        tierRepo;
+    private final CountryValidationConfigRepository  countryRepo;
+    private final CategoryDefinitionRepository       categoryRepo;
 
     @Value("${platform.seeder.enabled:true}")
     private boolean enabled;
@@ -33,6 +37,10 @@ public class MetadataSeeder implements ApplicationRunner {
         seedEntities();
         seedObjectTypes();
         seedRelationshipDefinitions();
+        seedDocumentTypes();
+        seedTierConfigurations();
+        seedCountryValidationConfigs();
+        seedCategories();
         log.info("MetadataSeeder complete");
     }
 
@@ -131,7 +139,22 @@ public class MetadataSeeder implements ApplicationRunner {
             attr("requires_recording","Recording Needed", AttributeType.BOOLEAN,      false, false, null),
             attr("requires_streaming","Live Streaming",   AttributeType.BOOLEAN,      false, false, null),
             // General
-            attr("is_active",         "Active",           AttributeType.BOOLEAN,      false, true,  null)
+            attr("is_active",         "Active",           AttributeType.BOOLEAN,      false, true,  null),
+            // Vendor identity / KYC
+            attr("business_name",     "Business Name",    AttributeType.TEXT,         true,  true,  null),
+            attr("business_type",     "Business Type",    AttributeType.ENUM,         true,  true,
+                List.of("SOLE_PROPRIETORSHIP","PARTNERSHIP","PRIVATE_LIMITED","LLP","PUBLIC_LIMITED")),
+            attr("gstin",             "GSTIN",            AttributeType.TEXT,         false, false, null),
+            attr("pan_number",        "PAN Number",       AttributeType.TEXT,         true,  false, null),
+            attr("company_reg_no",    "Company Reg No.",  AttributeType.TEXT,         false, false, null),
+            // Vendor bank info
+            attr("account_number",    "Account Number",   AttributeType.TEXT,         false, false, null),
+            attr("ifsc_code",         "IFSC Code",        AttributeType.TEXT,         false, false, null),
+            attr("account_holder",    "Account Holder",   AttributeType.TEXT,         false, false, null),
+            attr("bank_name",         "Bank Name",        AttributeType.TEXT,         false, false, null),
+            // Vendor tax info
+            attr("tax_registration",  "Tax Registration", AttributeType.TEXT,         false, false, null),
+            attr("service_tax_no",    "Service Tax No.",  AttributeType.TEXT,         false, false, null)
         );
 
         int seeded = 0;
@@ -283,6 +306,17 @@ public class MetadataSeeder implements ApplicationRunner {
                 sec("contact_details",  "Contact",           2),
                 sec("media",            "Media",             3)
             ));
+
+        // VENDOR represents an org-level vendor business profile (KYC, bank, tax).
+        // Listing-level service details live in VENUE/PHOTOGRAPHER/CATERER/DECORATOR/MAKEUP_ARTIST records.
+        ensureObjectType("VENDOR", "Vendor", "Vendor business profile and KYC information",
+            List.of(
+                sec("basic_details",   "Business Identity", 0),
+                sec("contact_details", "Contact",           1),
+                sec("address",         "Address",           2),
+                sec("tax_info",        "Tax Information",   3),
+                sec("bank_info",       "Bank Details",      4)
+            ));
     }
 
     // ── 4. Relationship definitions ───────────────────────────────────────────
@@ -395,4 +429,175 @@ public class MetadataSeeder implements ApplicationRunner {
 
     private record RelDefSpec(String name, String label, String sourceType, String targetType,
                                String relType, boolean required, boolean cascadeDelete) {}
+
+    // ── 5. Document Types ─────────────────────────────────────────────────────
+
+    private void seedDocumentTypes() {
+        // Vendor business documents
+        List<DocTypeSpec> vendorDocs = List.of(
+            docType("GST_CERTIFICATE",       "GST Registration Certificate",      "VENDOR", true,  true,  0),
+            docType("PAN_CARD",              "PAN Card",                          "VENDOR", true,  false, 1),
+            docType("COMPANY_REGISTRATION",  "Company Registration Certificate",  "VENDOR", false, false, 2),
+            docType("TRADE_LICENSE",         "Trade License",                     "VENDOR", false, true,  3),
+            docType("FSSAI_LICENSE",         "FSSAI License (Caterers only)",     "VENDOR", false, true,  4),
+            docType("BANK_CANCELLED_CHEQUE", "Cancelled Cheque / Bank Letter",    "VENDOR", true,  false, 5),
+            docType("IDENTITY_PROOF",        "Owner Identity Proof",              "VENDOR", true,  false, 6)
+        );
+        // HR / employee documents (preserve existing document-service behaviour)
+        List<DocTypeSpec> hrDocs = List.of(
+            docType("RESUME",               "Resume / CV",                        null,     true,  false, 0),
+            docType("HR_IDENTITY_PROOF",    "Government-issued Identity Proof",   null,     true,  false, 1),
+            docType("PHOTOGRAPH",           "Passport-size Photograph",           null,     true,  false, 2),
+            docType("ACADEMIC_CERTIFICATE", "Academic Certificates / Mark Sheets",null,     false, false, 3),
+            docType("ADDRESS_PROOF",        "Address Proof",                      null,     false, false, 4),
+            docType("OTHER",                "Additional Documents",               null,     false, false, 5)
+        );
+
+        int seeded = 0;
+        for (DocTypeSpec s : vendorDocs) {
+            if (docTypeRepo.findByCodeAndOrgIdIsNull(s.code()).isEmpty()) {
+                seeded += saveDocType(s);
+            }
+        }
+        for (DocTypeSpec s : hrDocs) {
+            if (docTypeRepo.findByCodeAndOrgIdIsNull(s.code()).isEmpty()) {
+                seeded += saveDocType(s);
+            }
+        }
+        if (seeded > 0) log.info("Seeded {} document type(s)", seeded);
+    }
+
+    private int saveDocType(DocTypeSpec s) {
+        DocumentTypeDefinition d = new DocumentTypeDefinition();
+        d.setCode(s.code());
+        d.setLabel(s.label());
+        d.setObjectType(s.objectType());
+        d.setRequired(s.required());
+        d.setExpiryTracked(s.expiryTracked());
+        d.setAllowedMimeTypes(List.of("application/pdf", "image/jpeg", "image/png"));
+        d.setMaxSizeMb(5);
+        d.setDisplayOrder(s.order());
+        docTypeRepo.save(d);
+        return 1;
+    }
+
+    private DocTypeSpec docType(String code, String label, String objectType,
+                                boolean required, boolean expiryTracked, int order) {
+        return new DocTypeSpec(code, label, objectType, required, expiryTracked, order);
+    }
+
+    private record DocTypeSpec(String code, String label, String objectType,
+                                boolean required, boolean expiryTracked, int order) {}
+
+    // ── 6. Tier Configurations ────────────────────────────────────────────────
+
+    private void seedTierConfigurations() {
+        record TierSpec(String name, double commission, Integer maxBookings,
+                        double boost, int slaHours, Map<String, Object> features) {}
+
+        List<TierSpec> tiers = List.of(
+            new TierSpec("NONE",    20.0, 3,    1.0, 72, Map.of()),
+            new TierSpec("BASIC",   15.0, 10,   1.5, 48, Map.of(
+                    "priority_support", false, "analytics", false, "featured_badge", false)),
+            new TierSpec("PREMIUM", 10.0, null, 2.0, 24, Map.of(
+                    "priority_support", true,  "analytics", true,  "featured_badge", true))
+        );
+
+        int seeded = 0;
+        for (TierSpec s : tiers) {
+            if (tierRepo.findByTierNameAndObjectTypeIsNull(s.name()).isEmpty()) {
+                TierConfiguration t = new TierConfiguration();
+                t.setTierName(s.name());
+                t.setCommissionRate(new java.math.BigDecimal(String.valueOf(s.commission())));
+                t.setMaxActiveBookings(s.maxBookings());
+                t.setSearchBoostFactor(new java.math.BigDecimal(String.valueOf(s.boost())));
+                t.setResponseSlaHours(s.slaHours());
+                t.setFeatures(s.features());
+                tierRepo.save(t);
+                seeded++;
+            }
+        }
+        if (seeded > 0) log.info("Seeded {} tier configuration(s)", seeded);
+    }
+
+    // ── 7. Country Validation Configs ─────────────────────────────────────────
+
+    private void seedCountryValidationConfigs() {
+        if (countryRepo.findByCountryAndActiveTrue("IN").isPresent()) return;
+
+        CountryValidationConfig india = new CountryValidationConfig();
+        india.setCountry("IN");
+        india.setCurrency("INR");
+        india.setTaxLabel("GST");
+        india.setDialCode("+91");
+        india.setRules(Map.of(
+            "pan",   Map.of("pattern", "[A-Z]{5}[0-9]{4}[A-Z]{1}", "label", "PAN Number"),
+            "gstin", Map.of("pattern",
+                    "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
+                    "label", "GSTIN"),
+            "ifsc",  Map.of("pattern", "^[A-Z]{4}0[A-Z0-9]{6}$", "label", "IFSC Code"),
+            "phone", Map.of("pattern", "^[6-9]\\d{9}$", "label", "Mobile Number"),
+            "pincode", Map.of("pattern", "^[1-9][0-9]{5}$", "label", "PIN Code"),
+            "account_number", Map.of("pattern", "^[0-9]{9,18}$", "label", "Bank Account Number")
+        ));
+        countryRepo.save(india);
+        log.info("Seeded country validation config: IN");
+    }
+
+    // ── 8. Category Definitions ───────────────────────────────────────────────
+
+    private void seedCategories() {
+        // Root categories
+        CategoryDefinition wedding  = ensureCategory(null, null, "wedding-services",
+                "Wedding Services", null, 0);
+        CategoryDefinition corporate = ensureCategory(null, null, "corporate-services",
+                "Corporate Services", null, 1);
+
+        // Wedding > service types
+        CategoryDefinition wVenue   = ensureCategory(wedding, "VENUE",        "wedding-venue",
+                "Wedding Venue", null, 0);
+        CategoryDefinition wPhoto   = ensureCategory(wedding, "PHOTOGRAPHER", "wedding-photography",
+                "Wedding Photography", null, 1);
+        CategoryDefinition wCater   = ensureCategory(wedding, "CATERER",      "wedding-catering",
+                "Wedding Catering", null, 2);
+        CategoryDefinition wDecor   = ensureCategory(wedding, "DECORATOR",    "wedding-decoration",
+                "Wedding Decoration", null, 3);
+        CategoryDefinition wMakeup  = ensureCategory(wedding, "MAKEUP_ARTIST","wedding-makeup",
+                "Bridal Makeup", null, 4);
+
+        // Wedding Photography sub-categories
+        ensureCategory(wPhoto, "PHOTOGRAPHER", "wedding-day-photography",
+                "Wedding Day", null, 0);
+        ensureCategory(wPhoto, "PHOTOGRAPHER", "pre-wedding-photography",
+                "Pre-Wedding / Engagement", null, 1);
+        ensureCategory(wPhoto, "PHOTOGRAPHER", "candid-photography",
+                "Candid Photography", null, 2);
+        ensureCategory(wPhoto, "PHOTOGRAPHER", "wedding-videography",
+                "Videography", null, 3);
+
+        // Corporate > service types
+        ensureCategory(corporate, "VENUE",       "corporate-venue",
+                "Corporate Venue", null, 0);
+        ensureCategory(corporate, "CATERER",     "corporate-catering",
+                "Corporate Catering", null, 1);
+        ensureCategory(corporate, "PHOTOGRAPHER","corporate-photography",
+                "Event Photography", null, 2);
+
+        log.info("Seeded category definitions");
+    }
+
+    private CategoryDefinition ensureCategory(CategoryDefinition parent, String objectType,
+                                              String slug, String label, String iconUrl,
+                                              int order) {
+        return categoryRepo.findBySlugAndOrgIdIsNull(slug).orElseGet(() -> {
+            CategoryDefinition c = new CategoryDefinition();
+            c.setParent(parent);
+            c.setObjectType(objectType);
+            c.setSlug(slug);
+            c.setLabel(label);
+            c.setIconUrl(iconUrl);
+            c.setDisplayOrder(order);
+            return categoryRepo.save(c);
+        });
+    }
 }

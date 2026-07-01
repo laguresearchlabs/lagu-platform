@@ -1,0 +1,40 @@
+spring:
+  config:
+    activate:
+      on-profile: loc
+
+  datasource:
+    url: jdbc:postgresql://localhost:5435/platformdb
+    username: postgres
+    password: postgres
+    hikari:
+      schema: listing
+
+  flyway:
+    schemas: listing
+    default-schema: listing
+
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        default_schema: listing
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+platform:
+  record-service.url: http://localhost:8101
+  metadata-service.url: http://localhost:8100
+  search-service.url: http://localhost:8104
+
+server:
+  port: 8108
+
+logging:
+  level:
+    com.lagu.platform: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
