@@ -146,6 +146,9 @@ services:
       - grafana-data:/var/lib/grafana
 
   # ── Applications ───────────────────────────────────────────────────────────
+  # EUREKA_SERVER_URL defaults to host.docker.internal:8761 — this standalone stack has
+  # no registry-service. Registration is non-fatal if unreachable; point it at the real
+  # registry-service when running alongside the full server-scripts stack.
   metadata-service:
     build:
       context: .
@@ -154,7 +157,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8100:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
@@ -179,7 +185,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8101:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
@@ -187,8 +196,6 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      METADATA_SERVICE_URL: http://metadata-service:8080
-      IMAGE_SERVICE_URL: ${IMAGE_SERVICE_URL:-http://image-service:8080}
       OTEL_SERVICE_NAME: record-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -208,7 +215,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8102:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
@@ -233,15 +243,16 @@ services:
     profiles: [search, full]
     ports:
       - "8103:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       OPENSEARCH_HOST: opensearch
       OPENSEARCH_PORT: 9200
-      METADATA_SERVICE_URL: http://metadata-service:8080
-      RECORD_SERVICE_URL: http://record-service:8080
       OTEL_SERVICE_NAME: search-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -263,14 +274,15 @@ services:
     profiles: [apps, full]
     ports:
       - "8104:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      WORKFLOW_SERVICE_URL: http://workflow-service:8080
-      RECORD_SERVICE_URL: http://record-service:8080
       OTEL_SERVICE_NAME: automation-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -288,7 +300,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8105:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
@@ -318,13 +333,15 @@ services:
     profiles: [apps, full]
     ports:
       - "8106:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      IMAGE_SERVICE_URL: ${IMAGE_SERVICE_URL:-http://image-service:8080}
       OTEL_SERVICE_NAME: document-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -342,7 +359,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8107:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platformdb
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
@@ -370,7 +390,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8108:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       DB_URL: jdbc:postgresql://postgres:5432/platformdb
       DB_USERNAME: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -378,9 +401,8 @@ services:
       SERVER_PORT: 8080
       SPRING_FLYWAY_SCHEMAS: vendor
       SPRING_DATASOURCE_HIKARI_SCHEMA: vendor
-      RECORD_SERVICE_URL: http://record-service:8080
-      METADATA_SERVICE_URL: http://metadata-service:8080
-      IAM_SERVICE_URL: ${IAM_SERVICE_URL:-http://iam-service:8080}
+      # No iam-service container exists in this standalone stack — user-service lives in the
+      # separate iam-services repo. Override via env when running alongside the full server-scripts stack.
       OTEL_SERVICE_NAME: vendor-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -400,7 +422,10 @@ services:
     profiles: [apps, full]
     ports:
       - "8109:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-http://host.docker.internal:8761/eureka}
       DB_URL: jdbc:postgresql://postgres:5432/platformdb
       DB_USERNAME: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -408,9 +433,6 @@ services:
       SERVER_PORT: 8080
       SPRING_FLYWAY_SCHEMAS: listing
       SPRING_DATASOURCE_HIKARI_SCHEMA: listing
-      RECORD_SERVICE_URL: http://record-service:8080
-      METADATA_SERVICE_URL: http://metadata-service:8080
-      SEARCH_SERVICE_URL: http://search-service:8080
       OTEL_SERVICE_NAME: listing-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc

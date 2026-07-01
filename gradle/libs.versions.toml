@@ -1,5 +1,6 @@
 [versions]
 spring-boot             = "4.1.0"
+spring-cloud            = "2025.1.2"
 spring-dep-mgmt         = "1.1.7"
 lombok                  = "1.18.38"
 mapstruct               = "1.6.3"
@@ -24,6 +25,10 @@ spring-boot-kafka           = { module = "org.springframework.boot:spring-boot-s
 spring-boot-mail            = { module = "org.springframework.boot:spring-boot-starter-mail" }
 spring-boot-test            = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-kafka-test           = { module = "org.springframework.kafka:spring-kafka-test" }
+
+# Service discovery
+eureka-client               = { module = "org.springframework.cloud:spring-cloud-starter-netflix-eureka-client" }
+loadbalancer                = { module = "org.springframework.cloud:spring-cloud-starter-loadbalancer" }
 
 # Database
 postgresql                  = { module = "org.postgresql:postgresql" }

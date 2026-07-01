@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -20,13 +19,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Slf4j
 public class DocumentTypeRegistry {
 
-    @Value("${platform.metadata.url:http://metadata-service}")
-    private String metadataBaseUrl;
+    private static final String METADATA_BASE_URL = "http://metadata-service";
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final List<DocumentConfig> configs = new CopyOnWriteArrayList<>(FALLBACK);
+
+    public DocumentTypeRegistry(RestTemplate loadBalancedRestTemplate) {
+        this.restTemplate = loadBalancedRestTemplate;
+    }
 
     private static final List<DocumentConfig> FALLBACK = List.of(
         new DocumentConfig("RESUME",               "Resume / CV",                            true,  false),
@@ -44,7 +46,7 @@ public class DocumentTypeRegistry {
 
     @Scheduled(fixedDelayString = "${platform.doc-types.refresh-ms:3600000}")
     public void refresh() {
-        String url = metadataBaseUrl + "/api/v1/document-types";
+        String url = METADATA_BASE_URL + "/api/v1/document-types";
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restTemplate.getForObject(url, Map.class);

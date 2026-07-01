@@ -3,7 +3,6 @@ package com.lagu.platform.vendor.client;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -18,10 +17,9 @@ public class RecordServiceClient {
     private final RestClient restClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public RecordServiceClient(
-            @Value("${platform.record-service.url:http://record-service:8101}") String url) {
-        this.restClient = RestClient.builder()
-                .baseUrl(url)
+    public RecordServiceClient(RestClient.Builder loadBalancedRestClientBuilder) {
+        this.restClient = loadBalancedRestClientBuilder.clone()
+                .baseUrl("http://record-service")
                 .defaultHeader("X-Internal-Service", "vendor-service")
                 .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
                 .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")

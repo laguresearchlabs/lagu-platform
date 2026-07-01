@@ -1,7 +1,6 @@
 package com.lagu.platform.search.client;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -15,9 +14,9 @@ public class RecordClient {
 
     private final RestClient restClient;
 
-    public RecordClient(@Value("${platform.record-service.url:http://localhost:8101}") String baseUrl) {
-        this.restClient = RestClient.builder()
-                .baseUrl(baseUrl)
+    public RecordClient(RestClient.Builder loadBalancedRestClientBuilder) {
+        this.restClient = loadBalancedRestClientBuilder.clone()
+                .baseUrl("http://record-service")
                 .defaultHeader("X-Internal-Service", "search-service")
                 .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
                 .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")

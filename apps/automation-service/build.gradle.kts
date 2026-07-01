@@ -12,6 +12,8 @@ dependencies {
     implementation(rootProject.libs.spring.boot.data.jpa)
     implementation(rootProject.libs.spring.boot.validation)
     implementation(rootProject.libs.spring.boot.actuator)
+    implementation(rootProject.libs.eureka.client)
+    implementation(rootProject.libs.loadbalancer)
     implementation(rootProject.libs.spring.boot.kafka)
     implementation(rootProject.libs.spring.retry)
     implementation(rootProject.libs.resilience4j.cb)

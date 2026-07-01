@@ -29,11 +29,6 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
 
-platform:
-  record-service.url: http://localhost:8101
-  metadata-service.url: http://localhost:8103
-  iam-service.url: http://localhost:8080
-
 server:
   port: 8107
 

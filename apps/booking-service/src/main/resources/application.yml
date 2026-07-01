@@ -31,7 +31,7 @@ server:
 
 platform:
   listing-service.url: ${LISTING_SERVICE_URL:http://listing-service:8108}
-  metadata-service.url: ${METADATA_SERVICE_URL:http://metadata-service:8103}
+  metadata-service.url: ${METADATA_SERVICE_URL:http://metadata-service:8080}
 
 management:
   endpoints.web.exposure.include: health,info,prometheus

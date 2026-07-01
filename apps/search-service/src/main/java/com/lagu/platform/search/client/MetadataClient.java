@@ -1,7 +1,6 @@
 package com.lagu.platform.search.client;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -18,9 +17,9 @@ public class MetadataClient {
 
     private final RestClient restClient;
 
-    public MetadataClient(@Value("${platform.metadata-service.url:http://localhost:8100}") String baseUrl) {
-        this.restClient = RestClient.builder()
-                .baseUrl(baseUrl)
+    public MetadataClient(RestClient.Builder loadBalancedRestClientBuilder) {
+        this.restClient = loadBalancedRestClientBuilder.clone()
+                .baseUrl("http://metadata-service")
                 .defaultHeader("X-Internal-Service", "search-service")
                 .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
                 .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
