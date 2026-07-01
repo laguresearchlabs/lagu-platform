@@ -34,4 +34,12 @@ subprojects {
     tasks.withType<Test> {
         useJUnitPlatform()
     }
+
+    // application.yml no longer defaults spring.profiles.active to "loc" (that would make
+    // every Docker image pick up application-loc.yml's hardcoded localhost config). Default
+    // it here instead, so `./gradlew :apps:X:bootRun` still "just works" locally — this has
+    // no effect on the packaged JAR/Docker image, which only runs `java -jar app.jar`.
+    tasks.withType<org.springframework.boot.gradle.tasks.run.BootRun> {
+        systemProperty("spring.profiles.active", "loc")
+    }
 }

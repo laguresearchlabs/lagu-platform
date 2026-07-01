@@ -1,8 +1,12 @@
 spring:
   application:
     name: notification-service
-  profiles:
-    active: loc
+  # "loc" is for local (non-Docker) IDE/bootRun development only. Do not set a
+  # default active profile here — a Docker image must never pick up application-loc.yml's
+  # hardcoded localhost DB/Kafka/Redis config. Activate it explicitly for local runs, e.g.
+  # SPRING_PROFILES_ACTIVE=loc ./gradlew :apps:<name>:bootRun
+  # profiles:
+  #   active: loc
 
   datasource:
     url: ${SPRING_DATASOURCE_URL}

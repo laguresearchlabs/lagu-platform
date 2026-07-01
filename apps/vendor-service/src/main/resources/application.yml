@@ -1,8 +1,12 @@
 spring:
   application:
     name: vendor-service
-  profiles:
-    active: loc
+  # "loc" is for local (non-Docker) IDE/bootRun development only. Do not set a
+  # default active profile here — a Docker image must never pick up application-loc.yml's
+  # hardcoded localhost DB/Kafka/Redis config. Activate it explicitly for local runs, e.g.
+  # SPRING_PROFILES_ACTIVE=loc ./gradlew :apps:<name>:bootRun
+  # profiles:
+  #   active: loc
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/lagu_vendor}
     username: ${DB_USERNAME:lagu}
