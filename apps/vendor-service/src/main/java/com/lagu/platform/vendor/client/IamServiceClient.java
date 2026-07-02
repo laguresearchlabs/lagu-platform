@@ -1,6 +1,7 @@
 package com.lagu.platform.vendor.client;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -14,7 +15,7 @@ public class IamServiceClient {
 
     // "iam-service" is user-service (iam-services repo, Eureka app name "user-service") —
     // org association lives on PUT /api/v1/users/{userId}/platform-org/{orgId}.
-    public IamServiceClient(RestClient.Builder loadBalancedRestClientBuilder) {
+    public IamServiceClient(@Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder) {
         this.restClient = loadBalancedRestClientBuilder.clone()
                 .baseUrl("http://user-service")
                 .defaultHeader("X-Internal-Service", "vendor-service")
