@@ -54,29 +54,13 @@
 
 ### ADR-04: Spring Boot 4.1.0 + Java 25
 
-**Chosen by user**: Spring Boot 4.1.0 + Java 25  
+**Chosen by user**: Spring Boot 4.1.0 + Java 25
 
-**Risk**: Spring Cloud compatibility needs verification.
-
-Spring Cloud release trains map to Spring Boot minor versions:
-- Spring Cloud 2025.x → Spring Boot 3.4.x / 3.5.x
-- Spring Cloud 2026.x → Spring Boot 4.x (assumed — verify against official release notes)
-
-**Action required before starting**:
-```bash
-# Check Spring Cloud releases at https://spring.io/projects/spring-cloud
-# Look for Spring Cloud version compatible with Spring Boot 4.1.0
-```
-
-If Spring Cloud 2026.x is not available:
-
-**Option A**: Use Spring Boot 3.5.x instead (zero risk, full Spring Cloud support, `2025.1.2` cloud version as in vendor-management).
-
-**Option B**: Skip Spring Cloud Eureka for platform services. Use Kubernetes service discovery (if running in K8s) or direct URLs configured via env vars. Gateway routes remain URL-based. This eliminates Spring Cloud dependency entirely.
-
-**Option C**: Proceed with Spring Boot 4.1.0 and use Spring Cloud 2025.x. Some APIs may deprecate differently but core features (Eureka, Gateway, CircuitBreaker) likely work.
-
-**Recommendation if unsure**: Start with Spring Boot 3.5.x for Phase 1. It's easier to upgrade Boot later than to debug Spring Cloud compatibility issues while building the platform.
+**Resolved (2026-07-02)**: Spring Cloud 2025.1.2 (released 2026-06-11, "Oakwood") added compatibility
+with Spring Boot 4.1.0 — confirmed against the official release notes at
+https://spring.io/blog/2026/06/11/spring-cloud-2025-1-2-aka-oakwood-has-been-released/.
+`gradle/libs.versions.toml` already pins `spring-boot = "4.1.0"` and `spring-cloud = "2025.1.2"`,
+which is the correct, currently-supported pairing — no change needed.
 
 ---
 

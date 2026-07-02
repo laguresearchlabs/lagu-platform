@@ -10,4 +10,7 @@ public interface DocumentRequirementRepository extends JpaRepository<DocumentReq
     Optional<DocumentRequirement> findByCodeAndOrgIdIsNull(String code);
     List<DocumentRequirement> findByListingTypeAndActiveTrueOrderByDisplayOrder(String listingType);
     List<DocumentRequirement> findByListingTypeIsNullAndActiveTrueOrderByDisplayOrder();
+
+    /** Full platform-level catalog regardless of listingType — used by document-service. */
+    List<DocumentRequirement> findByOrgIdIsNullAndActiveTrueOrderByDisplayOrder();
 }

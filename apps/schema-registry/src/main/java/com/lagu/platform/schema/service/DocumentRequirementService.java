@@ -26,6 +26,11 @@ public class DocumentRequirementService {
                 : repository.findByListingTypeIsNullAndActiveTrueOrderByDisplayOrder();
     }
 
+    /** Full platform-level catalog regardless of listingType — used by document-service. */
+    public List<DocumentRequirement> catalog() {
+        return repository.findByOrgIdIsNullAndActiveTrueOrderByDisplayOrder();
+    }
+
     public DocumentRequirement getById(UUID id) {
         return findById(id);
     }

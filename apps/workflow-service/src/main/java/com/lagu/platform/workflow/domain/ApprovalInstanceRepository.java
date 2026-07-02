@@ -14,15 +14,15 @@ public interface ApprovalInstanceRepository extends JpaRepository<ApprovalInstan
             SELECT ai FROM ApprovalInstance ai
             JOIN FETCH ai.approvalDefinition ad
             JOIN ad.steps s
-            WHERE ai.status = 'PENDING' AND s.approverRole IN :roles
+            WHERE ai.orgId = :orgId AND ai.status = 'PENDING' AND s.approverRole IN :roles
             """)
-    List<ApprovalInstance> findPendingForRoles(List<String> roles);
+    List<ApprovalInstance> findPendingForRoles(UUID orgId, List<String> roles);
 
     @Query("""
             SELECT ai FROM ApprovalInstance ai
             JOIN FETCH ai.approvalDefinition ad
             JOIN ad.steps s
-            WHERE ai.status = 'PENDING' AND s.approverRole IN :roles AND ai.createdAt < :cutoff
+            WHERE ai.orgId = :orgId AND ai.status = 'PENDING' AND s.approverRole IN :roles AND ai.createdAt < :cutoff
             """)
-    List<ApprovalInstance> findPendingForRolesOlderThan(List<String> roles, java.time.OffsetDateTime cutoff);
+    List<ApprovalInstance> findPendingForRolesOlderThan(UUID orgId, List<String> roles, java.time.OffsetDateTime cutoff);
 }

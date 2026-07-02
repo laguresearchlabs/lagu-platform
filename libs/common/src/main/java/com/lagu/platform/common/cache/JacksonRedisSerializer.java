@@ -23,7 +23,12 @@ public class JacksonRedisSerializer implements RedisSerializer<Object> {
                         BasicPolymorphicTypeValidator.builder()
                                 .allowIfBaseType(Object.class)
                                 .build(),
-                        ObjectMapper.DefaultTyping.NON_FINAL,
+                        // NON_FINAL omits the @class tag for final runtime types (e.g. Java records like
+                        // ListingTypeSchemaDto) since it assumes the declared field type already pins the
+                        // concrete class. That assumption doesn't hold here — everything round-trips through
+                        // this type-erased Object-typed cache, so EVERYTHING is required to reliably recover
+                        // the concrete type on read.
+                        ObjectMapper.DefaultTyping.EVERYTHING,
                         JsonTypeInfo.As.PROPERTY
                 );
     }

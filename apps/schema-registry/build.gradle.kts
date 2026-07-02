@@ -20,6 +20,7 @@ dependencies {
     implementation(rootProject.libs.logstash.logback)
     implementation(rootProject.libs.flyway.core)
     implementation(rootProject.libs.flyway.postgresql)
+    implementation(rootProject.libs.spring.boot.flyway)
     implementation(rootProject.libs.mapstruct)
 
     compileOnly(rootProject.libs.lombok)

@@ -189,26 +189,9 @@ CREATE TABLE search_definition (
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
--- ── Relationship Definitions ──────────────────────────────────────────────────
--- Directed named relationships between listing types.
-
-CREATE TABLE relationship_definition (
-    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id              UUID,
-    name                VARCHAR(100) NOT NULL,
-    label               VARCHAR(200) NOT NULL,
-    source_type         VARCHAR(100) NOT NULL,
-    target_type         VARCHAR(100) NOT NULL,
-    relationship_type   VARCHAR(50)  NOT NULL,              -- ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY | PARENT_CHILD
-    is_required         BOOLEAN      NOT NULL DEFAULT false,
-    cascade_delete      BOOLEAN      NOT NULL DEFAULT false,
-    is_active           BOOLEAN      NOT NULL DEFAULT true,
-    created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_rel_def_org         ON relationship_definition (org_id);
-CREATE INDEX idx_rel_def_source_type ON relationship_definition (source_type);
+-- Relationship definitions live in V2__relationship_definition.sql (source_listing_type /
+-- target_listing_type, matching the RelationshipDefinition entity) — this table used to be
+-- created here too, with stale source_type/target_type columns that never matched the entity.
 
 -- ── Category Definitions ──────────────────────────────────────────────────────
 -- Hierarchical taxonomy for listing types.

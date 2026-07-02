@@ -1,5 +1,6 @@
 package com.lagu.platform.workflow.service;
 
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.workflow.domain.*;
@@ -8,6 +9,7 @@ import com.lagu.platform.workflow.dto.ApprovalInstanceResponse;
 import com.lagu.platform.workflow.event.WorkflowEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,9 +45,16 @@ public class ApprovalEngine {
     }
 
     @Transactional
-    public ApprovalInstanceResponse decide(UUID instanceId, ApprovalDecisionRequest req, UUID actorId) {
+    public ApprovalInstanceResponse decide(UUID instanceId, ApprovalDecisionRequest req, UUID actorId,
+                                            UUID actorOrgId, Set<String> actorRoles) {
         ApprovalInstance instance = instanceRepo.findById(instanceId)
                 .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", instanceId.toString()));
+
+        // Tenant isolation: an approval instance belongs to the org that owns the underlying
+        // record. Treat a cross-org lookup the same as "not found" rather than leaking existence.
+        if (!instance.getOrgId().equals(actorOrgId)) {
+            throw new ResourceNotFoundException("ApprovalInstance", instanceId.toString());
+        }
 
         if (!"PENDING".equals(instance.getStatus())) {
             throw new ValidationException("Approval instance is already " + instance.getStatus());
@@ -54,6 +63,18 @@ public class ApprovalEngine {
         ApprovalDefinition def = instance.getApprovalDefinition();
         int totalSteps = def.getSteps().size();
         int currentStep = instance.getCurrentStep();
+
+        // R-06: the approver's role must be checked at decision time, not trusted from when the
+        // approval instance was created — a role granted/revoked since then must take effect now.
+        String requiredRole = def.getSteps().stream()
+                .filter(s -> s.getStepOrder() == currentStep)
+                .map(ApprovalStep::getApproverRole)
+                .findFirst()
+                .orElseThrow(() -> new ValidationException("No approval step configured for step " + currentStep));
+        if (actorRoles == null || !actorRoles.contains(requiredRole)) {
+            throw new PlatformException("APPROVAL_ROLE_REQUIRED",
+                    "Decision requires role " + requiredRole, HttpStatus.FORBIDDEN);
+        }
 
         ApprovalStepDecision decision = new ApprovalStepDecision();
         decision.setApprovalInstance(instance);
@@ -103,17 +124,21 @@ public class ApprovalEngine {
         }
     }
 
-    public List<ApprovalInstanceResponse> getPendingForUser(Set<String> roles, Integer olderThanMinutes) {
+    public List<ApprovalInstanceResponse> getPendingForUser(UUID orgId, Set<String> roles, Integer olderThanMinutes) {
         List<String> roleList = List.copyOf(roles);
         List<ApprovalInstance> instances = olderThanMinutes != null
-                ? instanceRepo.findPendingForRolesOlderThan(roleList, OffsetDateTime.now().minusMinutes(olderThanMinutes))
-                : instanceRepo.findPendingForRoles(roleList);
+                ? instanceRepo.findPendingForRolesOlderThan(orgId, roleList, OffsetDateTime.now().minusMinutes(olderThanMinutes))
+                : instanceRepo.findPendingForRoles(orgId, roleList);
         return instances.stream().map(this::toResponse).toList();
     }
 
-    public ApprovalInstanceResponse getById(UUID id) {
-        return toResponse(instanceRepo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", id.toString())));
+    public ApprovalInstanceResponse getById(UUID id, UUID orgId) {
+        ApprovalInstance instance = instanceRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", id.toString()));
+        if (!instance.getOrgId().equals(orgId)) {
+            throw new ResourceNotFoundException("ApprovalInstance", id.toString());
+        }
+        return toResponse(instance);
     }
 
     private ApprovalInstanceResponse toResponse(ApprovalInstance ai) {

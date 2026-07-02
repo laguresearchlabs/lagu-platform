@@ -10,6 +10,7 @@ flyway                  = "11.0.0"
 testcontainers          = "1.21.0"
 jackson                 = "2.19.0"
 opensearch-client       = "2.19.0"
+awaitility              = "4.2.2"
 
 [libraries]
 # Spring Boot starters
@@ -68,6 +69,7 @@ testcontainers-junit        = { module = "org.testcontainers:junit-jupiter", ver
 testcontainers-postgresql   = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
 testcontainers-kafka        = { module = "org.testcontainers:kafka", version.ref = "testcontainers" }
 testcontainers-redis        = { module = "com.redis:testcontainers-redis", version = "2.2.2" }
+awaitility                  = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
 
 [plugins]
 spring-boot     = { id = "org.springframework.boot", version.ref = "spring-boot" }

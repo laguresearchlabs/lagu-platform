@@ -8,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -50,12 +49,11 @@ public class WorkflowEventConsumer {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) record.get("data");
             String verificationTier = extractString(record, "verificationTier", "NONE");
-            BigDecimal searchBoost  = extractBoost(record, verificationTier);
 
             snapshotService.publishSnapshot(
                     event.getRecordId(), event.getOrgId(),
                     event.getObjectType(), data,
-                    verificationTier, searchBoost);
+                    verificationTier);
         } catch (Exception e) {
             log.error("Failed to publish snapshot for record {}: {}", event.getRecordId(), e.getMessage(), e);
         }
@@ -64,13 +62,5 @@ public class WorkflowEventConsumer {
     private String extractString(Map<String, Object> map, String key, String defaultVal) {
         Object v = map.get(key);
         return v != null ? v.toString() : defaultVal;
-    }
-
-    private BigDecimal extractBoost(Map<String, Object> record, String tier) {
-        return switch (tier) {
-            case "BASIC"   -> new BigDecimal("1.5");
-            case "PREMIUM" -> new BigDecimal("2.0");
-            default        -> BigDecimal.ONE;
-        };
     }
 }

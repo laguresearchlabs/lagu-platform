@@ -52,7 +52,7 @@ the JWT and forwards it as trusted headers. Services validate these headers, not
 ```
 lagu-platform/
 ├── apps/
-│   ├── metadata-service     Phase 1  — attribute/entity/object-type definitions
+│   ├── schema-registry      field/listing-type/relationship definitions (absorbed metadata-service — see todo/13-no-code-vendor-platform-adr.md)
 │   ├── record-service       Phase 1  — dynamic CRUD, JSONB storage, form validation
 │   ├── workflow-service     Phase 3  — state machines, transition rules, approvals
 │   ├── search-service       Phase 4  — OpenSearch indexing & query

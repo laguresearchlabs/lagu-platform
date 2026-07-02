@@ -12,14 +12,14 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Loads document type definitions from metadata-service at startup and refreshes hourly.
- * Falls back to a built-in static list if metadata-service is unreachable.
+ * Loads document type definitions from schema-registry at startup and refreshes hourly.
+ * Falls back to a built-in static list if schema-registry is unreachable.
  */
 @Component
 @Slf4j
 public class DocumentTypeRegistry {
 
-    private static final String METADATA_BASE_URL = "http://metadata-service";
+    private static final String SCHEMA_REGISTRY_BASE_URL = "http://schema-registry";
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -46,7 +46,7 @@ public class DocumentTypeRegistry {
 
     @Scheduled(fixedDelayString = "${platform.doc-types.refresh-ms:3600000}")
     public void refresh() {
-        String url = METADATA_BASE_URL + "/api/v1/document-types";
+        String url = SCHEMA_REGISTRY_BASE_URL + "/api/v1/document-requirements/catalog";
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restTemplate.getForObject(url, Map.class);
@@ -68,9 +68,9 @@ public class DocumentTypeRegistry {
 
             configs.clear();
             configs.addAll(loaded);
-            log.info("DocumentTypeRegistry: loaded {} type(s) from metadata-service", loaded.size());
+            log.info("DocumentTypeRegistry: loaded {} type(s) from schema-registry", loaded.size());
         } catch (Exception ex) {
-            log.warn("DocumentTypeRegistry: could not reach metadata-service ({}), using fallback",
+            log.warn("DocumentTypeRegistry: could not reach schema-registry ({}), using fallback",
                     ex.getMessage());
         }
     }

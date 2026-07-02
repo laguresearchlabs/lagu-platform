@@ -1,6 +1,7 @@
 package com.lagu.platform.listing.client;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -14,10 +15,14 @@ public class RecordServiceClient {
 
     private final RestClient restClient;
 
-    public RecordServiceClient(RestClient.Builder loadBalancedRestClientBuilder) {
+    public RecordServiceClient(
+            RestClient.Builder loadBalancedRestClientBuilder,
+            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
+            String gatewaySharedSecret) {
         this.restClient = loadBalancedRestClientBuilder.clone()
                 .baseUrl("http://record-service")
                 .defaultHeader("X-Internal-Service", "listing-service")
+                .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
                 .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
                 .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();

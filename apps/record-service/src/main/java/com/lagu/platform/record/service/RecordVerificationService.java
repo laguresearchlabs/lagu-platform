@@ -46,8 +46,7 @@ public class RecordVerificationService {
     public VerificationResponse set(UUID recordId, SetVerificationRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
 
-        Record record = recordRepository.findById(recordId)
-                .orElseThrow(() -> new ResourceNotFoundException("Record", recordId.toString()));
+        Record record = findRecordInScope(recordId, ctx);
 
         RecordVerification v = verificationRepository.findByRecordId(recordId)
                 .orElseGet(() -> {
@@ -79,11 +78,10 @@ public class RecordVerificationService {
     public VerificationResponse revoke(UUID recordId, String reason) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
 
+        Record record = findRecordInScope(recordId, ctx);
+
         RecordVerification v = verificationRepository.findByRecordId(recordId)
                 .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()));
-
-        Record record = recordRepository.findById(recordId)
-                .orElseThrow(() -> new ResourceNotFoundException("Record", recordId.toString()));
 
         String previousTier = v.getTier();
         v.setStatus("REVOKED");
@@ -109,6 +107,17 @@ public class RecordVerificationService {
 
     private boolean isPlatformAdmin(PlatformSecurityContext ctx) {
         return ctx != null && ctx.isPlatformAdmin();
+    }
+
+    /** Fetches the record, enforcing org scoping unless the caller is a platform admin. */
+    private Record findRecordInScope(UUID recordId, PlatformSecurityContext ctx) {
+        Record record = recordRepository.findById(recordId)
+                .orElseThrow(() -> new ResourceNotFoundException("Record", recordId.toString()));
+        UUID orgId = ctx != null ? ctx.getOrgId() : null;
+        if (!isPlatformAdmin(ctx) && (orgId == null || !orgId.equals(record.getOrgId()))) {
+            throw new ResourceNotFoundException("Record", recordId.toString());
+        }
+        return record;
     }
 
     private VerificationResponse toResponse(RecordVerification v) {

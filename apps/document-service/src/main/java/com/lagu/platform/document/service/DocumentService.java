@@ -42,6 +42,7 @@ public class DocumentService {
         PlatformSecurityContext ctx = requireContext();
 
         validateDocumentType(documentType, identitySubType);
+        validateFile(file);
 
         String fileUrl = storageService.upload(file, ctx.getUserId(), documentType);
 
@@ -50,7 +51,7 @@ public class DocumentService {
         doc.setUserId(ctx.getUserId());
         doc.setDocumentType(documentType.toUpperCase());
         doc.setIdentitySubType(identitySubType != null ? identitySubType.toUpperCase() : null);
-        doc.setFileName(file.getOriginalFilename());
+        doc.setFileName(sanitizeFileName(file.getOriginalFilename()));
         doc.setFileUrl(fileUrl);
         doc.setMimeType(file.getContentType());
         doc.setFileSizeBytes(file.getSize());
@@ -187,6 +188,52 @@ public class DocumentService {
             throw new com.lagu.platform.common.exception.ValidationException("Authentication required");
         }
         return ctx;
+    }
+
+    // Identity/verification documents: photos and scans only. No executables, HTML/SVG (stored
+    // XSS risk if ever rendered inline), or arbitrary office/archive formats.
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+            "image/jpeg", "image/png", "image/webp", "application/pdf");
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "webp", "pdf");
+    private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024;
+
+    private void validateFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new com.lagu.platform.common.exception.ValidationException("File must not be empty");
+        }
+        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
+            throw new com.lagu.platform.common.exception.ValidationException(
+                    "File exceeds maximum size of " + (MAX_FILE_SIZE_BYTES / (1024 * 1024)) + "MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new com.lagu.platform.common.exception.ValidationException(
+                    "Unsupported file type: " + contentType + ". Allowed: " + ALLOWED_CONTENT_TYPES);
+        }
+
+        String extension = extensionOf(file.getOriginalFilename());
+        if (extension == null || !ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new com.lagu.platform.common.exception.ValidationException(
+                    "Unsupported file extension: " + extension + ". Allowed: " + ALLOWED_EXTENSIONS);
+        }
+    }
+
+    private String extensionOf(String fileName) {
+        if (fileName == null) return null;
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) return null;
+        return fileName.substring(dot + 1).toLowerCase();
+    }
+
+    /** Strips path separators and control characters; keeps the original name otherwise readable. */
+    private String sanitizeFileName(String fileName) {
+        if (fileName == null) return null;
+        String base = fileName.replace("\\", "/");
+        base = base.substring(base.lastIndexOf('/') + 1);
+        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        return base.length() > 255 ? base.substring(base.length() - 255) : base;
     }
 
     private void validateDocumentType(String documentType, String identitySubType) {

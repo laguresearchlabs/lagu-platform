@@ -41,18 +41,22 @@ public class EmailDeliveryService {
             return false;
         }
 
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom(from);
+        msg.setTo(to);
+        msg.setSubject(subject);
+        msg.setText(body);
         try {
-            SimpleMailMessage msg = new SimpleMailMessage();
-            msg.setFrom(from);
-            msg.setTo(to);
-            msg.setSubject(subject);
-            msg.setText(body);
             mailSender.send(msg);
-            log.info("Email sent to {} subject='{}'", to, subject);
-            return true;
         } catch (Exception e) {
+            // Propagate instead of swallowing: NotificationDeliveryService.deliver() runs inside
+            // the Kafka listener's try/catch, which rethrows to the DefaultErrorHandler so the
+            // message is retried and, on repeated failure, routed to the DLT. Silently returning
+            // false here would ack the message as delivered while the email was actually dropped.
             log.error("Failed to send email to {}: {}", to, e.getMessage(), e);
-            return false;
+            throw new EmailDeliveryException("Failed to send email to " + to, e);
         }
+        log.info("Email sent to {} subject='{}'", to, subject);
+        return true;
     }
 }

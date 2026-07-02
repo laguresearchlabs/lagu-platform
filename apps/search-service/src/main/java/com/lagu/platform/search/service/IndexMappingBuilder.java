@@ -1,5 +1,6 @@
 package com.lagu.platform.search.service;
 
+import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.search.client.MetadataClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,11 +15,17 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class IndexMappingBuilder {
+
+    // Index names are built by string concatenation of orgId/objectType; OpenSearch's _search
+    // endpoint treats "," as a multi-index separator and "*" as a wildcard, so either character
+    // (or a "/") in an unvalidated segment lets a caller query across other orgs' indices.
+    private static final Pattern SAFE_INDEX_SEGMENT = Pattern.compile("^[a-zA-Z0-9_-]+$");
 
     private final MetadataClient    metadataClient;
     private final OpenSearchClient  osClient;
@@ -27,7 +34,15 @@ public class IndexMappingBuilder {
     private String indexPrefix;
 
     public String indexName(String orgId, String objectType) {
+        validateSegment("orgId", orgId);
+        validateSegment("objectType", objectType);
         return indexPrefix + "-" + orgId.toLowerCase() + "-" + objectType.toLowerCase();
+    }
+
+    private void validateSegment(String label, String value) {
+        if (value == null || !SAFE_INDEX_SEGMENT.matcher(value).matches()) {
+            throw new ValidationException("Invalid " + label + ": " + value);
+        }
     }
 
     /**

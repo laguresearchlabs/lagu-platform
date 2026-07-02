@@ -1,22 +1,27 @@
 package com.lagu.platform.workflow.event;
 
-import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.WorkflowEvent;
 import com.lagu.platform.workflow.domain.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Publishes WorkflowEvents via Spring's application-event bus rather than sending to Kafka
+ * directly; {@link WorkflowKafkaPublisherListener} performs the actual send only after the
+ * enclosing DB transaction commits, so a mid-transaction failure never sends an event for a
+ * state change that was rolled back.
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class WorkflowEventPublisher {
 
-    private final KafkaTemplate<String, Object> kafka;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public void publishTransitioned(WorkflowDefinition wf, RecordWorkflowState rws,
                                     WorkflowTransition tx, UUID actorId, String comment) {
@@ -87,9 +92,6 @@ public class WorkflowEventPublisher {
 
     private void send(String key, WorkflowEvent event) {
         String partitionKey = event.getRecordId() != null ? key + ":" + event.getRecordId() : key;
-        kafka.send(PlatformTopics.WORKFLOW_EVENTS, partitionKey, event)
-                .whenComplete((result, ex) -> {
-                    if (ex != null) log.error("Failed to publish WorkflowEvent {}", event.getEventType(), ex);
-                });
+        applicationEventPublisher.publishEvent(new OutboundWorkflowEvent(this, partitionKey, event));
     }
 }

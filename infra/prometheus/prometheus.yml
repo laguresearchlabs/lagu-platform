@@ -2,9 +2,9 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: metadata-service
+  - job_name: schema-registry
     static_configs:
-      - targets: ['metadata-service:8080']
+      - targets: ['schema-registry:8080']
     metrics_path: /actuator/prometheus
 
   - job_name: record-service

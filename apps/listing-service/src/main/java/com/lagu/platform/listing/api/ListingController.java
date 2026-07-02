@@ -74,9 +74,11 @@ public class ListingController {
     @PostMapping("/{recordId}/publish")
     public ResponseEntity<ApiResponse<ListingSnapshot>> manualPublish(
             @PathVariable UUID recordId, @RequestBody PublishRequest req) {
+        requireAdmin();
+        // searchBoost is intentionally not accepted from the request — publishSnapshot derives
+        // it from verificationTier so a caller can't set an arbitrary search-ranking boost.
         ListingSnapshot snap = snapshotService.publishSnapshot(
-                recordId, req.orgId(), req.objectType(), req.data(),
-                req.verificationTier(), req.searchBoost());
+                recordId, req.orgId(), req.objectType(), req.data(), req.verificationTier());
         return snap != null
                 ? ResponseEntity.ok(ApiResponse.ok(snap))
                 : ResponseEntity.badRequest().build();
@@ -84,6 +86,7 @@ public class ListingController {
 
     @PostMapping("/{recordId}/unpublish")
     public ResponseEntity<Void> unpublish(@PathVariable UUID recordId) {
+        requireAdmin();
         snapshotService.unpublishSnapshot(recordId);
         return ResponseEntity.noContent().build();
     }
@@ -96,12 +99,21 @@ public class ListingController {
         return ctx;
     }
 
+    /** Manual publish/unpublish bypass the normal workflow-transition path — admin only. */
+    private PlatformSecurityContext requireAdmin() {
+        PlatformSecurityContext ctx = requireContext();
+        if (!ctx.isConfigAdmin()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Admin role required");
+        }
+        return ctx;
+    }
+
     record AvailabilityRequest(
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             String slotType) {}
 
     record PublishRequest(java.util.UUID orgId, String objectType,
-                          java.util.Map<String, Object> data, String verificationTier,
-                          java.math.BigDecimal searchBoost) {}
+                          java.util.Map<String, Object> data, String verificationTier) {}
 }

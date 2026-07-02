@@ -37,9 +37,6 @@ jobs:
             schema-registry:
               - *shared
               - 'apps/schema-registry/**'
-            metadata-service:
-              - *shared
-              - 'apps/metadata-service/**'
             record-service:
               - *shared
               - 'apps/record-service/**'
@@ -69,7 +66,6 @@ jobs:
         id: matrix
         env:
           SCHEMA_REGISTRY: ${{ steps.filter.outputs.schema-registry }}
-          METADATA_SERVICE: ${{ steps.filter.outputs.metadata-service }}
           RECORD_SERVICE: ${{ steps.filter.outputs.record-service }}
           WORKFLOW_SERVICE: ${{ steps.filter.outputs.workflow-service }}
           SEARCH_SERVICE: ${{ steps.filter.outputs.search-service }}
@@ -81,7 +77,6 @@ jobs:
         run: |
           services=()
           [[ "$SCHEMA_REGISTRY" == "true" ]] && services+=("schema-registry")
-          [[ "$METADATA_SERVICE" == "true" ]] && services+=("metadata-service")
           [[ "$RECORD_SERVICE" == "true" ]] && services+=("record-service")
           [[ "$WORKFLOW_SERVICE" == "true" ]] && services+=("workflow-service")
           [[ "$SEARCH_SERVICE" == "true" ]] && services+=("search-service")

@@ -58,12 +58,14 @@ public class VendorController {
 
     @GetMapping("/{orgId}")
     public ResponseEntity<ApiResponse<VendorProfileResponse>> getByOrgId(@PathVariable UUID orgId) {
+        requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(vendorService.getByOrgId(orgId)));
     }
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<VendorProfileResponse>>> list(
             @RequestParam(defaultValue = "SUBMITTED") String status) {
+        requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(vendorService.listByStatus(status)));
     }
 
@@ -72,7 +74,7 @@ public class VendorController {
     public ResponseEntity<ApiResponse<VendorProfileResponse>> updateStatus(
             @PathVariable UUID orgId,
             @RequestBody StatusRequest req) {
-        PlatformSecurityContext ctx = requireContext();
+        PlatformSecurityContext ctx = requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(
                 vendorService.updateStatus(orgId, req.status(), ctx.getUserId())));
     }
@@ -81,6 +83,16 @@ public class VendorController {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         if (ctx == null || ctx.getUserId() == null) {
             throw new com.lagu.platform.common.exception.ValidationException("Authentication required");
+        }
+        return ctx;
+    }
+
+    /** These are cross-org review/admin operations — restricted to config/platform admins. */
+    private PlatformSecurityContext requireAdmin() {
+        PlatformSecurityContext ctx = requireContext();
+        if (!ctx.isConfigAdmin()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Admin role required");
         }
         return ctx;
     }

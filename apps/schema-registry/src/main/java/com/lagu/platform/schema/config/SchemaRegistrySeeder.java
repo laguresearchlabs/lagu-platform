@@ -25,6 +25,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     private final TierEligibilityRuleRepository   tierRuleRepo;
     private final CountryValidationConfigRepository countryRepo;
     private final CategoryDefinitionRepository    categoryRepo;
+    private final RelationshipDefinitionRepository relDefRepo;
 
     @Value("${platform.seeder.enabled:true}")
     private boolean enabled;
@@ -42,6 +43,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         seedTierEligibilityRules();
         seedCountryValidationConfigs();
         seedCategories();
+        seedRelationshipDefinitions();
         log.info("SchemaRegistrySeeder complete");
     }
 
@@ -386,6 +388,36 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 seeded++;
             }
         }
+
+        // HR / employee documents — listingType=null (platform-wide, not tied to a vendor
+        // listing type). Consumed by document-service's DocumentTypeRegistry catalog fetch.
+        // Preserves what used to be seeded by metadata-service before its decommission.
+        record HrDocSpec(String code, String label, boolean required) {}
+        List<HrDocSpec> hrDocs = List.of(
+            new HrDocSpec("RESUME",               "Resume / CV",                          true),
+            new HrDocSpec("HR_IDENTITY_PROOF",    "Government-issued Identity Proof",     true),
+            new HrDocSpec("PHOTOGRAPH",           "Passport-size Photograph",             true),
+            new HrDocSpec("ACADEMIC_CERTIFICATE", "Academic Certificates / Mark Sheets",  false),
+            new HrDocSpec("ADDRESS_PROOF",        "Address Proof",                        false),
+            new HrDocSpec("OTHER",                "Additional Documents",                 false)
+        );
+        int order = 0;
+        for (HrDocSpec s : hrDocs) {
+            if (docReqRepo.findByCodeAndOrgIdIsNull(s.code()).isEmpty()) {
+                DocumentRequirement doc = new DocumentRequirement();
+                doc.setListingType(null);
+                doc.setCode(s.code());
+                doc.setLabel(s.label());
+                doc.setRequired(s.required());
+                doc.setExpiryTracked(false);
+                doc.setAllowedMimeTypes(List.of("application/pdf","image/jpeg","image/png"));
+                doc.setMaxSizeMb(5);
+                doc.setDisplayOrder(order++);
+                docReqRepo.save(doc);
+                seeded++;
+            }
+        }
+
         if (seeded > 0) log.info("Seeded {} document requirement(s)", seeded);
     }
 
@@ -581,4 +613,36 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     private record FgeSpec(String fieldName, int displayOrder, boolean required) {}
 
     private record SecSpec(String groupName, String label, int order) {}
+
+    // ── 9. Relationship Definitions (ported from metadata-service) ─────────────
+
+    private void seedRelationshipDefinitions() {
+        record RelDefSpec(String name, String label, String sourceType, String targetType,
+                           String relType, boolean required, boolean cascadeDelete) {}
+
+        List<RelDefSpec> specs = List.of(
+            new RelDefSpec("EVENT_VENUE",          "Event Venue",          "WEDDING_EVENT", "VENUE",         "ONE_TO_ONE",   false, false),
+            new RelDefSpec("EVENT_PHOTOGRAPHERS",  "Event Photographers",  "WEDDING_EVENT", "PHOTOGRAPHER",  "MANY_TO_MANY", false, false),
+            new RelDefSpec("EVENT_CATERERS",       "Event Caterers",       "WEDDING_EVENT", "CATERER",       "MANY_TO_MANY", false, false),
+            new RelDefSpec("EVENT_DECORATORS",     "Event Decorators",     "WEDDING_EVENT", "DECORATOR",     "MANY_TO_MANY", false, false),
+            new RelDefSpec("EVENT_MAKEUP_ARTISTS", "Event Makeup Artists", "WEDDING_EVENT", "MAKEUP_ARTIST", "MANY_TO_MANY", false, false)
+        );
+
+        int seeded = 0;
+        for (RelDefSpec s : specs) {
+            if (relDefRepo.findByNameAndOrgIdIsNull(s.name()).isEmpty()) {
+                RelationshipDefinition def = new RelationshipDefinition();
+                def.setName(s.name());
+                def.setLabel(s.label());
+                def.setSourceListingType(s.sourceType());
+                def.setTargetListingType(s.targetType());
+                def.setRelationshipType(s.relType());
+                def.setRequired(s.required());
+                def.setCascadeDelete(s.cascadeDelete());
+                relDefRepo.save(def);
+                seeded++;
+            }
+        }
+        if (seeded > 0) log.info("Seeded {} relationship definition(s)", seeded);
+    }
 }

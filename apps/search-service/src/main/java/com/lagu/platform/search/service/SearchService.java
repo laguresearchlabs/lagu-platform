@@ -34,7 +34,7 @@ public class SearchService {
 
         var searchBuilder = new org.opensearch.client.opensearch.core.SearchRequest.Builder()
                 .index(index)
-                .query(buildQuery(req))
+                .query(buildQuery(req, orgId))
                 .from(from)
                 .size(req.getSize());
 
@@ -62,8 +62,12 @@ public class SearchService {
     // ── query construction ────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
-    private Query buildQuery(SearchRequest req) {
+    private Query buildQuery(SearchRequest req, String orgId) {
         BoolQuery.Builder bool = new BoolQuery.Builder();
+
+        // Defense-in-depth: don't rely solely on per-org index-name isolation for tenant
+        // isolation — filter every query by orgId at the document level too.
+        bool.filter(f -> f.term(t -> t.field("orgId").value(v -> v.stringValue(orgId))));
 
         if (req.getQuery() != null && !req.getQuery().isBlank()) {
             bool.must(m -> m.multiMatch(mm -> mm

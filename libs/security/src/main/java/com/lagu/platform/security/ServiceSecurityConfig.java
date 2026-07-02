@@ -1,6 +1,7 @@
 package com.lagu.platform.security;
 
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,8 +17,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class ServiceSecurityConfig {
 
     @Bean
-    public GatewayHeaderFilter gatewayHeaderFilter() {
-        return new GatewayHeaderFilter();
+    public GatewayHeaderFilter gatewayHeaderFilter(
+            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
+            String gatewaySharedSecret) {
+        return new GatewayHeaderFilter(gatewaySharedSecret);
     }
 
     /** Prevents Spring Boot from also registering the filter as a raw servlet filter. */

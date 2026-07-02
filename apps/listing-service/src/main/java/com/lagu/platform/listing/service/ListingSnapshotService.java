@@ -1,5 +1,6 @@
 package com.lagu.platform.listing.service;
 
+import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.listing.domain.ListingSnapshot;
 import com.lagu.platform.listing.domain.ListingSnapshotRepository;
 import com.lagu.platform.listing.domain.ListingAvailability;
@@ -28,17 +29,20 @@ public class ListingSnapshotService {
     private final ListingAvailabilityRepository availabilityRepo;
 
     /**
-     * Called by the Kafka consumer when a record transitions to ACTIVE/APPROVED.
-     * Creates or updates the consumer-facing snapshot.
+     * Called by the Kafka consumer when a record transitions to ACTIVE/APPROVED, and by the
+     * admin manual-publish endpoint. searchBoost is always derived from verificationTier here
+     * (never accepted as caller input) so a caller cannot set an arbitrary search-ranking boost.
      */
     @Transactional
     public ListingSnapshot publishSnapshot(UUID recordId, UUID orgId, String objectType,
                                            Map<String, Object> recordData,
-                                           String verificationTier, BigDecimal searchBoost) {
+                                           String verificationTier) {
         if (!VENDOR_LISTING_TYPES.contains(objectType.toUpperCase())) {
             log.debug("Skipping snapshot for non-listing objectType: {}", objectType);
             return null;
         }
+
+        String tier = verificationTier != null ? verificationTier : "NONE";
 
         ListingSnapshot snap = snapshotRepo.findByRecordId(recordId)
                 .orElseGet(ListingSnapshot::new);
@@ -48,14 +52,22 @@ public class ListingSnapshotService {
         snap.setObjectType(objectType.toUpperCase());
         snap.setData(recordData != null ? recordData : Map.of());
         snap.setStatus("PUBLISHED");
-        snap.setVerificationTier(verificationTier != null ? verificationTier : "NONE");
-        snap.setSearchBoost(searchBoost != null ? searchBoost : BigDecimal.ONE);
+        snap.setVerificationTier(tier);
+        snap.setSearchBoost(boostForTier(tier));
         snap.setPublishedAt(Instant.now());
         snap.setVersion(snap.getVersion() + 1);
 
         ListingSnapshot saved = snapshotRepo.save(snap);
         log.info("Published snapshot for record {} org {} type {}", recordId, orgId, objectType);
         return saved;
+    }
+
+    public static BigDecimal boostForTier(String tier) {
+        return switch (tier) {
+            case "BASIC"   -> new BigDecimal("1.5");
+            case "PREMIUM" -> new BigDecimal("2.0");
+            default        -> BigDecimal.ONE;
+        };
     }
 
     /** Depublish when listing is suspended/archived. */
@@ -87,6 +99,13 @@ public class ListingSnapshotService {
     @Transactional
     public List<ListingAvailability> setAvailability(UUID recordId, UUID orgId,
                                                      LocalDate from, LocalDate to, String slotType) {
+        ListingSnapshot snap = snapshotRepo.findByRecordId(recordId)
+                .orElseThrow(() -> new ResourceNotFoundException("ListingSnapshot", recordId.toString()));
+        if (!snap.getOrgId().equals(orgId)) {
+            // Caller's org doesn't own this record — treat as not found rather than leaking existence.
+            throw new ResourceNotFoundException("ListingSnapshot", recordId.toString());
+        }
+
         List<LocalDate> dates = from.datesUntil(to.plusDays(1)).toList();
         List<ListingAvailability> saved = new ArrayList<>();
         for (LocalDate date : dates) {

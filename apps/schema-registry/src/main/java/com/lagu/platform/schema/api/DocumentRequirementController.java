@@ -26,6 +26,12 @@ public class DocumentRequirementController {
         return ResponseEntity.ok(ApiResponse.ok(documentRequirementService.list(listingType)));
     }
 
+    /** Full platform-level catalog regardless of listingType — used by document-service. */
+    @GetMapping("/catalog")
+    public ResponseEntity<ApiResponse<List<DocumentRequirement>>> catalog() {
+        return ResponseEntity.ok(ApiResponse.ok(documentRequirementService.catalog()));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<DocumentRequirement>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(documentRequirementService.getById(id)));
