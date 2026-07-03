@@ -22,6 +22,8 @@ spring:
     port: 1025
 
 platform:
+  gateway:
+    allow-insecure-default: true
   notification:
     email:
       enabled: false

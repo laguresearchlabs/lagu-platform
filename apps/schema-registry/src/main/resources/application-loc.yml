@@ -31,3 +31,7 @@ logging:
     org.springframework.kafka: INFO
     org.springframework.data.redis: DEBUG
     org.hibernate.SQL: DEBUG
+
+platform:
+  gateway:
+    allow-insecure-default: true

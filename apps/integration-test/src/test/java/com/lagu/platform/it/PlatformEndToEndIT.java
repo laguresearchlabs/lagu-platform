@@ -62,7 +62,9 @@ import static org.awaitility.Awaitility.await;
  */
 class PlatformEndToEndIT {
 
-    private static final String GATEWAY_SECRET = "CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD";
+    // Explicit non-default secret: services now refuse to start on the well-known default
+    // (unless platform.gateway.allow-insecure-default=true), so the IT provisions its own.
+    private static final String GATEWAY_SECRET = "it-e2e-gateway-secret";
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
     private static final Network NETWORK = Network.newNetwork();
@@ -111,6 +113,7 @@ class PlatformEndToEndIT {
                     "SPRING_DATA_REDIS_PORT", "6379",
                     "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
                     "PLATFORM_SEEDER_ENABLED", "false",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
                     "EUREKA_CLIENT_ENABLED", "false"
             ),
             List.of());
@@ -124,6 +127,7 @@ class PlatformEndToEndIT {
                     "SPRING_DATA_REDIS_HOST", "redis",
                     "SPRING_DATA_REDIS_PORT", "6379",
                     "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
                     "EUREKA_CLIENT_ENABLED", "false"
             ),
             List.of("--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
@@ -136,6 +140,7 @@ class PlatformEndToEndIT {
                     "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
                     "OPENSEARCH_HOST", "opensearch",
                     "OPENSEARCH_PORT", "9200",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
                     "EUREKA_CLIENT_ENABLED", "false"
             ),
             List.of("--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));

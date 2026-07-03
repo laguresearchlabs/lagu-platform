@@ -24,8 +24,6 @@ public class WorkflowServiceClient {
                 .baseUrl("http://workflow-service")
                 .defaultHeader("X-Internal-Service", "automation-service")
                 .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
-                .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();
     }
 

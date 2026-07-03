@@ -34,8 +34,6 @@ public class MetadataClient {
                 .baseUrl("http://schema-registry")
                 .defaultHeader("X-Internal-Service", "search-service")
                 .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
-                .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();
     }
 

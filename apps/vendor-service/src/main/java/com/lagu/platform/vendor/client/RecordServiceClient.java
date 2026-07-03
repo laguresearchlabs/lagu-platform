@@ -23,20 +23,22 @@ public class RecordServiceClient {
             @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder,
             @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
             String gatewaySharedSecret) {
+        // Identity: SVC_VENDOR_SERVICE via X-Internal-Service — the acting user/org travel as
+        // per-request headers so record-service scopes tenancy and attributes audit correctly.
         this.restClient = loadBalancedRestClientBuilder.clone()
                 .baseUrl("http://record-service")
                 .defaultHeader("X-Internal-Service", "vendor-service")
                 .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .defaultHeader("X-User-Id", "00000000-0000-0000-0000-000000000001")
-                .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();
     }
 
-    public Map<String, Object> createRecord(UUID orgId, String objectType, Map<String, Object> data) {
+    public Map<String, Object> createRecord(UUID orgId, UUID actingUserId, String objectType,
+                                            Map<String, Object> data) {
         try {
             return restClient.post()
                     .uri("/api/v1/records")
                     .header("X-Org-Id", orgId.toString())
+                    .header("X-User-Id", actingUserId.toString())
                     .body(Map.of("objectType", objectType, "data", data))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});

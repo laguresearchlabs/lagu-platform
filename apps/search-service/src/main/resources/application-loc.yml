@@ -24,3 +24,7 @@ logging:
     com.lagu.platform: DEBUG
     org.springframework.kafka: INFO
     org.springframework.data.redis: DEBUG
+
+platform:
+  gateway:
+    allow-insecure-default: true

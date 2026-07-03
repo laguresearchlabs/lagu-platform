@@ -38,6 +38,17 @@ public class PlatformSecurityContext {
     }
 
     /**
+     * True when the caller is another lagu-platform service (authenticated via
+     * X-Internal-Service + gateway secret and granted a single {@code SVC_*} role by
+     * {@link GatewayHeaderFilter}). Service callers are not users: they get the narrow
+     * grant defined in {@link DefaultPermissionEvaluator}, never role-based user permissions.
+     */
+    public boolean isInternalService() {
+        return roles != null && roles.stream()
+                .anyMatch(r -> r.startsWith(GatewayHeaderFilter.SERVICE_ROLE_PREFIX));
+    }
+
+    /**
      * Whether this caller may read a resource owned by {@code resourceOrgId}. A null
      * {@code resourceOrgId} marks a platform-level/shared definition, readable by any org.
      */

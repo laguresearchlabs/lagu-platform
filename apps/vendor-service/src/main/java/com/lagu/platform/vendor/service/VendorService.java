@@ -33,7 +33,7 @@ public class VendorService {
         UUID orgId = UUID.randomUUID();
 
         // Create the canonical VENDOR record in record-service
-        Map<String, Object> recordResponse = recordClient.createRecord(orgId, "VENDOR", Map.of(
+        Map<String, Object> recordResponse = recordClient.createRecord(orgId, userId, "VENDOR", Map.of(
             "businessName", req.getBusinessName(),
             "country", req.getCountry()
         ));

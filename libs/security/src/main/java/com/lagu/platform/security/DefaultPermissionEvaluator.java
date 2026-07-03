@@ -20,6 +20,21 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
         // PLATFORM_ADMIN bypasses all checks
         if (ctx.isPlatformAdmin()) return true;
 
+        // Internal service-to-service callers (SVC_* role from X-Internal-Service): allowed to
+        // read anything and to drive record lifecycles, but never DELETE and never config writes.
+        // Tenancy is still enforced downstream via the X-Org-Id they forward per request.
+        if (ctx.isInternalService()) {
+            if ("READ".equals(action)) return true;
+            if ("RECORD".equals(resource)) {
+                return switch (action) {
+                    case "CREATE", "UPDATE", "TRANSITION" -> true;
+                    default -> false;
+                };
+            }
+            // automation-service revokes/expires verifications (EXPIRE_VERIFICATION action)
+            return "RECORD_VERIFICATION".equals(resource) && "MANAGE".equals(action);
+        }
+
         // CONFIG_ADMIN can manage all configuration resources
         if (ctx.isConfigAdmin()) {
             return isConfigResource(resource);

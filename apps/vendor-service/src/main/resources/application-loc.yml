@@ -35,3 +35,7 @@ server:
 logging:
   level:
     com.lagu.platform: DEBUG
+
+platform:
+  gateway:
+    allow-insecure-default: true

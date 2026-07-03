@@ -21,12 +21,6 @@ import java.util.Map;
 @Configuration
 public class RecordServiceConfig {
 
-    // Identity used by record-service itself when calling other services — mirrors
-    // search-service's MetadataClient/RecordClient. GatewayHeaderFilter rejects requests with no
-    // X-User-Id/X-Platform-Gateway-Secret as unauthenticated, so without these headers every
-    // schema-registry/image-service call from here 401s.
-    private static final String SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
-
     @Bean
     @LoadBalanced
     public RestClient.Builder loadBalancedRestClientBuilder() {
@@ -56,8 +50,6 @@ public class RecordServiceConfig {
                 .baseUrl("http://schema-registry")
                 .defaultHeader("X-Internal-Service", "record-service")
                 .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .defaultHeader("X-User-Id", SYSTEM_USER_ID)
-                .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();
     }
 
@@ -70,8 +62,6 @@ public class RecordServiceConfig {
                 .baseUrl("http://image-service")
                 .defaultHeader("X-Internal-Service", "record-service")
                 .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .defaultHeader("X-User-Id", SYSTEM_USER_ID)
-                .defaultHeader("X-User-Roles", "PLATFORM_ADMIN")
                 .build();
     }
 
