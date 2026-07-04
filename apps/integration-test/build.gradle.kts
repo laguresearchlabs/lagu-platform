@@ -31,6 +31,8 @@ tasks.named<Test>("test") {
         ":apps:schema-registry:bootJar",
         ":apps:record-service:bootJar",
         ":apps:search-service:bootJar",
+        ":apps:workflow-service:bootJar",
+        ":apps:listing-service:bootJar",
     )
     // Pointing at the libs/ dir (rather than a specific task output file) sidesteps having to
     // reach into another project's task graph — bootJar's default archive name convention is
@@ -38,12 +40,16 @@ tasks.named<Test>("test") {
     systemProperty("it.schemaRegistryJarDir", jarDir(":apps:schema-registry"))
     systemProperty("it.recordServiceJarDir", jarDir(":apps:record-service"))
     systemProperty("it.searchServiceJarDir", jarDir(":apps:search-service"))
+    systemProperty("it.workflowServiceJarDir", jarDir(":apps:workflow-service"))
+    systemProperty("it.listingServiceJarDir", jarDir(":apps:listing-service"))
     // The jars are consumed at runtime via the system properties above, which Gradle can't see —
     // declare them as inputs so a rebuilt service jar invalidates this task's up-to-date check
     // (otherwise the E2E silently does NOT re-run after service code changes).
     inputs.dir(jarDir(":apps:schema-registry")).withPropertyName("schemaRegistryJars")
     inputs.dir(jarDir(":apps:record-service")).withPropertyName("recordServiceJars")
     inputs.dir(jarDir(":apps:search-service")).withPropertyName("searchServiceJars")
+    inputs.dir(jarDir(":apps:workflow-service")).withPropertyName("workflowServiceJars")
+    inputs.dir(jarDir(":apps:listing-service")).withPropertyName("listingServiceJars")
     testLogging {
         showStandardStreams = true
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

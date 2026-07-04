@@ -87,3 +87,6 @@ platform:
   cache:
     schema-ttl-minutes: 5
     tier-config-ttl-minutes: 10
+  outbox:
+    enabled: true
+    table: schema_outbox

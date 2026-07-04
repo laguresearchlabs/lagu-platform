@@ -1,12 +1,9 @@
 package com.lagu.platform.record.event;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lagu.platform.common.outbox.TransactionalOutbox;
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.RecordEvent;
 import com.lagu.platform.events.VerificationEvent;
-import com.lagu.platform.record.domain.OutboxEvent;
-import com.lagu.platform.record.domain.OutboxEventRepository;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
@@ -19,15 +16,14 @@ import java.time.Instant;
  * Stages platform events in the transactional outbox ({@code record_outbox}) rather than
  * sending to Kafka directly. Every publish method is called inside the service-layer
  * transaction that makes the corresponding record change, so the event and the change
- * commit or roll back together; {@link OutboxRelay} delivers committed events to Kafka.
+ * commit or roll back together; the shared relay delivers committed events to Kafka.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class RecordEventPublisher {
 
-    private final OutboxEventRepository outboxRepository;
-    private final ObjectMapper objectMapper;
+    private final TransactionalOutbox outbox;
 
     public void publishCreated(Record record) {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
@@ -116,19 +112,7 @@ public class RecordEventPublisher {
     }
 
     private void enqueue(String topic, String key, Object event) {
-        OutboxEvent row = new OutboxEvent();
-        row.setTopic(topic);
-        row.setEventKey(key);
-        row.setPayloadType(event.getClass().getName());
-        try {
-            row.setPayload(objectMapper.writeValueAsString(event));
-        } catch (JsonProcessingException e) {
-            // Must propagate: failing to stage the event has to roll back the record change,
-            // otherwise we are back to silent DB/event divergence.
-            throw new IllegalStateException("Could not serialize " + event.getClass().getSimpleName()
-                    + " for outbox", e);
-        }
-        outboxRepository.save(row);
+        outbox.stage(topic, key, event);
     }
 
     private String recordKey(Record record) {

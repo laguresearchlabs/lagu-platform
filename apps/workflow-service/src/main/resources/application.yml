@@ -85,3 +85,8 @@ springdoc:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
+
+platform:
+  outbox:
+    enabled: true
+    table: workflow_outbox

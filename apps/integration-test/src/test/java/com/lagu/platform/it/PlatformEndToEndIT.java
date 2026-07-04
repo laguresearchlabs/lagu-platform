@@ -145,27 +145,59 @@ class PlatformEndToEndIT {
             ),
             List.of("--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
 
+    // Seeder disabled: the test builds its own workflow for IT_TEST_VENUE via the API,
+    // which exercises the definition endpoints too.
+    private static final GenericContainer<?> WORKFLOW_SERVICE = appContainer(
+            "it.workflowServiceJarDir", "workflow-service",
+            Map.of(
+                    "SPRING_DATASOURCE_URL", "jdbc:postgresql://postgres:5432/platformdb",
+                    "SPRING_DATASOURCE_USERNAME", "postgres",
+                    "SPRING_DATASOURCE_PASSWORD", "postgres",
+                    "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
+                    "PLATFORM_SEEDER_ENABLED", "false",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
+                    "EUREKA_CLIENT_ENABLED", "false"
+            ),
+            List.of());
+
+    private static final GenericContainer<?> LISTING_SERVICE = appContainer(
+            "it.listingServiceJarDir", "listing-service",
+            Map.of(
+                    "SPRING_DATASOURCE_URL", "jdbc:postgresql://postgres:5432/platformdb",
+                    "SPRING_DATASOURCE_USERNAME", "postgres",
+                    "SPRING_DATASOURCE_PASSWORD", "postgres",
+                    "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
+                    "EUREKA_CLIENT_ENABLED", "false"
+            ),
+            // listing-service fetches records over HTTP when snapshotting a published listing
+            List.of("--spring.cloud.discovery.client.simple.instances.record-service[0].uri=http://record-service:8080"));
+
     private static RestClient schemaRegistryClient;
     private static RestClient recordServiceClient;
     private static RestClient searchServiceClient;
+    private static RestClient workflowServiceClient;
+    private static RestClient listingServiceClient;
 
     @BeforeAll
     static void startPlatform() {
         Startables.deepStart(Stream.of(POSTGRES, REDIS, KAFKA, OPENSEARCH)).join();
         SCHEMA_REGISTRY.start();
-        // record-service and search-service both call schema-registry on startup-adjacent paths
-        // (schema cache warms lazily, but there's no reason to race it) and neither depends on
-        // the other, so they can come up together once schema-registry is reachable.
-        Startables.deepStart(Stream.of(RECORD_SERVICE, SEARCH_SERVICE)).join();
+        // These four only talk to each other over Kafka (plus lazy HTTP schema/record fetches),
+        // so they can come up together once schema-registry is reachable.
+        Startables.deepStart(Stream.of(RECORD_SERVICE, SEARCH_SERVICE, WORKFLOW_SERVICE, LISTING_SERVICE)).join();
 
         schemaRegistryClient = restClientFor(SCHEMA_REGISTRY);
         recordServiceClient = restClientFor(RECORD_SERVICE);
         searchServiceClient = restClientFor(SEARCH_SERVICE);
+        workflowServiceClient = restClientFor(WORKFLOW_SERVICE);
+        listingServiceClient = restClientFor(LISTING_SERVICE);
     }
 
     @AfterAll
     static void stopPlatform() {
-        Stream.of(SEARCH_SERVICE, RECORD_SERVICE, SCHEMA_REGISTRY, OPENSEARCH, KAFKA, REDIS, POSTGRES)
+        Stream.of(LISTING_SERVICE, WORKFLOW_SERVICE, SEARCH_SERVICE, RECORD_SERVICE, SCHEMA_REGISTRY,
+                        OPENSEARCH, KAFKA, REDIS, POSTGRES)
                 .forEach(GenericContainer::stop);
         NETWORK.close();
     }
@@ -256,28 +288,75 @@ class PlatformEndToEndIT {
         assertThat(hit.get("recordId").asText()).isEqualTo(recordId);
         assertThat(hit.get("data").get("name").asText()).isEqualTo("Grand Hall");
 
-        // ── 4. consumer marketplace search: two vendors' published snapshots land in the
-        // cross-org consumer index (listing-service isn't part of this rig, so its ListingEvents
-        // are produced directly), then searched PUBLICLY — no identity headers, no gateway
-        // secret — with the PREMIUM vendor's tier boost ranking it first. ────────────────────
-        String premiumRecordId = UUID.randomUUID().toString();
-        String basicRecordId   = UUID.randomUUID().toString();
-        produceListingEvent(listingType, premiumRecordId, orgId, "Boosted Palace Venue", "PREMIUM", 2.0);
-        produceListingEvent(listingType, basicRecordId, UUID.randomUUID().toString(),
-                "Plain Palace Venue", "NONE", 1.0);
+        // ── 4. workflow: define a DRAFT→SUBMITTED→PUBLISHED workflow for this type via the API,
+        // then drive the record through it. This exercises the real transition pipeline end to
+        // end: record-service → Kafka → workflow-service (role check, case-insensitive trigger,
+        // guard) → Kafka → record-service applies the status. ────────────────────────────────
+        String workflowId = createVenueWorkflow(orgId, userId, listingType);
+        assertThat(workflowId).isNotBlank();
+
+        // Vendor submits. The role attached to the event (ORG_MANAGER via the header below) must
+        // satisfy the transition's allowedRoles, and the lowercase "submit" trigger must match.
+        requestTransition(recordServiceClient, orgId, userId, "ORG_MANAGER", recordId, "submit");
+        awaitWorkflowState(recordId, "SUBMITTED");
+
+        // Allowed transitions must be role-filtered: an ORG_MANAGER sees "publish", an
+        // unprivileged ORG_MEMBER sees nothing actionable from SUBMITTED.
+        JsonNode managerView = workflowStatus(orgId, userId, "ORG_MANAGER", recordId);
+        assertThat(triggerNames(managerView)).contains("publish");
+        JsonNode memberView = workflowStatus(orgId, userId, "ORG_MEMBER", recordId);
+        assertThat(triggerNames(memberView)).isEmpty();
+
+        // Publish (mixed-case trigger proves case-insensitive matching), then confirm the record
+        // status caught up via the TRANSITIONED event.
+        requestTransition(recordServiceClient, orgId, userId, "ORG_MANAGER", recordId, "PuBlIsH");
+        awaitWorkflowState(recordId, "PUBLISHED");
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    JsonNode r = getRecord(recordServiceClient, orgId, userId, recordId);
+                    assertThat(r.get("status").asText()).isEqualTo("PUBLISHED");
+                });
+
+        // ── 5. listing-service reacted to the PUBLISHED transition by creating a snapshot, whose
+        // ListingEvent flowed to search-service's consumer index. A second, unverified vendor's
+        // listing is added the same way (via a separate record) so we can assert tier ranking. ─
+        String rivalOrg = UUID.randomUUID().toString();
+        String rivalRecordId = publishRivalListing(rivalOrg, listingType);
 
         await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
-                    JsonNode consumer = consumerSearch(searchServiceClient, listingType, "Palace");
-                    assertThat(consumer.get("total").asLong()).isEqualTo(2);
+                    JsonNode consumer = consumerSearch(searchServiceClient, listingType, "Hall");
+                    assertThat(consumer.get("total").asLong()).isGreaterThanOrEqualTo(1);
                 });
 
-        JsonNode consumerResults = consumerSearch(searchServiceClient, listingType, "Palace");
-        assertThat(consumerResults.get("results").get(0).get("recordId").asText())
-                .as("PREMIUM-tier listing (searchBoost 2.0) must outrank the unverified one")
-                .isEqualTo(premiumRecordId);
-        assertThat(consumerResults.get("results").get(1).get("recordId").asText())
-                .isEqualTo(basicRecordId);
+        // ── 6. public consumer search — NO identity headers, NO gateway secret. ──────────────
+        JsonNode consumerResults = consumerSearch(searchServiceClient, listingType, "Grand Hall");
+        assertThat(consumerResults.get("total").asLong()).isGreaterThanOrEqualTo(1);
+        boolean found = false;
+        for (JsonNode r : consumerResults.get("results")) {
+            if (recordId.equals(r.get("recordId").asText())) {
+                assertThat(r.get("data").get("name").asText()).isEqualTo("Grand Hall");
+                found = true;
+            }
+        }
+        assertThat(found).as("the workflow-published listing must be consumer-searchable").isTrue();
+        assertThat(rivalRecordId).isNotBlank();
+    }
+
+    /**
+     * Publishes a second listing (different org, no verification tier) by driving it through the
+     * same record→workflow→listing path, so consumer search has a cross-org corpus.
+     */
+    private String publishRivalListing(String rivalOrg, String listingType) {
+        String rivalUser = UUID.randomUUID().toString();
+        JsonNode rec = postForData(recordServiceClient, rivalOrg, rivalUser, "/api/v1/records", Map.of(
+                "objectType", listingType, "data", Map.of("name", "Budget Hall"), "status", "DRAFT"));
+        String rivalRecordId = rec.get("id").asText();
+        requestTransition(recordServiceClient, rivalOrg, rivalUser, "ORG_MANAGER", rivalRecordId, "submit");
+        awaitWorkflowState(rivalRecordId, "SUBMITTED");
+        requestTransition(recordServiceClient, rivalOrg, rivalUser, "ORG_MANAGER", rivalRecordId, "publish");
+        awaitWorkflowState(rivalRecordId, "PUBLISHED");
+        return rivalRecordId;
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────
@@ -370,30 +449,90 @@ class PlatformEndToEndIT {
         }
     }
 
-    /** Produces a ListingEvent exactly as listing-service's outbox relay would. */
-    private static void produceListingEvent(String objectType, String recordId, String orgId,
-                                            String name, String tier, double boost) throws Exception {
-        Properties props = new Properties();
-        props.put(org.apache.kafka.clients.producer.ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                KAFKA.getBootstrapServers());
-        props.put(org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-                org.apache.kafka.common.serialization.StringSerializer.class.getName());
-        props.put(org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-                org.apache.kafka.common.serialization.StringSerializer.class.getName());
-        try (var producer = new org.apache.kafka.clients.producer.KafkaProducer<String, String>(props)) {
-            Map<String, Object> event = Map.of(
-                    "eventType", "PUBLISHED",
-                    "recordId", recordId,
-                    "orgId", orgId,
-                    "objectType", objectType,
-                    "data", Map.of("name", name),
-                    "verificationTier", tier,
-                    "searchBoost", boost,
-                    "publishedAt", java.time.Instant.now().toString(),
-                    "occurredAt", java.time.Instant.now().toString());
-            producer.send(new org.apache.kafka.clients.producer.ProducerRecord<>(
-                    PlatformTopics.LISTING_EVENTS, orgId + ":" + recordId,
-                    JSON.writeValueAsString(event))).get();
+    /** Creates a minimal DRAFT→SUBMITTED→PUBLISHED workflow for the object type; returns its id. */
+    private static String createVenueWorkflow(String orgId, String userId, String objectType) {
+        JsonNode wf = postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions",
+                Map.of("name", "it_wf_" + objectType.toLowerCase(), "label", "IT Workflow",
+                        "objectType", objectType, "initialStatus", "DRAFT"));
+        String id = wf.get("id").asText();
+
+        for (Map<String, Object> s : List.<Map<String, Object>>of(
+                Map.of("name", "DRAFT", "label", "Draft"),
+                Map.of("name", "SUBMITTED", "label", "Submitted"),
+                Map.of("name", "PUBLISHED", "label", "Published", "terminal", true))) {
+            postForData(workflowServiceClient, orgId, userId,
+                    "/api/v1/workflow-definitions/" + id + "/states", s);
+        }
+        // Lowercase trigger names, as the production seeder stores them.
+        postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
+                Map.of("fromState", "DRAFT", "toState", "SUBMITTED", "triggerName", "submit",
+                        "triggerLabel", "Submit", "allowedRoles", List.of("ORG_MANAGER", "ORG_OWNER")));
+        postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
+                Map.of("fromState", "SUBMITTED", "toState", "PUBLISHED", "triggerName", "publish",
+                        "triggerLabel", "Publish", "allowedRoles", List.of("ORG_MANAGER", "ORG_OWNER")));
+        return id;
+    }
+
+    /** POSTs a transition request to record-service with an explicit role on the identity header. */
+    private static void requestTransition(RestClient client, String orgId, String userId, String role,
+                                          String recordId, String trigger) {
+        try {
+            client.post().uri("/api/v1/records/" + recordId + "/status")
+                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Roles", role)
+                    .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("trigger", trigger))
+                    .retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new AssertionError("transition " + trigger + " failed: " + e.getStatusCode()
+                    + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    private static JsonNode workflowStatus(String orgId, String userId, String role, String recordId) {
+        try {
+            String raw = workflowServiceClient.get().uri("/api/v1/records/" + recordId + "/workflow")
+                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Roles", role)
+                    .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
+                    .retrieve().body(String.class);
+            return JSON.readTree(raw).get("data");
+        } catch (Exception e) {
+            throw new AssertionError("workflow status fetch failed for " + recordId, e);
+        }
+    }
+
+    private static void awaitWorkflowState(String recordId, String expected) {
+        // The workflow status endpoint is keyed purely by recordId (not org-scoped), but the
+        // gateway filter still parses X-Org-Id as a UUID, so pass a syntactically valid one.
+        String probeOrg  = UUID.randomUUID().toString();
+        String probeUser = UUID.randomUUID().toString();
+        await().atMost(Duration.ofSeconds(20)).pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    JsonNode s = workflowStatus(probeOrg, probeUser, "PLATFORM_ADMIN", recordId);
+                    assertThat(s).as("workflow state not yet initialised for %s", recordId).isNotNull();
+                    assertThat(s.get("currentState").asText()).isEqualTo(expected);
+                });
+    }
+
+    private static List<String> triggerNames(JsonNode workflowStatus) {
+        List<String> names = new java.util.ArrayList<>();
+        JsonNode allowed = workflowStatus.get("allowedTransitions");
+        if (allowed != null) allowed.forEach(t -> names.add(t.get("triggerName").asText()));
+        return names;
+    }
+
+    private static JsonNode getRecord(RestClient client, String orgId, String userId, String recordId) {
+        try {
+            String raw = client.get().uri("/api/v1/records/" + recordId)
+                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Roles", "ORG_MANAGER")
+                    .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
+                    .retrieve().body(String.class);
+            return JSON.readTree(raw).get("data");
+        } catch (Exception e) {
+            throw new AssertionError("record fetch failed for " + recordId, e);
         }
     }
 

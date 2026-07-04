@@ -1,10 +1,8 @@
-package com.lagu.platform.record.event;
+package com.lagu.platform.common.outbox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.RecordEvent;
-import com.lagu.platform.record.domain.OutboxEvent;
-import com.lagu.platform.record.domain.OutboxEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,9 +18,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -34,7 +32,7 @@ import static org.mockito.Mockito.*;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OutboxRelayTest {
 
-    @Mock OutboxEventRepository repo;
+    @Mock OutboxStore store;
     @Mock KafkaTemplate<String, Object> kafka;
 
     ObjectMapper json = new ObjectMapper().findAndRegisterModules();
@@ -42,10 +40,14 @@ class OutboxRelayTest {
 
     @BeforeEach
     void setUp() {
-        relay = new OutboxRelay(repo, kafka, json);
+        relay = new OutboxRelay(store, kafka, json);
     }
 
-    private OutboxEvent row(String key) throws Exception {
+    private OutboxRow row(String key) throws Exception {
+        return row(key, RecordEvent.class.getName());
+    }
+
+    private OutboxRow row(String key, String payloadType) throws Exception {
         RecordEvent event = RecordEvent.builder()
                 .eventType("CREATED")
                 .recordId(UUID.randomUUID())
@@ -53,13 +55,8 @@ class OutboxRelayTest {
                 .objectType("VENUE")
                 .occurredAt(Instant.now())
                 .build();
-        OutboxEvent row = new OutboxEvent();
-        row.setId(UUID.randomUUID());
-        row.setTopic(PlatformTopics.RECORD_EVENTS);
-        row.setEventKey(key);
-        row.setPayloadType(RecordEvent.class.getName());
-        row.setPayload(json.writeValueAsString(event));
-        return row;
+        return new OutboxRow(UUID.randomUUID(), PlatformTopics.RECORD_EVENTS, key,
+                payloadType, json.writeValueAsString(event), 0);
     }
 
     private static CompletableFuture<SendResult<String, Object>> ok() {
@@ -72,55 +69,55 @@ class OutboxRelayTest {
 
     @Test
     void publishesClaimedRowsInOrderAndMarksThem() throws Exception {
-        OutboxEvent first = row("org:rec-1");
-        OutboxEvent second = row("org:rec-2");
-        when(repo.claimUnpublishedBatch(anyInt())).thenReturn(List.of(first, second));
+        OutboxRow first = row("org:rec-1");
+        OutboxRow second = row("org:rec-2");
+        when(store.claimUnpublishedBatch(anyInt())).thenReturn(List.of(first, second));
         when(kafka.send(any(), any(), any())).thenReturn(ok());
 
         relay.relay();
 
-        var order = inOrder(kafka);
+        var order = inOrder(kafka, store);
         order.verify(kafka).send(PlatformTopics.RECORD_EVENTS, "org:rec-1", deserialized(first));
+        order.verify(store).markPublished(first.id());
         order.verify(kafka).send(PlatformTopics.RECORD_EVENTS, "org:rec-2", deserialized(second));
-        assertThat(first.getPublishedAt()).isNotNull();
-        assertThat(second.getPublishedAt()).isNotNull();
+        order.verify(store).markPublished(second.id());
+        verify(store, never()).park(any());
+        verify(store, never()).recordFailure(any());
     }
 
     @Test
     void brokerFailureStopsBatchWithoutMarkingOrSkipping() throws Exception {
-        OutboxEvent first = row("org:rec-1");
-        OutboxEvent second = row("org:rec-2");
-        when(repo.claimUnpublishedBatch(anyInt())).thenReturn(List.of(first, second));
+        OutboxRow first = row("org:rec-1");
+        OutboxRow second = row("org:rec-2");
+        when(store.claimUnpublishedBatch(anyInt())).thenReturn(List.of(first, second));
         when(kafka.send(any(), any(), any())).thenReturn(broken());
 
         relay.relay();
 
         // first row failed → attempt counted, not published; second row never attempted
-        assertThat(first.getPublishedAt()).isNull();
-        assertThat(first.getAttempts()).isEqualTo(1);
-        assertThat(second.getPublishedAt()).isNull();
-        assertThat(second.getAttempts()).isZero();
+        verify(store).recordFailure(first.id());
+        verify(store, never()).markPublished(any());
+        verify(store, never()).recordFailure(second.id());
         verify(kafka, times(1)).send(any(), any(), any());
     }
 
     @Test
     void poisonRowIsParkedAndDoesNotBlockTheStream() throws Exception {
-        OutboxEvent poison = row("org:rec-1");
-        poison.setPayloadType("java.lang.ProcessBuilder"); // outside the events package → refused
-        OutboxEvent healthy = row("org:rec-2");
-        when(repo.claimUnpublishedBatch(anyInt())).thenReturn(List.of(poison, healthy));
+        // payload type outside the events package → refused
+        OutboxRow poison = row("org:rec-1", "java.lang.ProcessBuilder");
+        OutboxRow healthy = row("org:rec-2");
+        when(store.claimUnpublishedBatch(anyInt())).thenReturn(List.of(poison, healthy));
         when(kafka.send(any(), any(), any())).thenReturn(ok());
 
         relay.relay();
 
         // poison parked (won't retry), healthy row still delivered
-        assertThat(poison.getPublishedAt()).isNotNull();
-        assertThat(poison.getAttempts()).isEqualTo(1);
-        assertThat(healthy.getPublishedAt()).isNotNull();
+        verify(store).park(poison.id());
+        verify(store).markPublished(healthy.id());
         verify(kafka, times(1)).send(eq(PlatformTopics.RECORD_EVENTS), eq("org:rec-2"), any());
     }
 
-    private RecordEvent deserialized(OutboxEvent row) throws Exception {
-        return json.readValue(row.getPayload(), RecordEvent.class);
+    private RecordEvent deserialized(OutboxRow row) throws Exception {
+        return json.readValue(row.payload(), RecordEvent.class);
     }
 }
