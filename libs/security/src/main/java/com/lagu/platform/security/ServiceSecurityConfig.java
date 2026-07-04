@@ -61,7 +61,16 @@ public class ServiceSecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                                    GatewayHeaderFilter gatewayHeaderFilter) throws Exception {
+                                                    GatewayHeaderFilter gatewayHeaderFilter,
+                                                    @Value("${platform.security.public-paths:}")
+                                                    String publicPathsCsv) throws Exception {
+        // Deliberately public endpoints (e.g. consumer marketplace search) — path prefixes,
+        // comma-separated. Empty by default: services must opt in per path.
+        java.util.List<String> publicPaths = java.util.Arrays.stream(publicPathsCsv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -77,7 +86,8 @@ public class ServiceSecurityConfig {
                                    p.startsWith("/v3/api-docs") ||
                                    p.equals("/actuator/health") ||
                                    p.equals("/actuator/info") ||
-                                   p.equals("/actuator/prometheus");
+                                   p.equals("/actuator/prometheus") ||
+                                   publicPaths.stream().anyMatch(p::startsWith);
                         }).permitAll()
                         .anyRequest().authenticated()
                 )

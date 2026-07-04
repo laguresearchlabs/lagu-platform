@@ -30,11 +30,44 @@ public class SearchService {
 
     public SearchResponse search(SearchRequest req, String orgId) throws IOException {
         String index = mappingBuilder.indexName(orgId, req.getObjectType());
-        int from     = req.getPage() * req.getSize();
+        return execute(index, buildQuery(req, orgId), req);
+    }
+
+    /**
+     * Cross-org marketplace search over published listing snapshots. The consumer index only
+     * ever contains PUBLISHED snapshots (visibility decided at publish time), so no org or
+     * status filter applies; relevance is multiplied by the tier-derived {@code searchBoost}.
+     */
+    public SearchResponse searchConsumer(SearchRequest req) throws IOException {
+        String index = mappingBuilder.consumerIndexName(req.getObjectType());
+
+        Query boosted = Query.of(q -> q.functionScore(fs -> fs
+                .query(buildQuery(req, null))
+                .functions(fn -> fn.fieldValueFactor(fv -> fv.field("searchBoost").missing(1.0)))
+                .boostMode(FunctionBoostMode.Multiply)
+                .scoreMode(FunctionScoreMode.Multiply)));
+
+        try {
+            return execute(index, boosted, req);
+        } catch (org.opensearch.client.opensearch._types.OpenSearchException e) {
+            // No listing of this type has ever been published → the index doesn't exist yet.
+            // An empty result page is the correct answer, not a 500.
+            if ("index_not_found_exception".equals(e.error().type())) {
+                return SearchResponse.builder()
+                        .total(0).page(req.getPage()).size(req.getSize())
+                        .results(List.of()).facets(Map.of())
+                        .build();
+            }
+            throw e;
+        }
+    }
+
+    private SearchResponse execute(String index, Query query, SearchRequest req) throws IOException {
+        int from = req.getPage() * req.getSize();
 
         var searchBuilder = new org.opensearch.client.opensearch.core.SearchRequest.Builder()
                 .index(index)
-                .query(buildQuery(req, orgId))
+                .query(query)
                 .from(from)
                 .size(req.getSize());
 
@@ -65,9 +98,12 @@ public class SearchService {
     private Query buildQuery(SearchRequest req, String orgId) {
         BoolQuery.Builder bool = new BoolQuery.Builder();
 
-        // Defense-in-depth: don't rely solely on per-org index-name isolation for tenant
-        // isolation — filter every query by orgId at the document level too.
-        bool.filter(f -> f.term(t -> t.field("orgId").value(v -> v.stringValue(orgId))));
+        // Defense-in-depth for org-scoped search: don't rely solely on per-org index-name
+        // isolation — filter every query by orgId at the document level too. Consumer search
+        // passes null: its index is cross-org by design and holds only published snapshots.
+        if (orgId != null) {
+            bool.filter(f -> f.term(t -> t.field("orgId").value(v -> v.stringValue(orgId))));
+        }
 
         if (req.getQuery() != null && !req.getQuery().isBlank()) {
             bool.must(m -> m.multiMatch(mm -> mm

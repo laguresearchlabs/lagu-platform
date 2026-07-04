@@ -67,3 +67,9 @@ springdoc:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
+
+platform:
+  security:
+    # Consumer marketplace search is deliberately public: the consumer index only holds
+    # workflow-approved PUBLISHED snapshots.
+    public-paths: /api/v1/search/consumer

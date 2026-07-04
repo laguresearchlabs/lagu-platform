@@ -255,6 +255,29 @@ class PlatformEndToEndIT {
         JsonNode hit = results.get("results").get(0);
         assertThat(hit.get("recordId").asText()).isEqualTo(recordId);
         assertThat(hit.get("data").get("name").asText()).isEqualTo("Grand Hall");
+
+        // ── 4. consumer marketplace search: two vendors' published snapshots land in the
+        // cross-org consumer index (listing-service isn't part of this rig, so its ListingEvents
+        // are produced directly), then searched PUBLICLY — no identity headers, no gateway
+        // secret — with the PREMIUM vendor's tier boost ranking it first. ────────────────────
+        String premiumRecordId = UUID.randomUUID().toString();
+        String basicRecordId   = UUID.randomUUID().toString();
+        produceListingEvent(listingType, premiumRecordId, orgId, "Boosted Palace Venue", "PREMIUM", 2.0);
+        produceListingEvent(listingType, basicRecordId, UUID.randomUUID().toString(),
+                "Plain Palace Venue", "NONE", 1.0);
+
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    JsonNode consumer = consumerSearch(searchServiceClient, listingType, "Palace");
+                    assertThat(consumer.get("total").asLong()).isEqualTo(2);
+                });
+
+        JsonNode consumerResults = consumerSearch(searchServiceClient, listingType, "Palace");
+        assertThat(consumerResults.get("results").get(0).get("recordId").asText())
+                .as("PREMIUM-tier listing (searchBoost 2.0) must outrank the unverified one")
+                .isEqualTo(premiumRecordId);
+        assertThat(consumerResults.get("results").get(1).get("recordId").asText())
+                .isEqualTo(basicRecordId);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────
@@ -344,6 +367,53 @@ class PlatformEndToEndIT {
             return JSON.readTree(raw);
         } catch (Exception e) {
             throw new AssertionError("Could not parse search response: " + raw, e);
+        }
+    }
+
+    /** Produces a ListingEvent exactly as listing-service's outbox relay would. */
+    private static void produceListingEvent(String objectType, String recordId, String orgId,
+                                            String name, String tier, double boost) throws Exception {
+        Properties props = new Properties();
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KAFKA.getBootstrapServers());
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+                org.apache.kafka.common.serialization.StringSerializer.class.getName());
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                org.apache.kafka.common.serialization.StringSerializer.class.getName());
+        try (var producer = new org.apache.kafka.clients.producer.KafkaProducer<String, String>(props)) {
+            Map<String, Object> event = Map.of(
+                    "eventType", "PUBLISHED",
+                    "recordId", recordId,
+                    "orgId", orgId,
+                    "objectType", objectType,
+                    "data", Map.of("name", name),
+                    "verificationTier", tier,
+                    "searchBoost", boost,
+                    "publishedAt", java.time.Instant.now().toString(),
+                    "occurredAt", java.time.Instant.now().toString());
+            producer.send(new org.apache.kafka.clients.producer.ProducerRecord<>(
+                    PlatformTopics.LISTING_EVENTS, orgId + ":" + recordId,
+                    JSON.writeValueAsString(event))).get();
+        }
+    }
+
+    /** Consumer search is public: deliberately sends NO identity headers and NO gateway secret. */
+    private static JsonNode consumerSearch(RestClient client, String objectType, String query) {
+        String raw;
+        try {
+            raw = client.post().uri("/api/v1/search/consumer")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("objectType", objectType, "query", query))
+                    .retrieve()
+                    .body(String.class);
+        } catch (RestClientResponseException e) {
+            throw new AssertionError("POST /api/v1/search/consumer failed: " + e.getStatusCode()
+                    + " " + e.getResponseBodyAsString(), e);
+        }
+        try {
+            return JSON.readTree(raw);
+        } catch (Exception e) {
+            throw new AssertionError("Could not parse consumer search response: " + raw, e);
         }
     }
 

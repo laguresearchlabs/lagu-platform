@@ -10,6 +10,11 @@ public interface WorkflowTransitionRepository extends JpaRepository<WorkflowTran
 
     List<WorkflowTransition> findByWorkflowIdAndFromState(UUID workflowId, String fromState);
 
-    Optional<WorkflowTransition> findByWorkflowIdAndFromStateAndTriggerName(
+    /**
+     * Trigger lookup is case-insensitive: the seeder stores lowercase trigger names
+     * ("submit") while API callers may send any case — an exact match here would make
+     * every seeded transition unreachable.
+     */
+    Optional<WorkflowTransition> findByWorkflowIdAndFromStateAndTriggerNameIgnoreCase(
             UUID workflowId, String fromState, String triggerName);
 }

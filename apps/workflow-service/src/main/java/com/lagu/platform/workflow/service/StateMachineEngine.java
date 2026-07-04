@@ -42,7 +42,7 @@ public class StateMachineEngine {
     public void processTransitionRequest(RecordEvent event) {
         UUID recordId  = event.getRecordId();
         UUID orgId     = event.getOrgId();
-        String trigger = event.getTriggerName().toUpperCase();
+        String trigger = event.getTriggerName();
 
         // Resolve workflow for this object type
         WorkflowDefinition wf = resolveWorkflow(event.getObjectType(), orgId);
@@ -53,9 +53,9 @@ public class StateMachineEngine {
 
         String currentState = rws.getCurrentState();
 
-        // Find the transition
+        // Find the transition (trigger match is case-insensitive — see repository note)
         WorkflowTransition transition = txRepo
-                .findByWorkflowIdAndFromStateAndTriggerName(wf.getId(), currentState, trigger)
+                .findByWorkflowIdAndFromStateAndTriggerNameIgnoreCase(wf.getId(), currentState, trigger)
                 .orElseThrow(() -> new ValidationException(
                         "No transition '" + trigger + "' from state '" + currentState + "'"));
 

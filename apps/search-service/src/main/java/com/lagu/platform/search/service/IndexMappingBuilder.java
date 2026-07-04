@@ -39,6 +39,12 @@ public class IndexMappingBuilder {
         return indexPrefix + "-" + orgId.toLowerCase() + "-" + objectType.toLowerCase();
     }
 
+    /** Cross-org index of published listing snapshots backing consumer/marketplace search. */
+    public String consumerIndexName(String objectType) {
+        validateSegment("objectType", objectType);
+        return indexPrefix + "-consumer-" + objectType.toLowerCase();
+    }
+
     private void validateSegment(String label, String value) {
         if (value == null || !SAFE_INDEX_SEGMENT.matcher(value).matches()) {
             throw new ValidationException("Invalid " + label + ": " + value);
@@ -50,7 +56,15 @@ public class IndexMappingBuilder {
      * Mapping is derived from the metadata-service schema.
      */
     public void ensureIndex(String orgId, String objectType) {
-        String name = indexName(orgId, objectType);
+        createIfAbsent(indexName(orgId, objectType), objectType, false);
+    }
+
+    /** Same, for the cross-org consumer index (adds searchBoost/verificationTier/publishedAt). */
+    public void ensureConsumerIndex(String objectType) {
+        createIfAbsent(consumerIndexName(objectType), objectType, true);
+    }
+
+    private void createIfAbsent(String name, String objectType, boolean consumer) {
         try {
             boolean exists = osClient.indices().exists(r -> r.index(name)).value();
             if (exists) return;
@@ -58,7 +72,14 @@ public class IndexMappingBuilder {
             List<Map<String, Object>> fields = metadataClient.getSchema(objectType);
             Map<String, Property> dataProperties = buildDataProperties(fields);
 
-            TypeMapping mapping = TypeMapping.of(m -> m.properties(allProperties(dataProperties)));
+            Map<String, Property> props = allProperties(dataProperties);
+            if (consumer) {
+                props.put("searchBoost",      Property.of(p -> p.double_(d -> d)));
+                props.put("verificationTier", Property.of(p -> p.keyword(k -> k)));
+                props.put("publishedAt",      Property.of(p -> p.date(d ->
+                        d.format("strict_date_time||epoch_millis"))));
+            }
+            TypeMapping mapping = TypeMapping.of(m -> m.properties(props));
 
             osClient.indices().create(CreateIndexRequest.of(r -> r
                     .index(name)

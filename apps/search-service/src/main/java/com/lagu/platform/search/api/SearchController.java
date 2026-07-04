@@ -32,6 +32,18 @@ public class SearchController {
         return searchService.search(req, orgId);
     }
 
+    /**
+     * Consumer/marketplace search across all vendors' PUBLISHED listings. Public — listed in
+     * platform.security.public-paths — because the index only ever contains data the workflow
+     * already approved for consumer visibility; ranking multiplies relevance by the vendor's
+     * verification-tier searchBoost.
+     */
+    @PostMapping("/consumer")
+    @Operation(summary = "Public marketplace search over published listings, tier-boosted")
+    public SearchResponse consumerSearch(@RequestBody @Valid SearchRequest req) throws IOException {
+        return searchService.searchConsumer(req);
+    }
+
     @GetMapping("/suggest")
     @Operation(summary = "Typeahead suggestions for a given field prefix")
     @RequirePermission(resource = "RECORD", action = "READ")

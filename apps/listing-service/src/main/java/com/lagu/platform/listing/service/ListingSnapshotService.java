@@ -1,6 +1,7 @@
 package com.lagu.platform.listing.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
+import com.lagu.platform.listing.event.ListingEventPublisher;
 import com.lagu.platform.listing.domain.ListingSnapshot;
 import com.lagu.platform.listing.domain.ListingSnapshotRepository;
 import com.lagu.platform.listing.domain.ListingAvailability;
@@ -27,6 +28,7 @@ public class ListingSnapshotService {
 
     private final ListingSnapshotRepository snapshotRepo;
     private final ListingAvailabilityRepository availabilityRepo;
+    private final ListingEventPublisher eventPublisher;
 
     /**
      * Called by the Kafka consumer when a record transitions to ACTIVE/APPROVED, and by the
@@ -58,6 +60,7 @@ public class ListingSnapshotService {
         snap.setVersion(snap.getVersion() + 1);
 
         ListingSnapshot saved = snapshotRepo.save(snap);
+        eventPublisher.publishPublished(saved);
         log.info("Published snapshot for record {} org {} type {}", recordId, orgId, objectType);
         return saved;
     }
@@ -82,6 +85,7 @@ public class ListingSnapshotService {
         snapshotRepo.findByRecordId(recordId).ifPresent(snap -> {
             snap.setStatus("UNPUBLISHED");
             snapshotRepo.save(snap);
+            eventPublisher.publishUnpublished(snap);
             log.info("Unpublished snapshot for record {}", recordId);
         });
     }
