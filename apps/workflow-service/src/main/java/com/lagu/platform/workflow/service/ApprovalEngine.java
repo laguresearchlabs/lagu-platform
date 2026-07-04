@@ -37,6 +37,7 @@ public class ApprovalEngine {
         instance.setTransition(transition);
         instance.setStatus("PENDING");
         instance.setCurrentStep(1);
+        instance.setRequestedBy(requestedBy);
         ApprovalInstance saved = instanceRepo.save(instance);
 
         publisher.publishApprovalRequested(rws.getWorkflow(), rws, transition, saved, requestedBy);
@@ -60,54 +61,106 @@ public class ApprovalEngine {
             throw new ValidationException("Approval instance is already " + instance.getStatus());
         }
 
+        // A multi-step approval exists to gather independent judgements: the requester may not
+        // approve their own request, and no approver may decide more than once per instance.
+        if (actorId != null && actorId.equals(instance.getRequestedBy())) {
+            throw new PlatformException("SELF_APPROVAL_FORBIDDEN",
+                    "The requester of a transition cannot decide its approval", HttpStatus.FORBIDDEN);
+        }
+        boolean alreadyDecided = instance.getDecisions().stream()
+                .anyMatch(d -> d.getApproverUserId().equals(actorId));
+        if (alreadyDecided) {
+            throw new ValidationException("You have already decided on this approval");
+        }
+
         ApprovalDefinition def = instance.getApprovalDefinition();
         int totalSteps = def.getSteps().size();
-        int currentStep = instance.getCurrentStep();
 
         // R-06: the approver's role must be checked at decision time, not trusted from when the
         // approval instance was created — a role granted/revoked since then must take effect now.
-        String requiredRole = def.getSteps().stream()
-                .filter(s -> s.getStepOrder() == currentStep)
-                .map(ApprovalStep::getApproverRole)
-                .findFirst()
-                .orElseThrow(() -> new ValidationException("No approval step configured for step " + currentStep));
-        if (actorRoles == null || !actorRoles.contains(requiredRole)) {
-            throw new PlatformException("APPROVAL_ROLE_REQUIRED",
-                    "Decision requires role " + requiredRole, HttpStatus.FORBIDDEN);
-        }
+        int decisionStep = resolveDecisionStep(def, instance, actorRoles);
 
         ApprovalStepDecision decision = new ApprovalStepDecision();
         decision.setApprovalInstance(instance);
-        decision.setStepOrder(currentStep);
+        decision.setStepOrder(decisionStep);
         decision.setApproverUserId(actorId);
         decision.setDecision(req.getDecision().toUpperCase());
         decision.setComment(req.getComment());
         instance.getDecisions().add(decision);
 
-        if ("REJECTED".equals(req.getDecision())) {
+        if ("REJECTED".equalsIgnoreCase(req.getDecision())) {
             complete(instance, "REJECTED", actorId);
         } else {
             // APPROVED
             switch (def.getApprovalType()) {
                 case "ANY_ONE" -> complete(instance, "APPROVED", actorId);
                 case "PARALLEL" -> {
-                    long approvedCount = instance.getDecisions().stream()
-                            .filter(d -> "APPROVED".equals(d.getDecision())).count();
-                    if (approvedCount >= totalSteps) complete(instance, "APPROVED", actorId);
-                }
-                default -> { // SEQUENTIAL
-                    if (currentStep >= totalSteps) {
+                    // Complete only when every step has an approval from its own role-holder.
+                    Set<Integer> approvedSteps = instance.getDecisions().stream()
+                            .filter(d -> "APPROVED".equals(d.getDecision()))
+                            .map(ApprovalStepDecision::getStepOrder)
+                            .collect(java.util.stream.Collectors.toSet());
+                    boolean allApproved = def.getSteps().stream()
+                            .allMatch(s -> approvedSteps.contains(s.getStepOrder()));
+                    if (allApproved) {
                         complete(instance, "APPROVED", actorId);
                     } else {
-                        instance.setCurrentStep(currentStep + 1);
-                        instanceRepo.save(instance);
-                        publisher.publishApprovalStepCompleted(instance, currentStep, actorId);
+                        publisher.publishApprovalStepCompleted(instance, decisionStep, actorId);
+                    }
+                }
+                default -> { // SEQUENTIAL
+                    if (decisionStep >= totalSteps) {
+                        complete(instance, "APPROVED", actorId);
+                    } else {
+                        instance.setCurrentStep(decisionStep + 1);
+                        publisher.publishApprovalStepCompleted(instance, decisionStep, actorId);
                     }
                 }
             }
         }
 
         return toResponse(instanceRepo.save(instance));
+    }
+
+    /**
+     * Determines which step this actor is deciding, enforcing per-step approver roles:
+     * SEQUENTIAL — the current step only; PARALLEL — any step not yet approved whose role the
+     * actor holds (steps are independent and may be approved in any order); ANY_ONE — any step
+     * whose role the actor holds.
+     */
+    private int resolveDecisionStep(ApprovalDefinition def, ApprovalInstance instance,
+                                    Set<String> actorRoles) {
+        Set<String> roles = actorRoles != null ? actorRoles : Set.of();
+
+        if ("SEQUENTIAL".equals(def.getApprovalType())) {
+            int currentStep = instance.getCurrentStep();
+            String requiredRole = def.getSteps().stream()
+                    .filter(s -> s.getStepOrder() == currentStep)
+                    .map(ApprovalStep::getApproverRole)
+                    .findFirst()
+                    .orElseThrow(() -> new ValidationException(
+                            "No approval step configured for step " + currentStep));
+            if (!roles.contains(requiredRole)) {
+                throw new PlatformException("APPROVAL_ROLE_REQUIRED",
+                        "Decision requires role " + requiredRole, HttpStatus.FORBIDDEN);
+            }
+            return currentStep;
+        }
+
+        Set<Integer> approvedSteps = instance.getDecisions().stream()
+                .filter(d -> "APPROVED".equals(d.getDecision()))
+                .map(ApprovalStepDecision::getStepOrder)
+                .collect(java.util.stream.Collectors.toSet());
+
+        return def.getSteps().stream()
+                .filter(s -> "ANY_ONE".equals(def.getApprovalType())
+                        || !approvedSteps.contains(s.getStepOrder()))
+                .filter(s -> roles.contains(s.getApproverRole()))
+                .map(ApprovalStep::getStepOrder)
+                .findFirst()
+                .orElseThrow(() -> new PlatformException("APPROVAL_ROLE_REQUIRED",
+                        "None of your roles can decide a remaining step of this approval",
+                        HttpStatus.FORBIDDEN));
     }
 
     private void complete(ApprovalInstance instance, String outcome, UUID actorId) {

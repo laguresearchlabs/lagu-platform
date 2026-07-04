@@ -39,6 +39,11 @@ public class Record {
     @Column(columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> data = new HashMap<>();
 
+    /** Optimistic lock — concurrent updates fail with 409 instead of silently overwriting. */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "created_by")
     private UUID createdBy;
 

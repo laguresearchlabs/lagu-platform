@@ -30,6 +30,11 @@ public class VendorProfile {
     @Column(nullable = false, length = 30)
     private String status = "DRAFT";
 
+    /** Optimistic lock — vendor edits and admin status changes can't silently collide. */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(nullable = false, length = 10)
     private String country = "IN";
 

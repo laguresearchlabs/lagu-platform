@@ -134,8 +134,17 @@ public class RecordService {
     public RecordResponse requestTransition(UUID id, StatusTransitionRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         Record record = findForContext(id, ctx);
+        // Guard context for workflow-service's TransitionGuard: the record's fields plus its
+        // verification tier/status, so conditions like {field: verificationTier, op: in, ...}
+        // evaluate against real data rather than an always-null context.
+        Map<String, Object> guardContext = new HashMap<>(record.getData());
+        verificationRepository.findByRecordId(record.getId()).ifPresent(v -> {
+            guardContext.put("verificationTier", v.getTier());
+            guardContext.put("verificationStatus", v.getStatus());
+        });
         // Publish event to workflow-service via Kafka; status updated when workflow responds
-        eventPublisher.publishTransitionRequested(record, req.getTrigger(), req.getComment(), ctx);
+        eventPublisher.publishTransitionRequested(
+                record, req.getTrigger(), req.getComment(), guardContext, ctx);
         return toResponse(record);
     }
 

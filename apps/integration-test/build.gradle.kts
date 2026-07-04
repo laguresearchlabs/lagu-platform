@@ -38,6 +38,12 @@ tasks.named<Test>("test") {
     systemProperty("it.schemaRegistryJarDir", jarDir(":apps:schema-registry"))
     systemProperty("it.recordServiceJarDir", jarDir(":apps:record-service"))
     systemProperty("it.searchServiceJarDir", jarDir(":apps:search-service"))
+    // The jars are consumed at runtime via the system properties above, which Gradle can't see —
+    // declare them as inputs so a rebuilt service jar invalidates this task's up-to-date check
+    // (otherwise the E2E silently does NOT re-run after service code changes).
+    inputs.dir(jarDir(":apps:schema-registry")).withPropertyName("schemaRegistryJars")
+    inputs.dir(jarDir(":apps:record-service")).withPropertyName("recordServiceJars")
+    inputs.dir(jarDir(":apps:search-service")).withPropertyName("searchServiceJars")
     testLogging {
         showStandardStreams = true
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

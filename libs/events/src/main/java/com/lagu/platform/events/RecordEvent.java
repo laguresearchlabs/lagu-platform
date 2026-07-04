@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Data
@@ -45,5 +46,13 @@ public class RecordEvent implements PlatformEvent {
     private Map<String, Object> context;
 
     private UUID   changedBy;
+
+    /**
+     * Roles of the requesting caller, for STATUS_TRANSITION_REQUESTED only — workflow-service
+     * enforces WorkflowTransition.allowedRoles against these. Null/empty means the caller had
+     * no roles: role-restricted transitions are then rejected (fail closed).
+     */
+    private Set<String> changedByRoles;
+
     private Instant occurredAt;
 }

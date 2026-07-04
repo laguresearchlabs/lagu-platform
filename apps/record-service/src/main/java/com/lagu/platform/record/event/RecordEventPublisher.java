@@ -1,26 +1,36 @@
 package com.lagu.platform.record.event;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.RecordEvent;
 import com.lagu.platform.events.VerificationEvent;
+import com.lagu.platform.record.domain.OutboxEvent;
+import com.lagu.platform.record.domain.OutboxEventRepository;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 
+/**
+ * Stages platform events in the transactional outbox ({@code record_outbox}) rather than
+ * sending to Kafka directly. Every publish method is called inside the service-layer
+ * transaction that makes the corresponding record change, so the event and the change
+ * commit or roll back together; {@link OutboxRelay} delivers committed events to Kafka.
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class RecordEventPublisher {
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxEventRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
     public void publishCreated(Record record) {
-        publish(recordKey(record), RecordEvent.builder()
+        enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("CREATED")
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -33,7 +43,7 @@ public class RecordEventPublisher {
     }
 
     public void publishUpdated(Record record) {
-        publish(recordKey(record), RecordEvent.builder()
+        enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("UPDATED")
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -46,7 +56,7 @@ public class RecordEventPublisher {
     }
 
     public void publishDeleted(Record record) {
-        publish(recordKey(record), RecordEvent.builder()
+        enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("DELETED")
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -59,8 +69,9 @@ public class RecordEventPublisher {
     }
 
     public void publishTransitionRequested(Record record, String trigger, String comment,
+                                           java.util.Map<String, Object> context,
                                            PlatformSecurityContext ctx) {
-        publish(recordKey(record), RecordEvent.builder()
+        enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("STATUS_TRANSITION_REQUESTED")
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -68,13 +79,15 @@ public class RecordEventPublisher {
                 .currentStatus(record.getStatus())
                 .triggerName(trigger)
                 .comment(comment)
+                .context(context)
                 .changedBy(ctx != null ? ctx.getUserId() : null)
+                .changedByRoles(ctx != null ? ctx.getRoles() : null)
                 .occurredAt(Instant.now())
                 .build());
     }
 
     public void publishStatusChanged(Record record, String previousStatus) {
-        publish(recordKey(record), RecordEvent.builder()
+        enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("STATUS_CHANGED")
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -90,7 +103,7 @@ public class RecordEventPublisher {
                                            PlatformSecurityContext ctx) {
         String eventType = "EXPIRED".equals(newTier) || "REVOKED".equals(newTier)
                 ? newTier : "TIER_CHANGED";
-        VerificationEvent event = VerificationEvent.builder()
+        enqueue(PlatformTopics.VERIFICATION_EVENTS, recordKey(record), VerificationEvent.builder()
                 .eventType(eventType)
                 .recordId(record.getId())
                 .orgId(record.getOrgId())
@@ -99,24 +112,23 @@ public class RecordEventPublisher {
                 .newTier(newTier)
                 .changedBy(ctx != null ? ctx.getUserId() : null)
                 .occurredAt(Instant.now())
-                .build();
-        kafkaTemplate.send(PlatformTopics.VERIFICATION_EVENTS, recordKey(record), event)
-                .whenComplete((result, ex) -> {
-                    if (ex != null) {
-                        log.error("Failed to publish VerificationEvent type={} recordId={}",
-                                eventType, record.getId(), ex);
-                    }
-                });
+                .build());
     }
 
-    private void publish(String key, RecordEvent event) {
-        kafkaTemplate.send(PlatformTopics.RECORD_EVENTS, key, event)
-                .whenComplete((result, ex) -> {
-                    if (ex != null) {
-                        log.error("Failed to publish RecordEvent type={} recordId={}",
-                                event.getEventType(), event.getRecordId(), ex);
-                    }
-                });
+    private void enqueue(String topic, String key, Object event) {
+        OutboxEvent row = new OutboxEvent();
+        row.setTopic(topic);
+        row.setEventKey(key);
+        row.setPayloadType(event.getClass().getName());
+        try {
+            row.setPayload(objectMapper.writeValueAsString(event));
+        } catch (JsonProcessingException e) {
+            // Must propagate: failing to stage the event has to roll back the record change,
+            // otherwise we are back to silent DB/event divergence.
+            throw new IllegalStateException("Could not serialize " + event.getClass().getSimpleName()
+                    + " for outbox", e);
+        }
+        outboxRepository.save(row);
     }
 
     private String recordKey(Record record) {

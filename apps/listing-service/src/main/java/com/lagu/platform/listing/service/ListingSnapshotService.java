@@ -62,11 +62,17 @@ public class ListingSnapshotService {
         return saved;
     }
 
+    /**
+     * Mirrors the searchBoostFactor values seeded into schema-registry's TierConfiguration
+     * (NONE 1.0 / BASIC 1.5 / ENHANCED 1.8 / PREMIUM 2.0). If the tier ladder changes there,
+     * this must follow — longer term this should be fetched from schema-registry instead.
+     */
     public static BigDecimal boostForTier(String tier) {
         return switch (tier) {
-            case "BASIC"   -> new BigDecimal("1.5");
-            case "PREMIUM" -> new BigDecimal("2.0");
-            default        -> BigDecimal.ONE;
+            case "BASIC"    -> new BigDecimal("1.5");
+            case "ENHANCED" -> new BigDecimal("1.8");
+            case "PREMIUM"  -> new BigDecimal("2.0");
+            default         -> BigDecimal.ONE;
         };
     }
 

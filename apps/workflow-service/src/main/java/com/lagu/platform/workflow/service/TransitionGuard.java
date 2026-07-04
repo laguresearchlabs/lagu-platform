@@ -60,7 +60,16 @@ public class TransitionGuard {
         return true;
     }
 
+    /**
+     * Fail closed: these conditions gate workflow transitions, so a rule the engine cannot
+     * evaluate (unknown/missing op, non-numeric value in a numeric comparison) must block the
+     * transition, not wave it through.
+     */
     private boolean passes(String op, Object actual, Object expected) {
+        if (op == null) {
+            log.warn("TransitionGuard: condition has no 'op' — failing closed");
+            return false;
+        }
         return switch (op) {
             case "eq"         -> Objects.equals(str(actual), str(expected));
             case "neq"        -> !Objects.equals(str(actual), str(expected));
@@ -70,13 +79,13 @@ public class TransitionGuard {
                                     && col.stream().anyMatch(v -> Objects.equals(str(actual), str(v)));
             case "not_in"     -> !(expected instanceof Collection<?> col)
                                     || col.stream().noneMatch(v -> Objects.equals(str(actual), str(v)));
-            case "gt"  -> compareNums(actual, expected) > 0;
-            case "lt"  -> compareNums(actual, expected) < 0;
-            case "gte" -> compareNums(actual, expected) >= 0;
-            case "lte" -> compareNums(actual, expected) <= 0;
+            case "gt"  -> numeric(op, actual, expected, cmp -> cmp > 0);
+            case "lt"  -> numeric(op, actual, expected, cmp -> cmp < 0);
+            case "gte" -> numeric(op, actual, expected, cmp -> cmp >= 0);
+            case "lte" -> numeric(op, actual, expected, cmp -> cmp <= 0);
             default -> {
-                log.warn("TransitionGuard: unknown op '{}'", op);
-                yield true;
+                log.warn("TransitionGuard: unknown op '{}' — failing closed", op);
+                yield false;
             }
         };
     }
@@ -85,13 +94,16 @@ public class TransitionGuard {
         return o == null ? null : o.toString();
     }
 
-    private int compareNums(Object actual, Object expected) {
+    private boolean numeric(String op, Object actual, Object expected,
+                            java.util.function.IntPredicate outcome) {
         try {
             double a = Double.parseDouble(str(actual));
             double e = Double.parseDouble(str(expected));
-            return Double.compare(a, e);
-        } catch (NumberFormatException ex) {
-            return 0;
+            return outcome.test(Double.compare(a, e));
+        } catch (NullPointerException | NumberFormatException ex) {
+            log.warn("TransitionGuard: op '{}' on non-numeric values (actual={}, expected={}) " +
+                    "— failing closed", op, actual, expected);
+            return false;
         }
     }
 }

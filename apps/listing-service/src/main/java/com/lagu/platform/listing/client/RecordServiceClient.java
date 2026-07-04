@@ -27,16 +27,16 @@ public class RecordServiceClient {
                 .build();
     }
 
+    /**
+     * Propagates HTTP failures rather than returning null: the Kafka consumer relies on the
+     * exception to trigger retry/DLT, and a swallowed failure here would silently skip a
+     * snapshot publication.
+     */
     public Map<String, Object> getRecord(UUID recordId, UUID orgId) {
-        try {
-            return restClient.get()
-                    .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId != null ? orgId.toString() : "")
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<>() {});
-        } catch (Exception e) {
-            log.error("Failed to fetch record {}: {}", recordId, e.getMessage());
-            return null;
-        }
+        return restClient.get()
+                .uri("/api/v1/records/{id}", recordId)
+                .header("X-Org-Id", orgId != null ? orgId.toString() : "")
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
     }
 }

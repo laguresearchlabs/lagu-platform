@@ -35,6 +35,15 @@ public class ApprovalInstance {
     @Column(nullable = false, length = 20)
     private String status = "PENDING";
 
+    /** Who triggered the transition that started this approval — used to block self-approval. */
+    @Column(name = "requested_by")
+    private UUID requestedBy;
+
+    /** Optimistic lock — two simultaneous decisions can't both complete the instance. */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "current_step", nullable = false)
     private int currentStep = 1;
 

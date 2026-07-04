@@ -4,9 +4,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 @EnableCaching
+@EnableScheduling  // OutboxRelay polling + cleanup
 @ComponentScan(basePackages = {"com.lagu.platform.record", "com.lagu.platform.common", "com.lagu.platform.security"})
 public class RecordServiceApplication {
 

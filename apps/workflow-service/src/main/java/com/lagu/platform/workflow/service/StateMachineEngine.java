@@ -59,9 +59,10 @@ public class StateMachineEngine {
                 .orElseThrow(() -> new ValidationException(
                         "No transition '" + trigger + "' from state '" + currentState + "'"));
 
-        // Role check — null/empty means anyone can trigger
+        // Role check — null/empty allowedRoles means anyone can trigger. The requester's roles
+        // travel in the event (set by record-service from the gateway-verified context).
         UUID actorId = event.getChangedBy();
-        Set<String> userRoles = resolveUserRoles(event);
+        Set<String> userRoles = event.getChangedByRoles();
         if (!isRoleAllowed(transition.getAllowedRoles(), userRoles)) {
             publisher.publishTransitionRejected(wf, rws, transition, actorId,
                     "User does not have permission to trigger " + trigger);
@@ -165,13 +166,12 @@ public class StateMachineEngine {
     private boolean isRoleAllowed(List<String> allowedRoles, Set<String> userRoles) {
         if (allowedRoles == null || allowedRoles.isEmpty()) return true;
         if (userRoles == null) return false;
-        // PLATFORM_ADMIN always allowed
-        if (userRoles.contains("PLATFORM_ADMIN")) return true;
+        // PLATFORM_ADMIN always allowed; SVC_* principals are other platform services
+        // (e.g. automation-service executing an admin-configured trigger) acting as the system.
+        if (userRoles.contains("PLATFORM_ADMIN")
+                || userRoles.stream().anyMatch(r -> r.startsWith("SVC_"))) {
+            return true;
+        }
         return allowedRoles.stream().anyMatch(userRoles::contains);
-    }
-
-    private Set<String> resolveUserRoles(RecordEvent event) {
-        // Roles are embedded in the event by the record-service from the gateway header
-        return Set.of(); // overridden by consumer which sets roles from the original request
     }
 }

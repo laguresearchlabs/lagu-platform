@@ -36,27 +36,28 @@ public class WorkflowEventConsumer {
         }
     }
 
+    /**
+     * Failures propagate: the container's DefaultErrorHandler retries 3× then parks the
+     * event on WORKFLOW_EVENTS.DLT. Swallowing here would silently drop a listing publish —
+     * the record would be ACTIVE but never appear as a consumer-facing snapshot.
+     */
     private void handlePublish(WorkflowEvent event) {
-        try {
-            Map<String, Object> record = recordClient.getRecord(
-                    event.getRecordId(), event.getOrgId());
+        Map<String, Object> record = recordClient.getRecord(
+                event.getRecordId(), event.getOrgId());
 
-            if (record == null) {
-                log.warn("Could not fetch record {} for snapshot", event.getRecordId());
-                return;
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> data = (Map<String, Object>) record.get("data");
-            String verificationTier = extractString(record, "verificationTier", "NONE");
-
-            snapshotService.publishSnapshot(
-                    event.getRecordId(), event.getOrgId(),
-                    event.getObjectType(), data,
-                    verificationTier);
-        } catch (Exception e) {
-            log.error("Failed to publish snapshot for record {}: {}", event.getRecordId(), e.getMessage(), e);
+        if (record == null) {
+            throw new IllegalStateException(
+                    "Could not fetch record " + event.getRecordId() + " for snapshot publication");
         }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) record.get("data");
+        String verificationTier = extractString(record, "verificationTier", "NONE");
+
+        snapshotService.publishSnapshot(
+                event.getRecordId(), event.getOrgId(),
+                event.getObjectType(), data,
+                verificationTier);
     }
 
     private String extractString(Map<String, Object> map, String key, String defaultVal) {

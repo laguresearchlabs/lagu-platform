@@ -31,6 +31,11 @@ public class RecordWorkflowState {
     @Column(name = "current_state", nullable = false, length = 50)
     private String currentState;
 
+    /** Optimistic lock — two concurrent transitions can't both apply from the same state. */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "updated_by")
     private UUID updatedBy;
 

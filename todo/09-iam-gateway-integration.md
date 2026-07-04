@@ -209,27 +209,31 @@ check for the presence of the `X-User-Id` header (set by GatewayHeaderFilter).
 Some services call others internally (record-service → metadata-service, etc.).
 
 **Internal calls do not go through the gateway.** They use Eureka (`lb://service-name`)
-directly. For these calls, pass a service identity header instead of user context:
+directly, authenticated by the same `X-Platform-Gateway-Secret` shared secret the gateway
+uses, plus a service identity header:
 
 ```java
-@Bean
-public RestClient metadataRestClient(LoadBalancerClient lbClient) {
-    return RestClient.builder()
-        .baseUrl("http://metadata-service")   // Eureka resolves
-        .defaultHeader("X-Internal-Service", "record-service")
-        .requestFactory(clientHttpRequestFactory())
-        .build();
-}
+this.restClient = loadBalancedRestClientBuilder.clone()
+    .baseUrl("http://record-service")
+    .defaultHeader("X-Internal-Service", "vendor-service")
+    .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
+    .build();
+// Per request, forward the acting tenancy/user for scoping + audit:
+//   .header("X-Org-Id", orgId)  .header("X-User-Id", actingUserId)
 ```
 
-In metadata-service, allow `X-Internal-Service` header to bypass auth for schema lookups:
+`GatewayHeaderFilter` authenticates such calls as a service principal with a single
+`SVC_<NAME>` role (e.g. `SVC_VENDOR_SERVICE`) — never `PLATFORM_ADMIN` or other user roles;
+`X-User-Roles` on internal calls is ignored. `DefaultPermissionEvaluator` grants service
+principals READ everywhere, CREATE/UPDATE/TRANSITION on RECORD, and MANAGE on
+RECORD_VERIFICATION — nothing else (notably: no DELETE, no config writes). The gateway strips
+`X-Internal-Service` from all external traffic, so this identity is unreachable from outside.
 
-```java
-.requestMatchers(r -> "record-service".equals(r.getHeader("X-Internal-Service")))
-    .permitAll()
-```
+Services refuse to start if `platform.gateway.shared-secret` is unset or still the well-known
+placeholder, unless `platform.gateway.allow-insecure-default=true` (docker-compose and the
+`loc` profile set this; production must never).
 
-Alternatively (more secure): use mTLS or a shared internal API key from environment config.
+Longer term (unchanged): move to mTLS or per-service signed tokens.
 
 ---
 

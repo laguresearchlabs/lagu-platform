@@ -1,27 +1,30 @@
 package com.lagu.platform.workflow.event;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.WorkflowEvent;
 import com.lagu.platform.workflow.domain.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Publishes WorkflowEvents via Spring's application-event bus rather than sending to Kafka
- * directly; {@link WorkflowKafkaPublisherListener} performs the actual send only after the
- * enclosing DB transaction commits, so a mid-transaction failure never sends an event for a
- * state change that was rolled back.
+ * Stages WorkflowEvents in the transactional outbox ({@code workflow_outbox}) inside the
+ * caller's transaction; {@link OutboxRelay} delivers committed rows to Kafka. This keeps the
+ * old AFTER_COMMIT guarantee (a rolled-back state change never emits an event) and adds the
+ * one it lacked: a send failure or crash after commit can no longer lose the event.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class WorkflowEventPublisher {
 
-    private final ApplicationEventPublisher applicationEventPublisher;
+    private final OutboxEventRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
     public void publishTransitioned(WorkflowDefinition wf, RecordWorkflowState rws,
                                     WorkflowTransition tx, UUID actorId, String comment) {
@@ -92,6 +95,17 @@ public class WorkflowEventPublisher {
 
     private void send(String key, WorkflowEvent event) {
         String partitionKey = event.getRecordId() != null ? key + ":" + event.getRecordId() : key;
-        applicationEventPublisher.publishEvent(new OutboundWorkflowEvent(this, partitionKey, event));
+        OutboxEvent row = new OutboxEvent();
+        row.setTopic(PlatformTopics.WORKFLOW_EVENTS);
+        row.setEventKey(partitionKey);
+        row.setPayloadType(event.getClass().getName());
+        try {
+            row.setPayload(objectMapper.writeValueAsString(event));
+        } catch (JsonProcessingException e) {
+            // Must propagate: failing to stage the event has to roll back the state change,
+            // otherwise the workflow state and its consumers silently diverge.
+            throw new IllegalStateException("Could not serialize WorkflowEvent for outbox", e);
+        }
+        outboxRepository.save(row);
     }
 }

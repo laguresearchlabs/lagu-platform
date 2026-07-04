@@ -29,6 +29,11 @@ public class RecordVerification {
     @Column(nullable = false, length = 20)
     private String status = "UNVERIFIED";
 
+    /** Optimistic lock — concurrent updates fail with 409 instead of silently overwriting. */
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "verified_by")
     private UUID verifiedBy;
 
