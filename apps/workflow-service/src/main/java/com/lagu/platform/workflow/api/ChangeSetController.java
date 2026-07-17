@@ -1,6 +1,7 @@
 package com.lagu.platform.workflow.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.workflow.domain.ChangeSet;
@@ -66,7 +67,13 @@ public class ChangeSetController {
             @RequestParam(required = false, defaultValue = "PENDING") String status) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         UUID orgId = ctx != null ? ctx.getOrgId() : null;
-        if (orgId == null) return ResponseEntity.badRequest().build();
+        if (orgId == null) {
+            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+                    "This endpoint lists change sets for the caller's own org; it requires a "
+                            + "vendor-scoped account. Platform admins should use GET /api/v1/change-sets/pending "
+                            + "for the cross-org pending list.",
+                    HttpStatus.FORBIDDEN);
+        }
         return ResponseEntity.ok(ApiResponse.ok(changeSetService.listByOrgAndStatus(orgId, status)));
     }
 
