@@ -29,16 +29,22 @@ public class EmailDeliveryService {
      */
     public boolean send(String to, String subject, String body) {
         if (!enabled) {
-            log.debug("Email delivery disabled — skipping email to {}", to);
+            // WARN, not DEBUG: with email disabled (the production default) this is the only
+            // trace an EMAIL/BOTH-channel notification's email half ever leaves — it must be
+            // visible at default log levels, not require DEBUG to be enabled to even notice.
+            log.warn("Email delivery disabled — skipping email to {}", to);
+            return false;
+        }
+        // Checked before dryRun: a dry-run must still report "would have failed" for a
+        // misconfigured (missing recipient) send, not unconditionally mark it successful before
+        // even knowing there's no one to send it to.
+        if (to == null || to.isBlank()) {
+            log.warn("No recipient email address provided — skipping email");
             return false;
         }
         if (dryRun) {
             log.info("[EMAIL DRY-RUN] To: {} | Subject: {} | Body: {}", to, subject, body);
             return true;
-        }
-        if (to == null || to.isBlank()) {
-            log.warn("No recipient email address provided — skipping email");
-            return false;
         }
 
         SimpleMailMessage msg = new SimpleMailMessage();

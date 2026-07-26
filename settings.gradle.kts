@@ -13,5 +13,6 @@ include(
     "apps:document-service",
     "apps:vendor-service",
     "apps:listing-service",
+    "apps:event-service",
     "apps:integration-test"
 )

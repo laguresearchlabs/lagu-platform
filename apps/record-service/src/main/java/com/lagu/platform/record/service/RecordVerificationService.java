@@ -1,5 +1,6 @@
 package com.lagu.platform.record.service;
 
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordRepository;
@@ -12,6 +13,7 @@ import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,13 +33,25 @@ public class RecordVerificationService {
 
     public VerificationResponse getByRecordId(UUID recordId) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
+        if (ctx == null) {
+            throw new PlatformException("AUTH_REQUIRED", "Authentication required", HttpStatus.UNAUTHORIZED);
+        }
 
-        RecordVerification v = (orgId != null && !isPlatformAdmin(ctx))
-                ? verificationRepository.findByRecordIdAndOrgId(recordId, orgId)
-                        .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()))
-                : verificationRepository.findByRecordId(recordId)
-                        .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()));
+        RecordVerification v;
+        if (isPlatformAdmin(ctx)) {
+            v = verificationRepository.findByRecordId(recordId)
+                    .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()));
+        } else {
+            // Fail closed: a caller without an org context must not fall through to an unscoped
+            // lookup — that was exactly the bug here (any guessed recordId leaked another org's
+            // verification tier/status/notes to any authenticated, org-less caller).
+            if (ctx.getOrgId() == null) {
+                throw new PlatformException("ORG_CONTEXT_REQUIRED",
+                        "An organization context is required to access records", HttpStatus.FORBIDDEN);
+            }
+            v = verificationRepository.findByRecordIdAndOrgId(recordId, ctx.getOrgId())
+                    .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()));
+        }
 
         return toResponse(v);
     }

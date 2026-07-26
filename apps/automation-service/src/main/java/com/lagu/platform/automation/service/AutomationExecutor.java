@@ -7,9 +7,7 @@ import com.lagu.platform.events.PlatformTopics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,20 +19,28 @@ import java.util.List;
 public class AutomationExecutor {
 
     private final ActionExecutor               actionExecutor;
-    private final AutomationRunRepository      runRepository;
+    private final AutomationRunService         runService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    @Async
+    /**
+     * Runs synchronously (previously {@code @Async}) — PlatformEventConsumer acks the Kafka
+     * offset right after calling this, so an async fire-and-forget call let the offset commit
+     * before the automation even started running: a failure here was never retried and never
+     * reached the DLT, both configured and both silently dead as a result. A slow trigger's
+     * actions now hold up that consumer thread instead, which is the correct trade for actually
+     * being able to retry/DLT a failure — throughput can be recovered later with more consumer
+     * concurrency, not by making failures unobservable.
+     */
     public void execute(TriggerDefinition trigger, AutomationEventContext ctx) {
         ctx.setTriggerId(trigger.getId());
         ctx.setTriggerName(trigger.getName());
         publishTriggerFired(ctx);
-        AutomationRun run = createRun(trigger, ctx);
+        AutomationRun run = runService.createRun(trigger, ctx);
 
         try {
             List<ActionDefinition> actions = trigger.getActions();
             if (actions == null || actions.isEmpty()) {
-                complete(run, "SUCCESS");
+                runService.complete(run, "SUCCESS");
                 return;
             }
 
@@ -60,31 +66,13 @@ public class AutomationExecutor {
             }
 
             run.setActionRuns(actionRuns);
-            complete(run, overallSuccess ? "SUCCESS" : "FAILED");
+            runService.complete(run, overallSuccess ? "SUCCESS" : "FAILED");
 
         } catch (Exception e) {
             log.error("AutomationExecutor failed for trigger {}: {}", trigger.getId(), e.getMessage(), e);
-            run.setErrorMessage(e.getMessage());
-            complete(run, "FAILED");
+            runService.completeWithError(run, e.getMessage());
+            throw e; // propagate so the Kafka listener's error handler can retry/DLT this event
         }
-    }
-
-    @Transactional
-    protected AutomationRun createRun(TriggerDefinition trigger, AutomationEventContext ctx) {
-        AutomationRun run = new AutomationRun();
-        run.setTrigger(trigger);
-        run.setOrgId(ctx.getOrgId());
-        run.setRecordId(ctx.getRecordId());
-        run.setEventType(ctx.getEventType());
-        run.setStatus("RUNNING");
-        return runRepository.save(run);
-    }
-
-    @Transactional
-    protected void complete(AutomationRun run, String status) {
-        run.setStatus(status);
-        run.setCompletedAt(Instant.now());
-        runRepository.save(run);
     }
 
     private void publishTriggerFired(AutomationEventContext ctx) {

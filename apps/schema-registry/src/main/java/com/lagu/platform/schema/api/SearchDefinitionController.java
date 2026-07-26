@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.dto.SearchDefinitionRequest;
 import com.lagu.platform.schema.dto.SearchDefinitionResponse;
 import com.lagu.platform.schema.service.SearchDefinitionService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -30,12 +31,14 @@ public class SearchDefinitionController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "SEARCH_DEFINITION", action = "UPDATE")
     public ResponseEntity<ApiResponse<SearchDefinitionResponse>> upsert(
             @Valid @RequestBody SearchDefinitionRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(searchDefinitionService.upsert(req)));
     }
 
     @DeleteMapping("/{listingType}")
+    @RequirePermission(resource = "SEARCH_DEFINITION", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable String listingType) {
         searchDefinitionService.delete(listingType);
         return ResponseEntity.ok(ApiResponse.ok(null));

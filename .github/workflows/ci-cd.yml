@@ -62,6 +62,9 @@ jobs:
             listing-service:
               - *shared
               - 'apps/listing-service/**'
+            event-service:
+              - *shared
+              - 'apps/event-service/**'
             postgres:
               - 'infra/postgres/**'
 
@@ -77,6 +80,7 @@ jobs:
           DOCUMENT_SERVICE: ${{ steps.filter.outputs.document-service }}
           VENDOR_SERVICE: ${{ steps.filter.outputs.vendor-service }}
           LISTING_SERVICE: ${{ steps.filter.outputs.listing-service }}
+          EVENT_SERVICE: ${{ steps.filter.outputs.event-service }}
         run: |
           services=()
           [[ "$SCHEMA_REGISTRY" == "true" ]] && services+=("schema-registry")
@@ -88,6 +92,7 @@ jobs:
           [[ "$DOCUMENT_SERVICE" == "true" ]] && services+=("document-service")
           [[ "$VENDOR_SERVICE" == "true" ]] && services+=("vendor-service")
           [[ "$LISTING_SERVICE" == "true" ]] && services+=("listing-service")
+          [[ "$EVENT_SERVICE" == "true" ]] && services+=("event-service")
 
           if [ ${#services[@]} -eq 0 ]; then
             json="[]"

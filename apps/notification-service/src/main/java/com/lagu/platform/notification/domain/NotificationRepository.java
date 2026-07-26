@@ -10,6 +10,8 @@ import java.util.UUID;
 
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
+    java.util.Optional<Notification> findBySourceEventId(UUID sourceEventId);
+
     Page<Notification> findByRecipientUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
     Page<Notification> findByRecipientUserIdAndReadOrderByCreatedAtDesc(UUID userId, boolean read, Pageable pageable);

@@ -1,0 +1,106 @@
+package com.lagu.platform.automation.config;
+
+import com.lagu.platform.automation.domain.ActionDefinition;
+import com.lagu.platform.automation.domain.TriggerDefinition;
+import com.lagu.platform.automation.domain.TriggerDefinitionRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Platform-wide (org_id IS NULL, matches every org per TriggerDefinitionRepository's queries —
+ * necessary since event-service mints a fresh throwaway org per event, so there is no single
+ * "the event org" to scope a seeded row to) notification triggers for BIRTHDAY_EVENT/
+ * WEDDING_EVENT. Replaces event-nest's NotificationService, which wrote directly to its own
+ * `notifications` table on every event/member/address mutation.
+ *
+ * Scope note: only RECORD_CREATED/RECORD_STATUS_CHANGED on the event record itself are wired
+ * here. Membership changes (invite/remove/role change) are NOT record-service events at all —
+ * EventMember is event-service's own local table, never touches record-service — so they are
+ * structurally invisible to automation-service's Kafka-event-driven model and can't be covered
+ * this way. Likewise EVENT_POST approve/reject fires with `changedBy` = the moderator who acted,
+ * not the post's original author, so a "your post was approved" notification isn't expressible
+ * here either (TemplateRenderer only exposes the current actor, never a record's original
+ * creator) — both would need a data-model change (event-service publishing its own domain
+ * events, or AutomationEventContext carrying the record's createdBy) to become possible.
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class AutomationSeeder implements ApplicationRunner {
+
+    private final TriggerDefinitionRepository triggerRepo;
+
+    @Value("${platform.seeder.enabled:true}")
+    private boolean enabled;
+
+    @Override
+    @Transactional
+    public void run(ApplicationArguments args) {
+        if (!enabled) return;
+        log.info("Running AutomationSeeder...");
+        for (String objectType : List.of("BIRTHDAY_EVENT", "WEDDING_EVENT")) {
+            seedCreatedNotification(objectType);
+            seedStatusChangedNotification(objectType);
+        }
+        log.info("AutomationSeeder complete");
+    }
+
+    private void seedCreatedNotification(String objectType) {
+        String name = "event_created_notification_" + objectType.toLowerCase();
+        if (triggerRepo.findByNameAndOrgIdIsNull(name).isPresent()) return;
+
+        TriggerDefinition trigger = newTrigger(name, "Event Created — " + objectType,
+                "RECORD_CREATED", objectType);
+        trigger.setActions(List.of(sendNotificationAction(trigger,
+                "Event Created", "Your event has been created and is ready for planning.")));
+        triggerRepo.save(trigger);
+        log.info("Seeded trigger: {}", name);
+    }
+
+    private void seedStatusChangedNotification(String objectType) {
+        String name = "event_status_changed_notification_" + objectType.toLowerCase();
+        if (triggerRepo.findByNameAndOrgIdIsNull(name).isPresent()) return;
+
+        TriggerDefinition trigger = newTrigger(name, "Event Status Changed — " + objectType,
+                "RECORD_STATUS_CHANGED", objectType);
+        trigger.setActions(List.of(sendNotificationAction(trigger,
+                "Event Status Updated", "Your event status changed to {{currentStatus}}.")));
+        triggerRepo.save(trigger);
+        log.info("Seeded trigger: {}", name);
+    }
+
+    private TriggerDefinition newTrigger(String name, String label, String eventType, String objectType) {
+        TriggerDefinition trigger = new TriggerDefinition();
+        trigger.setOrgId(null); // platform-wide — matches every org via (t.orgId = :orgId OR t.orgId IS NULL)
+        trigger.setName(name);
+        trigger.setLabel(label);
+        trigger.setEventType(eventType);
+        trigger.setObjectType(objectType);
+        trigger.setActive(true);
+        return trigger;
+    }
+
+    private ActionDefinition sendNotificationAction(TriggerDefinition trigger, String title, String message) {
+        ActionDefinition action = new ActionDefinition();
+        action.setTrigger(trigger);
+        action.setActionType("SEND_NOTIFICATION");
+        action.setExecutionOrder(0);
+        action.setActive(true);
+        Map<String, Object> config = new java.util.HashMap<>();
+        config.put("title", title);
+        config.put("message", message);
+        config.put("channel", "IN_APP");
+        config.put("recipientUserId", "{{changedBy}}");
+        action.setConfig(config);
+        return action;
+    }
+}

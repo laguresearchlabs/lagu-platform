@@ -33,11 +33,24 @@ public class ListingController {
         return ResponseEntity.ok(ApiResponse.ok(snapshotService.searchPublished(objectType, page, size)));
     }
 
+    /**
+     * A PUBLISHED snapshot is genuinely public (that's what "consumer-facing" means for this
+     * endpoint) — anyone may view it. Anything else (UNPUBLISHED/SUSPENDED/a suspended vendor's
+     * data, etc) previously had no gate at all: any authenticated user of any tenant could read
+     * it by recordId. Now only the owning org (or a platform admin) can see a non-published one.
+     */
     @GetMapping("/{recordId}/snapshot")
     public ResponseEntity<ApiResponse<ListingSnapshot>> getSnapshot(@PathVariable UUID recordId) {
         return snapshotService.getByRecordId(recordId)
+                .filter(this::isVisibleToCaller)
                 .map(s -> ResponseEntity.ok(ApiResponse.ok(s)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    private boolean isVisibleToCaller(ListingSnapshot snapshot) {
+        if ("PUBLISHED".equals(snapshot.getStatus())) return true;
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        return ctx != null && (ctx.isPlatformAdmin() || snapshot.getOrgId().equals(ctx.getOrgId()));
     }
 
     // ── Vendor (authenticated) endpoints ─────────────────────────────────────
@@ -56,6 +69,12 @@ public class ListingController {
             @PathVariable UUID recordId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        // Same visibility rule as getSnapshot: availability for a non-published listing (a
+        // suspended vendor's, say) is only the owning org's or an admin's business.
+        boolean visible = snapshotService.getByRecordId(recordId)
+                .map(this::isVisibleToCaller)
+                .orElse(false);
+        if (!visible) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(ApiResponse.ok(snapshotService.getAvailability(recordId, from, to)));
     }
 

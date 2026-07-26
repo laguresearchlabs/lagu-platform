@@ -1,0 +1,87 @@
+package com.lagu.platform.event.api;
+
+import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.event.dto.CreateEventRequest;
+import com.lagu.platform.event.dto.EventResponse;
+import com.lagu.platform.event.dto.LinkVendorRequest;
+import com.lagu.platform.event.dto.TransitionRequest;
+import com.lagu.platform.event.dto.UpdateEventRequest;
+import com.lagu.platform.event.service.EventService;
+import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/events")
+@RequiredArgsConstructor
+public class EventController {
+
+    private final EventService eventService;
+
+    @PostMapping
+    public ResponseEntity<ApiResponse<EventResponse>> create(@Valid @RequestBody CreateEventRequest req) {
+        UUID userId = requireUserId();
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(eventService.create(req, userId)));
+    }
+
+    /** Events the caller is an accepted member of. */
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<EventResponse>>> listMine() {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.listMine(requireUserId())));
+    }
+
+    @GetMapping("/{eventId}")
+    public ResponseEntity<ApiResponse<EventResponse>> get(@PathVariable UUID eventId) {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.get(eventId, requireUserId())));
+    }
+
+    @PutMapping("/{eventId}")
+    public ResponseEntity<ApiResponse<EventResponse>> update(@PathVariable UUID eventId,
+                                                              @Valid @RequestBody UpdateEventRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.update(eventId, requireUserId(), req)));
+    }
+
+    @PostMapping("/{eventId}/transition")
+    public ResponseEntity<ApiResponse<Void>> transition(@PathVariable UUID eventId,
+                                                          @Valid @RequestBody TransitionRequest req) {
+        eventService.requestTransition(eventId, requireUserId(), req);
+        return ResponseEntity.accepted().body(ApiResponse.ok(null));
+    }
+
+    @PostMapping("/{eventId}/vendors")
+    public ResponseEntity<ApiResponse<Void>> linkVendor(@PathVariable UUID eventId,
+                                                         @Valid @RequestBody LinkVendorRequest req) {
+        eventService.linkVendor(eventId, requireUserId(), req);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));
+    }
+
+    @GetMapping("/{eventId}/vendors")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listVendors(@PathVariable UUID eventId) {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.listVendorLinks(eventId, requireUserId())));
+    }
+
+    @DeleteMapping("/{eventId}/vendors/{relationshipName}/{targetRecordId}")
+    public ResponseEntity<Void> unlinkVendor(@PathVariable UUID eventId,
+                                             @PathVariable String relationshipName,
+                                             @PathVariable UUID targetRecordId) {
+        eventService.unlinkVendor(eventId, requireUserId(), relationshipName, targetRecordId);
+        return ResponseEntity.noContent().build();
+    }
+
+    static UUID requireUserId() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        return ctx.getUserId();
+    }
+}

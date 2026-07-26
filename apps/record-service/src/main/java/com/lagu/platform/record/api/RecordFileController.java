@@ -50,12 +50,7 @@ public class RecordFileController {
             @RequestParam("file") MultipartFile file) {
 
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-
-        Record record = (ctx != null && ctx.getOrgId() != null && !ctx.isPlatformAdmin())
-                ? recordRepository.findByIdAndOrgId(id, ctx.getOrgId())
-                        .orElseThrow(() -> new com.lagu.platform.common.exception.ResourceNotFoundException("Record", id.toString()))
-                : recordRepository.findById(id)
-                        .orElseThrow(() -> new com.lagu.platform.common.exception.ResourceNotFoundException("Record", id.toString()));
+        Record record = recordService.findForContext(id, ctx);
 
         // Verify the field is of type FILE or IMAGE
         MetadataClient.ObjectTypeSchemaDto schema = metadataClient.getSchema(record.getObjectType());

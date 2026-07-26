@@ -1,6 +1,7 @@
 package com.lagu.platform.document.config;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,10 +42,17 @@ public class DocumentServiceConfig {
 
     @Bean
     public RestClient imageRestClient(
-            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder) {
+            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder,
+            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
+            String gatewaySharedSecret) {
+        // Was missing X-Platform-Gateway-Secret — the only internal client in the platform that
+        // was. GatewayHeaderFilter treats X-Internal-Service as untrusted (and the request as
+        // unauthenticated) without a matching secret, so image-service would have rejected every
+        // upload here as unauthenticated even once it exists to receive them.
         return loadBalancedRestClientBuilder.clone()
                 .baseUrl("http://image-service")
                 .defaultHeader("X-Internal-Service", "document-service")
+                .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
                 .build();
     }
 }

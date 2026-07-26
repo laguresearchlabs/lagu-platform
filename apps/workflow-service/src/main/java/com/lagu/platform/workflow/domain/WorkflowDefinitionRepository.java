@@ -19,4 +19,8 @@ public interface WorkflowDefinitionRepository extends JpaRepository<WorkflowDefi
     List<WorkflowDefinition> findForObjectType(String objectType, UUID orgId);
 
     List<WorkflowDefinition> findByActiveTrue();
+
+    /** Org-scoped listing — see findForObjectType for the same "own org or platform-level" rule. */
+    @Query("SELECT w FROM WorkflowDefinition w WHERE w.active = true AND (w.orgId = :orgId OR w.orgId IS NULL)")
+    List<WorkflowDefinition> findByActiveTrueAndOrgIdOrPlatformLevel(UUID orgId);
 }

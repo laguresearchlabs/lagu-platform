@@ -94,5 +94,5 @@ public class DocumentTypeRegistry {
         return v == null ? null : v.toString();
     }
 
-    record DocumentConfig(String code, String label, boolean required, boolean expiryTracked) {}
+    public record DocumentConfig(String code, String label, boolean required, boolean expiryTracked) {}
 }

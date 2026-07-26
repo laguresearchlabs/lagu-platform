@@ -5,6 +5,7 @@ import com.lagu.platform.automation.model.AutomationEventContext;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import lombok.RequiredArgsConstructor;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -28,13 +29,14 @@ public class TriggerDefinitionService {
 
     public Page<TriggerDefinition> listForOrg(Pageable pageable) {
         UUID orgId = GatewayHeaderFilter.current().getOrgId();
-        return triggerRepo.findAllForOrg(orgId, pageable);
+        return triggerRepo.findAllForOrg(orgId, pageable).map(this::withActionsInitialized);
     }
 
     public TriggerDefinition getById(UUID id) {
         UUID orgId = GatewayHeaderFilter.current().getOrgId();
-        return triggerRepo.findByIdAndOrg(id, orgId)
+        TriggerDefinition trigger = triggerRepo.findByIdAndOrg(id, orgId)
                 .orElseThrow(() -> new ResourceNotFoundException("TriggerDefinition", id.toString()));
+        return withActionsInitialized(trigger);
     }
 
     public TriggerDefinition create(Map<String, Object> req) {
@@ -43,13 +45,22 @@ public class TriggerDefinitionService {
         TriggerDefinition trigger = new TriggerDefinition();
         trigger.setOrgId(orgId);
         applyFields(trigger, req);
-        return triggerRepo.save(trigger);
+        return withActionsInitialized(triggerRepo.save(trigger));
     }
 
     public TriggerDefinition update(UUID id, Map<String, Object> req) {
         TriggerDefinition trigger = getById(id);
         applyFields(trigger, req);
-        return triggerRepo.save(trigger);
+        return withActionsInitialized(triggerRepo.save(trigger));
+    }
+
+    /** TriggerController returns this entity directly (no DTO layer) and open-in-view is
+     *  intentionally false, so the "actions" collection must be pulled while the transactional
+     *  service method (and its Hibernate session) is still open — otherwise Jackson hits a
+     *  LazyInitializationException serializing the response after the session has closed. */
+    private TriggerDefinition withActionsInitialized(TriggerDefinition trigger) {
+        Hibernate.initialize(trigger.getActions());
+        return trigger;
     }
 
     public void disable(UUID id) {

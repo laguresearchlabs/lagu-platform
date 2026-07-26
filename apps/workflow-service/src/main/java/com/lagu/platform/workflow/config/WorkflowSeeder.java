@@ -84,6 +84,87 @@ public class WorkflowSeeder implements ApplicationRunner {
     private void seedEventLifecycleWorkflows() {
         seedWeddingEventWorkflow();
         seedCorporateEventWorkflow();
+        seedBirthdayEventWorkflow();
+        seedEventPostModerationWorkflow();
+    }
+
+    /**
+     * Post moderation — replaces event-nest posts-service's PostStatus (PUBLISHED/PENDING/
+     * REJECTED). Records always start in DRAFT (record-service forces this for non-admin
+     * callers), so DRAFT is the real initial state here, not PENDING/PUBLISHED directly.
+     * event-service picks "submit_for_approval" or "publish" right after creation depending on
+     * the parent event's post_approval_required flag.
+     */
+    private void seedEventPostModerationWorkflow() {
+        if (!wfRepo.findForObjectType("EVENT_POST", null).isEmpty()) return;
+
+        WorkflowDefinition wf = new WorkflowDefinition();
+        wf.setName("event_post_moderation");
+        wf.setLabel("Event Post Moderation");
+        wf.setObjectType("EVENT_POST");
+        wf.setInitialStatus("DRAFT");
+        wf.setActive(true);
+
+        List<WorkflowState> states = new ArrayList<>();
+        states.add(state(wf, "DRAFT",     "Draft",     "#9E9E9E", false, 0));
+        states.add(state(wf, "PENDING",   "Pending",   "#FF9800", false, 1));
+        states.add(state(wf, "PUBLISHED", "Published", "#4CAF50", false, 2));
+        states.add(state(wf, "REJECTED",  "Rejected",  "#F44336", true,  3));
+        wf.setStates(states);
+
+        // allowedRoles is decorative here too — event-service is the sole caller, always as
+        // SVC_EVENT_SERVICE, and enforces the real check (post author, or event ADMIN/MAINTAINER
+        // for moderation actions) locally before requesting any transition.
+        List<WorkflowTransition> transitions = new ArrayList<>();
+        transitions.add(tx(wf, "DRAFT",   "PENDING",   "submit_for_approval", "Submit for Approval", List.of()));
+        transitions.add(tx(wf, "DRAFT",   "PUBLISHED", "publish",             "Publish",              List.of()));
+        transitions.add(tx(wf, "PENDING", "PUBLISHED", "approve",             "Approve",              List.of("ADMIN","MAINTAINER")));
+        transitions.add(tx(wf, "PENDING", "REJECTED",  "reject",              "Reject",               List.of("ADMIN","MAINTAINER")));
+        wf.setTransitions(transitions);
+
+        wfRepo.save(wf);
+        log.info("Seeded EVENT_POST moderation workflow");
+    }
+
+    // event-service is the sole caller of this workflow's transitions, always authenticating
+    // as SVC_EVENT_SERVICE (which StateMachineEngine.isRoleAllowed always permits regardless of
+    // allowedRoles — see libs/security's internal-service bypass). allowedRoles here is
+    // documentation/defense-in-depth only; real enforcement is event-service's own EventMember
+    // role check before it requests a transition.
+    private void seedBirthdayEventWorkflow() {
+        if (!wfRepo.findForObjectType("BIRTHDAY_EVENT", null).isEmpty()) return;
+
+        WorkflowDefinition wf = new WorkflowDefinition();
+        wf.setName("event_lifecycle_birthday");
+        wf.setLabel("Birthday Event Lifecycle");
+        wf.setObjectType("BIRTHDAY_EVENT");
+        wf.setInitialStatus("PLANNING");
+        wf.setActive(true);
+
+        List<WorkflowState> states = new ArrayList<>();
+        states.add(state(wf, "PLANNING",    "Planning",     "#2196F3", false, 0));
+        states.add(state(wf, "CONFIRMED",   "Confirmed",    "#4CAF50", false, 1));
+        states.add(state(wf, "IN_PROGRESS", "In Progress",  "#FF9800", false, 2));
+        states.add(state(wf, "COMPLETED",   "Completed",    "#00BCD4", true,  3));
+        states.add(state(wf, "CANCELLED",   "Cancelled",    "#F44336", true,  4));
+        states.add(state(wf, "ARCHIVED",    "Archived",     "#607D8B", true,  5));
+        wf.setStates(states);
+
+        List<String> eventRoles = List.of("ADMIN", "MAINTAINER");
+        List<String> adminOnly  = List.of("ADMIN");
+
+        List<WorkflowTransition> transitions = new ArrayList<>();
+        transitions.add(tx(wf, "PLANNING",    "CONFIRMED",   "confirm",  "Confirm Event",   eventRoles));
+        transitions.add(tx(wf, "PLANNING",    "CANCELLED",   "cancel",   "Cancel",          adminOnly));
+        transitions.add(tx(wf, "CONFIRMED",   "IN_PROGRESS", "start",    "Start Event",     eventRoles));
+        transitions.add(tx(wf, "CONFIRMED",   "CANCELLED",   "cancel",   "Cancel",          adminOnly));
+        transitions.add(tx(wf, "IN_PROGRESS", "COMPLETED",   "complete", "Mark Complete",   eventRoles));
+        transitions.add(tx(wf, "COMPLETED",   "ARCHIVED",    "archive",  "Archive",         eventRoles));
+        transitions.add(tx(wf, "CANCELLED",   "ARCHIVED",    "archive",  "Archive",         eventRoles));
+        wf.setTransitions(transitions);
+
+        wfRepo.save(wf);
+        log.info("Seeded BIRTHDAY_EVENT workflow");
     }
 
     private void seedWeddingEventWorkflow() {

@@ -53,8 +53,17 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
         // Org members can read any resource within their org
         if (ctx.isOrgMember() && "READ".equals(action)) return true;
 
-        // ORG_MANAGER and above can create/update/delete/transition records
-        if (ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER") && isRecordAction(action)) return true;
+        // ORG_MANAGER and above can create/update/delete/transition records — and only records:
+        // isRecordAction() checks the action shape, not the resource, so without the explicit
+        // "RECORD".equals(resource) check here this branch would grant ORG_MANAGER the same
+        // CREATE/UPDATE/DELETE on ATTRIBUTE/OBJECT_TYPE/WORKFLOW/TRIGGER/"*" (or any other
+        // resource name) as it does on RECORD — silently defeating every config-admin gate in
+        // schema-registry/automation-service/workflow-service and the resource="*" checks like
+        // AdminReindexController's.
+        if ("RECORD".equals(resource) && ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER")
+                && isRecordAction(action)) {
+            return true;
+        }
 
         return false;
     }
@@ -62,7 +71,8 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
     private boolean isConfigResource(String resource) {
         return switch (resource) {
             case "ATTRIBUTE", "ENTITY", "OBJECT_TYPE", "RELATIONSHIP",
-                 "ROLE", "PERMISSION", "GROUP", "WORKFLOW", "TRIGGER", "*"
+                 "ROLE", "PERMISSION", "GROUP", "WORKFLOW", "TRIGGER",
+                 "TIER_CONFIG", "TIER_RULE", "DOCUMENT_REQUIREMENT", "SEARCH_DEFINITION", "*"
                     -> true;
             default -> false;
         };

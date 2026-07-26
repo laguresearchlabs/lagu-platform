@@ -1,0 +1,224 @@
+package com.lagu.platform.event.service;
+
+import com.lagu.platform.common.exception.ResourceNotFoundException;
+import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.event.domain.Event;
+import com.lagu.platform.event.domain.EventJoinRequest;
+import com.lagu.platform.event.domain.EventJoinRequestRepository;
+import com.lagu.platform.event.domain.EventMember;
+import com.lagu.platform.event.domain.EventMemberRepository;
+import com.lagu.platform.event.domain.EventRepository;
+import com.lagu.platform.event.dto.CreateJoinRequestRequest;
+import com.lagu.platform.event.dto.EventMemberResponse;
+import com.lagu.platform.event.dto.InviteMemberRequest;
+import com.lagu.platform.event.dto.JoinRequestResponse;
+import com.lagu.platform.event.dto.UpdateMemberRoleRequest;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+@Transactional(readOnly = true)
+public class EventMemberService {
+
+    private static final List<String> VALID_ROLES = List.of("ADMIN", "MAINTAINER", "INVITEE");
+
+    private final EventRepository            eventRepo;
+    private final EventMemberRepository      memberRepo;
+    private final EventJoinRequestRepository joinRequestRepo;
+
+    public List<EventMemberResponse> list(UUID eventId, UUID requesterId) {
+        Event event = requireEvent(eventId);
+        requireMember(event, requesterId);
+        return memberRepo.findByOrgId(event.getOrgId()).stream().map(this::toResponse).toList();
+    }
+
+    @Transactional
+    public EventMemberResponse invite(UUID eventId, UUID requesterId, InviteMemberRequest req) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+        validateRole(req.getRole());
+
+        if (memberRepo.existsByOrgIdAndUserId(event.getOrgId(), req.getUserId())) {
+            throw new ValidationException("User is already a member of this event");
+        }
+
+        EventMember member = new EventMember();
+        member.setOrgId(event.getOrgId());
+        member.setUserId(req.getUserId());
+        member.setRole(req.getRole() != null ? req.getRole().toUpperCase() : "INVITEE");
+        member.setStatus("INVITED");
+        member.setGuestNote(req.getGuestNote());
+        member.setInvitedBy(requesterId);
+        memberRepo.save(member);
+
+        log.info("User {} invited {} to event {} as {}", requesterId, req.getUserId(), eventId, member.getRole());
+        return toResponse(member);
+    }
+
+    @Transactional
+    public EventMemberResponse updateRole(UUID eventId, UUID requesterId, UUID targetUserId, UpdateMemberRoleRequest req) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+        validateRole(req.getRole());
+
+        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("EventMember", targetUserId.toString()));
+        member.setRole(req.getRole().toUpperCase());
+        return toResponse(memberRepo.save(member));
+    }
+
+    @Transactional
+    public void remove(UUID eventId, UUID requesterId, UUID targetUserId) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+
+        if (targetUserId.equals(event.getOwnerUserId())) {
+            throw new ValidationException("Cannot remove the event owner");
+        }
+        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("EventMember", targetUserId.toString()));
+        memberRepo.delete(member);
+    }
+
+    @Transactional
+    public EventMemberResponse setMuted(UUID eventId, UUID requesterId, boolean muted) {
+        Event event = requireEvent(eventId);
+        EventMember member = requireMember(event, requesterId); // a user mutes/unmutes themself
+        member.setMuted(muted);
+        return toResponse(memberRepo.save(member));
+    }
+
+    /** The invited user accepts or declines their own INVITED membership row. */
+    @Transactional
+    public EventMemberResponse respondToInvite(UUID eventId, UUID userId, boolean accept) {
+        Event event = requireEvent(eventId);
+        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not invited to this event"));
+        if (!"INVITED".equals(member.getStatus())) {
+            throw new ValidationException("No pending invitation to respond to");
+        }
+        member.setStatus(accept ? "ACCEPTED" : "DECLINED");
+        return toResponse(memberRepo.save(member));
+    }
+
+    // ── join requests ────────────────────────────────────────────────────────
+
+    @Transactional
+    public JoinRequestResponse requestToJoin(UUID eventId, UUID userId, CreateJoinRequestRequest req) {
+        Event event = requireEvent(eventId);
+        if (memberRepo.existsByOrgIdAndUserId(event.getOrgId(), userId)) {
+            throw new ValidationException("Already a member of this event");
+        }
+        joinRequestRepo.findByOrgIdAndUserId(event.getOrgId(), userId).ifPresent(r -> {
+            throw new ValidationException("A join request is already pending for this event");
+        });
+
+        EventJoinRequest jr = new EventJoinRequest();
+        jr.setOrgId(event.getOrgId());
+        jr.setUserId(userId);
+        jr.setRequestedRole(req.getRequestedRole() != null ? req.getRequestedRole().toUpperCase() : "INVITEE");
+        jr.setMessage(req.getMessage());
+        joinRequestRepo.save(jr);
+        return toResponse(jr);
+    }
+
+    public List<JoinRequestResponse> listPending(UUID eventId, UUID requesterId) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+        return joinRequestRepo.findByOrgIdAndStatus(event.getOrgId(), "PENDING").stream()
+                .map(this::toResponse).toList();
+    }
+
+    @Transactional
+    public EventMemberResponse approve(UUID eventId, UUID requesterId, UUID joinRequestId) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+
+        EventJoinRequest jr = joinRequestRepo.findById(joinRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException("JoinRequest", joinRequestId.toString()));
+        if (!jr.getOrgId().equals(event.getOrgId())) {
+            throw new ResourceNotFoundException("JoinRequest", joinRequestId.toString());
+        }
+        jr.setStatus("APPROVED");
+        jr.setReviewedByUserId(requesterId);
+        jr.setReviewedAt(Instant.now());
+        joinRequestRepo.save(jr);
+
+        EventMember member = new EventMember();
+        member.setOrgId(event.getOrgId());
+        member.setUserId(jr.getUserId());
+        member.setRole(jr.getRequestedRole());
+        member.setStatus("ACCEPTED");
+        member.setInvitedBy(requesterId);
+        return toResponse(memberRepo.save(member));
+    }
+
+    @Transactional
+    public void reject(UUID eventId, UUID requesterId, UUID joinRequestId) {
+        Event event = requireEvent(eventId);
+        requireManager(event, requesterId);
+
+        EventJoinRequest jr = joinRequestRepo.findById(joinRequestId)
+                .orElseThrow(() -> new ResourceNotFoundException("JoinRequest", joinRequestId.toString()));
+        if (!jr.getOrgId().equals(event.getOrgId())) {
+            throw new ResourceNotFoundException("JoinRequest", joinRequestId.toString());
+        }
+        jr.setStatus("REJECTED");
+        jr.setReviewedByUserId(requesterId);
+        jr.setReviewedAt(Instant.now());
+        joinRequestRepo.save(jr);
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private void validateRole(String role) {
+        if (role != null && !VALID_ROLES.contains(role.toUpperCase())) {
+            throw new ValidationException("Invalid role: " + role);
+        }
+    }
+
+    private Event requireEvent(UUID eventId) {
+        return eventRepo.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("Event", eventId.toString()));
+    }
+
+    private EventMember requireMember(Event event, UUID userId) {
+        return memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
+    }
+
+    private EventMember requireManager(Event event, UUID userId) {
+        EventMember member = requireMember(event, userId);
+        if (!member.canManage()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ADMIN or MAINTAINER role required");
+        }
+        return member;
+    }
+
+    private EventMemberResponse toResponse(EventMember m) {
+        return EventMemberResponse.builder()
+                .id(m.getId()).userId(m.getUserId()).role(m.getRole()).status(m.getStatus())
+                .guestNote(m.getGuestNote()).muted(m.isMuted()).invitedBy(m.getInvitedBy())
+                .joinedAt(m.getJoinedAt())
+                .build();
+    }
+
+    private JoinRequestResponse toResponse(EventJoinRequest jr) {
+        return JoinRequestResponse.builder()
+                .id(jr.getId()).userId(jr.getUserId()).requestedRole(jr.getRequestedRole())
+                .status(jr.getStatus()).message(jr.getMessage())
+                .reviewedByUserId(jr.getReviewedByUserId()).reviewedAt(jr.getReviewedAt())
+                .createdAt(jr.getCreatedAt())
+                .build();
+    }
+}

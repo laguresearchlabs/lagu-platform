@@ -4,6 +4,9 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.dto.*;
 import com.lagu.platform.schema.service.ListingTypeService;
 import com.lagu.platform.schema.service.SchemaVersionService;
+import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +24,8 @@ public class ListingTypeController {
     private final ListingTypeService listingTypeService;
     private final SchemaVersionService schemaVersionService;
 
+    // Reads stay open (no @RequirePermission): these endpoints are events-ui's dynamic-form
+    // schema source and are fetched without a login token — see schemaService.ts.
     @GetMapping
     public ResponseEntity<ApiResponse<List<ListingTypeResponse>>> list() {
         return ResponseEntity.ok(ApiResponse.ok(listingTypeService.list()));
@@ -44,6 +49,7 @@ public class ListingTypeController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "OBJECT_TYPE", action = "CREATE")
     public ResponseEntity<ApiResponse<ListingTypeResponse>> create(
             @Valid @RequestBody ListingTypeRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -51,6 +57,7 @@ public class ListingTypeController {
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "UPDATE")
     public ResponseEntity<ApiResponse<ListingTypeResponse>> update(
             @PathVariable UUID id,
             @Valid @RequestBody ListingTypeRequest req) {
@@ -58,6 +65,7 @@ public class ListingTypeController {
     }
 
     @PostMapping("/{name}/sections")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "UPDATE")
     public ResponseEntity<ApiResponse<ListingTypeResponse>> addSection(
             @PathVariable String name,
             @Valid @RequestBody ListingTypeRequest.SectionRequest req) {
@@ -65,14 +73,19 @@ public class ListingTypeController {
     }
 
     @PostMapping("/{name}/publish")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "UPDATE")
     public ResponseEntity<ApiResponse<SchemaVersionResponse>> publish(
             @PathVariable String name,
-            @RequestBody PublishSchemaRequest req,
-            @RequestHeader(value = "X-User-Id", defaultValue = "system") String publishedBy) {
+            @RequestBody PublishSchemaRequest req) {
+        // publishedBy comes from the trusted gateway-injected context, not a raw client header —
+        // a caller could otherwise claim to be anyone for this audit field.
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        String publishedBy = (ctx != null && ctx.getUserId() != null) ? ctx.getUserId().toString() : "system";
         return ResponseEntity.ok(ApiResponse.ok(schemaVersionService.publish(name, req, publishedBy)));
     }
 
     @DeleteMapping("/{id}")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
         listingTypeService.deactivate(id);
         return ResponseEntity.ok(ApiResponse.ok(null));

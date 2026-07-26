@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: event-service
+  # "loc" is for local (non-Docker) IDE/bootRun development only. Do not set a
+  # default active profile here — a Docker image must never pick up application-loc.yml's
+  # hardcoded localhost DB/Kafka/Redis config. Activate it explicitly for local runs, e.g.
+  # SPRING_PROFILES_ACTIVE=loc ./gradlew :apps:<name>:bootRun
+  # profiles:
+  #   active: loc
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/lagu_event}
+    username: ${DB_USERNAME:lagu}
+    password: ${DB_PASSWORD:lagu}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: event-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.lagu.platform.*"
+
+server:
+  port: ${SERVER_PORT:8110}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
+management:
+  endpoints.web.exposure.include: health,info,prometheus
+  endpoint.health.show-details: always

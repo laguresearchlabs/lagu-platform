@@ -36,6 +36,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         if (!enabled) return;
         log.info("Running SchemaRegistrySeeder...");
         seedFields();
+        seedArrayFields();
         seedFieldGroups();
         seedListingTypes();
         seedTierConfigurations();
@@ -155,7 +156,56 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("bank_name",         "Bank Name",         FieldType.TEXT,        false, false, null),
             // Tax info
             field("tax_registration",  "Tax Registration",  FieldType.TEXT,        false, false, null),
-            field("service_tax_no",    "Service Tax No.",   FieldType.TEXT,        false, false, null)
+            field("service_tax_no",    "Service Tax No.",   FieldType.TEXT,        false, false, null),
+            // Event (birthday/wedding) shared — schedule, visibility, style
+            field("start_datetime",    "Start",             FieldType.DATETIME,    true,  true,  null),
+            field("end_datetime",      "End",               FieldType.DATETIME,    true,  false, null),
+            field("timezone",          "Timezone",          FieldType.TEXT,        false, false, null),
+            field("visibility",        "Visibility",        FieldType.ENUM,        false, false,
+                List.of("PRIVATE","UNLISTED","PUBLIC")),
+            field("is_virtual",        "Virtual Event",     FieldType.BOOLEAN,     false, false, null),
+            field("virtual_meeting_provider","Meeting Platform",FieldType.ENUM,    false, false,
+                List.of("ZOOM","GOOGLE_MEET","MICROSOFT_TEAMS","OTHER")),
+            field("virtual_meeting_url","Meeting URL",      FieldType.URL,         false, false, null),
+            field("post_approval_required","Posts Require Approval",FieldType.BOOLEAN,false,false,null),
+            field("event_theme",       "Theme",             FieldType.TEXT,        false, false, null),
+            field("dresscode",         "Dress Code",        FieldType.TEXT,        false, false, null),
+            field("menu_preference",   "Menu Preference",   FieldType.LONG_TEXT,   false, false, null),
+            field("rsvp_deadline",     "RSVP Deadline",     FieldType.DATE,        false, false, null),
+            // Birthday event specific
+            field("birthday_person_name","Birthday Person", FieldType.TEXT,        true,  true,  null),
+            field("birthday_person_age","Age",              FieldType.NUMBER,      false, false, null),
+            field("birthday_person_gender","Gender",        FieldType.ENUM,        false, false,
+                List.of("MALE","FEMALE","NON_BINARY","PREFER_NOT_TO_SAY")),
+            field("cake_preference",   "Cake Preference",   FieldType.TEXT,        false, false, null),
+            // Matches event-nest's GiftPreference/PartyStyle enums exactly (source of truth for
+            // the birthday-service data this is migrating from) — not a freely-chosen taxonomy.
+            field("gift_preference",   "Gift Preference",   FieldType.ENUM,        false, false,
+                List.of("ANY","WISH_LIST_ONLY","CASH_PREFERRED","NO_GIFTS","CHARITY_DONATION")),
+            field("party_style",       "Party Style",       FieldType.ENUM,        false, false,
+                List.of("INDOOR","OUTDOOR","RESTAURANT","HOME","VENUE")),
+            field("guest_count_adults","Adult Guests",      FieldType.NUMBER,      false, false, null),
+            field("guest_count_children","Child Guests",    FieldType.NUMBER,      false, false, null),
+            field("surprise_mode",     "Surprise Mode",     FieldType.BOOLEAN,     false, false, null),
+            // Wedding event party details (event_date/venue_ref/etc reused from wedding_details)
+            field("bride_name",        "Bride's Name",      FieldType.TEXT,        false, true,  null),
+            field("groom_name",        "Groom's Name",      FieldType.TEXT,        false, true,  null),
+            // Matches event-nest's CeremonyType enum exactly, same rationale as gift_preference above.
+            field("ceremony_type",     "Ceremony Type",     FieldType.ENUM,        false, false,
+                List.of("CIVIL","RELIGIOUS","DESTINATION","CULTURAL","INTIMATE")),
+            field("reception_style",   "Reception Style",   FieldType.TEXT,        false, false, null),
+            field("wedding_website_url","Wedding Website",  FieldType.URL,         false, false, null),
+            // Event social feed (posts/comments/reports) — replaces event-nest's posts-service
+            field("post_content",       "Content",           FieldType.LONG_TEXT,   true,  false, null),
+            field("post_image_ids",     "Images",            FieldType.JSON,        false, false, null),
+            field("post_pinned",        "Pinned",            FieldType.BOOLEAN,     false, false, null),
+            field("post_locked",        "Comments Locked",   FieldType.BOOLEAN,     false, false, null),
+            field("comment_content",    "Content",           FieldType.TEXT,        true,  false, null),
+            // Matches event-nest's PostReportReason enum exactly.
+            field("report_reason",      "Reason",            FieldType.ENUM,        true,  false,
+                List.of("SPAM","INAPPROPRIATE","OFF_TOPIC","OTHER")),
+            field("report_details",     "Details",           FieldType.LONG_TEXT,   false, false, null),
+            field("reported_post_id",   "Reported Post",     FieldType.ENTITY_REFERENCE,true,false,null)
         );
 
         int seeded = 0;
@@ -174,6 +224,57 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             }
         }
         if (seeded > 0) log.info("Seeded {} platform field definitions", seeded);
+    }
+
+    // ── 1b. Array (repeating structure) field definitions ────────────────────
+    // itemSchema entries use the keys "name" (String), "type" (FieldType name), "required"
+    // (boolean, optional) — see MetadataClient.FieldSchemaDto.itemSchema / RecordValidator.
+
+    private void seedArrayFields() {
+        record ArraySpec(String name, String label, List<Map<String, Object>> itemSchema) {}
+
+        List<ArraySpec> specs = List.of(
+            new ArraySpec("wish_list", "Wish List", List.of(
+                itemField("item", "TEXT", true),
+                itemField("priority", "ENUM", false),
+                itemField("purchased", "BOOLEAN", false),
+                itemField("purchasedBy", "TEXT", false))),
+            new ArraySpec("planning_tasks", "Planning Tasks", List.of(
+                itemField("title", "TEXT", true),
+                itemField("assignee", "TEXT", false),
+                itemField("dueDate", "DATE", false),
+                itemField("status", "ENUM", false))),
+            new ArraySpec("budget_items", "Budget Items", List.of(
+                itemField("category", "TEXT", false),
+                itemField("description", "TEXT", false),
+                itemField("estimatedCost", "DECIMAL", false),
+                itemField("actualCost", "DECIMAL", false))),
+            new ArraySpec("schedule_activities", "Schedule", List.of(
+                itemField("time", "TIME", false),
+                itemField("activity", "TEXT", true),
+                itemField("durationMinutes", "NUMBER", false)))
+        );
+
+        int seeded = 0;
+        for (ArraySpec s : specs) {
+            if (fieldRepo.findByNameAndOrgIdIsNull(s.name()).isEmpty()) {
+                FieldDefinition def = new FieldDefinition();
+                def.setName(s.name());
+                def.setLabel(s.label());
+                def.setFieldType(FieldType.ARRAY_OF_OBJECTS);
+                def.setRequired(false);
+                def.setSearchable(false);
+                def.setFilterable(false);
+                def.setItemSchema(s.itemSchema());
+                fieldRepo.save(def);
+                seeded++;
+            }
+        }
+        if (seeded > 0) log.info("Seeded {} array field definitions", seeded);
+    }
+
+    private Map<String, Object> itemField(String name, String type, boolean required) {
+        return Map.of("name", name, "type", type, "required", required);
     }
 
     // ── 2. Field Groups ───────────────────────────────────────────────────────
@@ -240,6 +341,48 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         ensureFieldGroup("bank_info",           "Bank Details",
             List.of(fge("account_number",0,false), fge("ifsc_code",1,false),
                     fge("account_holder",2,false), fge("bank_name",3,false)));
+
+        // Event (birthday/wedding) shared groups
+        ensureFieldGroup("event_schedule",      "Schedule",
+            List.of(fge("start_datetime",0,true), fge("end_datetime",1,true), fge("timezone",2,false)));
+
+        ensureFieldGroup("event_visibility",    "Visibility",
+            List.of(fge("visibility",0,false), fge("is_virtual",1,false),
+                    fge("virtual_meeting_provider",2,false), fge("virtual_meeting_url",3,false),
+                    fge("post_approval_required",4,false)));
+
+        ensureFieldGroup("event_style_preferences","Style & Preferences",
+            List.of(fge("event_theme",0,false), fge("dresscode",1,false),
+                    fge("menu_preference",2,false), fge("rsvp_deadline",3,false)));
+
+        ensureFieldGroup("event_planning_tools","Planning Tools",
+            List.of(fge("planning_tasks",0,false), fge("budget_items",1,false),
+                    fge("schedule_activities",2,false)));
+
+        ensureFieldGroup("wish_list",           "Wish List",
+            List.of(fge("wish_list",0,false)));
+
+        ensureFieldGroup("birthday_details",    "Birthday Details",
+            List.of(fge("birthday_person_name",0,true), fge("birthday_person_age",1,false),
+                    fge("birthday_person_gender",2,false), fge("cake_preference",3,false),
+                    fge("gift_preference",4,false), fge("party_style",5,false),
+                    fge("guest_count_adults",6,false), fge("guest_count_children",7,false),
+                    fge("surprise_mode",8,false)));
+
+        ensureFieldGroup("wedding_party_details","Wedding Party",
+            List.of(fge("bride_name",0,false), fge("groom_name",1,false),
+                    fge("ceremony_type",2,false), fge("reception_style",3,false),
+                    fge("wedding_website_url",4,false)));
+
+        ensureFieldGroup("event_post_details",  "Post",
+            List.of(fge("post_content",0,true), fge("post_image_ids",1,false),
+                    fge("post_pinned",2,false), fge("post_locked",3,false)));
+
+        ensureFieldGroup("event_comment_details","Comment",
+            List.of(fge("comment_content",0,true)));
+
+        ensureFieldGroup("event_post_report_details","Report",
+            List.of(fge("reported_post_id",0,true), fge("report_reason",1,true), fge("report_details",2,false)));
     }
 
     // ── 3. Listing Types ──────────────────────────────────────────────────────
@@ -292,13 +435,24 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("media",           "Portfolio",     4)
             ), true, true);
 
+        // Events are private, membership-gated planning objects, not discoverable marketplace
+        // listings — publishable=false/consumerSearchable=false, matching VENDOR's pattern
+        // rather than VENUE's. (WEDDING_EVENT/CORPORATE_EVENT were previously seeded (true,true);
+        // ensureListingType() is a no-op once a row exists, so this only takes effect on a fresh
+        // seed — see plan note on manual migration for already-seeded environments.)
         ensureListingType("WEDDING_EVENT",  "Wedding Event",  "End-to-end wedding event management",
             List.of(
-                sec("basic_details",   "Event Overview", 0),
-                sec("wedding_details", "Event Details",  1),
-                sec("contact_details", "Contact",        2),
-                sec("media",           "Media",          3)
-            ), true, true);
+                sec("basic_details",           "Event Overview",   0),
+                sec("event_schedule",          "Schedule",         1),
+                sec("wedding_party_details",   "Wedding Party",    2),
+                sec("wedding_details",         "Event Details",    3),
+                sec("event_visibility",        "Visibility",       4),
+                sec("event_style_preferences", "Style",            5),
+                sec("event_planning_tools",    "Planning Tools",   6),
+                sec("contact_details",         "Contact",          7),
+                sec("address",                 "Address",          8),
+                sec("media",                   "Media",            9)
+            ), false, false);
 
         ensureListingType("CORPORATE_EVENT","Corporate Event","Corporate and business event management",
             List.of(
@@ -306,7 +460,29 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("corporate_details", "Corporate Details", 1),
                 sec("contact_details",   "Contact",           2),
                 sec("media",             "Media",             3)
-            ), true, true);
+            ), false, false);
+
+        ensureListingType("BIRTHDAY_EVENT", "Birthday Event", "Birthday party planning and management",
+            List.of(
+                sec("basic_details",           "Event Overview",   0),
+                sec("event_schedule",          "Schedule",         1),
+                sec("birthday_details",        "Birthday Details", 2),
+                sec("event_visibility",        "Visibility",       3),
+                sec("event_style_preferences", "Style",            4),
+                sec("wish_list",               "Wish List",        5),
+                sec("event_planning_tools",    "Planning Tools",   6),
+                sec("address",                 "Address",          7),
+                sec("media",                   "Media",            8)
+            ), false, false);
+
+        ensureListingType("EVENT_POST", "Event Post", "A post in an event's social feed",
+            List.of(sec("event_post_details", "Post", 0)), false, false);
+
+        ensureListingType("EVENT_COMMENT", "Event Comment", "A comment on an event post",
+            List.of(sec("event_comment_details", "Comment", 0)), false, false);
+
+        ensureListingType("EVENT_POST_REPORT", "Event Post Report", "A user report against an event post",
+            List.of(sec("event_post_report_details", "Report", 0)), false, false);
 
         ensureListingType("VENDOR",         "Vendor",         "Vendor business profile and KYC information",
             List.of(
@@ -625,7 +801,13 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             new RelDefSpec("EVENT_PHOTOGRAPHERS",  "Event Photographers",  "WEDDING_EVENT", "PHOTOGRAPHER",  "MANY_TO_MANY", false, false),
             new RelDefSpec("EVENT_CATERERS",       "Event Caterers",       "WEDDING_EVENT", "CATERER",       "MANY_TO_MANY", false, false),
             new RelDefSpec("EVENT_DECORATORS",     "Event Decorators",     "WEDDING_EVENT", "DECORATOR",     "MANY_TO_MANY", false, false),
-            new RelDefSpec("EVENT_MAKEUP_ARTISTS", "Event Makeup Artists", "WEDDING_EVENT", "MAKEUP_ARTIST", "MANY_TO_MANY", false, false)
+            new RelDefSpec("EVENT_MAKEUP_ARTISTS", "Event Makeup Artists", "WEDDING_EVENT", "MAKEUP_ARTIST", "MANY_TO_MANY", false, false),
+
+            new RelDefSpec("BIRTHDAY_EVENT_VENUE",          "Event Venue",          "BIRTHDAY_EVENT", "VENUE",         "ONE_TO_ONE",   false, false),
+            new RelDefSpec("BIRTHDAY_EVENT_PHOTOGRAPHERS",  "Event Photographers",  "BIRTHDAY_EVENT", "PHOTOGRAPHER",  "MANY_TO_MANY", false, false),
+            new RelDefSpec("BIRTHDAY_EVENT_CATERERS",       "Event Caterers",       "BIRTHDAY_EVENT", "CATERER",       "MANY_TO_MANY", false, false),
+            new RelDefSpec("BIRTHDAY_EVENT_DECORATORS",     "Event Decorators",     "BIRTHDAY_EVENT", "DECORATOR",     "MANY_TO_MANY", false, false),
+            new RelDefSpec("BIRTHDAY_EVENT_MAKEUP_ARTISTS", "Event Makeup Artists", "BIRTHDAY_EVENT", "MAKEUP_ARTIST", "MANY_TO_MANY", false, false)
         );
 
         int seeded = 0;

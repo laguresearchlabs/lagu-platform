@@ -33,6 +33,12 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+        // The JVM's default timezone on this host resolves to the deprecated "Asia/Calcutta"
+        // alias; pgjdbc forwards it as the connection's TimeZone startup parameter, which the
+        // postgres:16 Testcontainers image rejects outright ("invalid value for parameter
+        // TimeZone"). Forcing UTC here fixes every Testcontainers-based test in every service,
+        // not just the one that happened to surface it first.
+        systemProperty("user.timezone", "UTC")
     }
 
     // application.yml no longer defaults spring.profiles.active to "loc" (that would make

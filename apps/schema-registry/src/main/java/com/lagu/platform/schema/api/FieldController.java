@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.dto.FieldRequest;
 import com.lagu.platform.schema.dto.FieldResponse;
 import com.lagu.platform.schema.service.FieldService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,9 @@ public class FieldController {
 
     private final FieldService fieldService;
 
+    // Reads stay open (no @RequirePermission): schema-registry's field definitions drive
+    // events-ui's dynamic form rendering, which fetches them without a login token — see
+    // ListingTypeController's schema endpoints for the same pattern.
     @GetMapping
     public ResponseEntity<ApiResponse<List<FieldResponse>>> list() {
         return ResponseEntity.ok(ApiResponse.ok(fieldService.listPlatformLevel()));
@@ -31,12 +35,14 @@ public class FieldController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "ATTRIBUTE", action = "CREATE")
     public ResponseEntity<ApiResponse<FieldResponse>> create(@Valid @RequestBody FieldRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(fieldService.create(req)));
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(resource = "ATTRIBUTE", action = "UPDATE")
     public ResponseEntity<ApiResponse<FieldResponse>> update(
             @PathVariable UUID id,
             @Valid @RequestBody FieldRequest req) {
@@ -44,6 +50,7 @@ public class FieldController {
     }
 
     @DeleteMapping("/{id}")
+    @RequirePermission(resource = "ATTRIBUTE", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
         fieldService.deactivate(id);
         return ResponseEntity.ok(ApiResponse.ok(null));

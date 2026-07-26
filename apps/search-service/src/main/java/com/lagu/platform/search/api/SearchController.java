@@ -1,6 +1,8 @@
 package com.lagu.platform.search.api;
 
 import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.search.dto.SearchRequest;
 import com.lagu.platform.search.dto.SearchResponse;
 import com.lagu.platform.search.service.SearchService;
@@ -10,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -28,8 +31,7 @@ public class SearchController {
     @Operation(summary = "Search records with full-text query, filters, sort, and facets")
     @RequirePermission(resource = "RECORD", action = "READ")
     public SearchResponse search(@RequestBody @Valid SearchRequest req) throws IOException {
-        String orgId = GatewayHeaderFilter.current().getOrgId().toString();
-        return searchService.search(req, orgId);
+        return searchService.search(req, requireOrgId().toString());
     }
 
     /**
@@ -51,7 +53,21 @@ public class SearchController {
             @RequestParam String objectType,
             @RequestParam String field,
             @RequestParam String prefix) throws IOException {
-        String orgId = GatewayHeaderFilter.current().getOrgId().toString();
-        return suggestService.suggest(objectType, field, prefix, orgId);
+        return suggestService.suggest(objectType, field, prefix, requireOrgId().toString());
+    }
+
+    /**
+     * Both org-scoped endpoints previously did {@code GatewayHeaderFilter.current().getOrgId()
+     * .toString()} unguarded — an internal SVC_* caller (permitted READ with no X-Org-Id header;
+     * see DefaultPermissionEvaluator) hit a raw NullPointerException (500) instead of a clean
+     * error identifying the actual problem.
+     */
+    private java.util.UUID requireOrgId() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getOrgId() == null) {
+            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+                    "An organization context is required for this search", HttpStatus.FORBIDDEN);
+        }
+        return ctx.getOrgId();
     }
 }

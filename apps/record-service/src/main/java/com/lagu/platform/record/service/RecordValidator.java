@@ -8,11 +8,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 @Component
 @RequiredArgsConstructor
@@ -69,8 +75,20 @@ public class RecordValidator {
             case "ENUM"     -> validateEnum(field, value, errors);
             case "MULTI_SELECT" -> validateMultiSelect(field, value, errors);
             case "BOOLEAN"  -> validateBoolean(field, value, errors);
-            case "DATE", "DATETIME", "TIME" -> {} // format validated client-side
-            default -> {} // FILE, IMAGE, ENTITY_REFERENCE, USER_REFERENCE, JSON, GEOLOCATION, ADDRESS, CURRENCY
+            case "ARRAY_OF_OBJECTS" -> validateArrayOfObjects(field, value, errors);
+            case "DATE"     -> validateDate(field, value, errors);
+            case "DATETIME" -> validateDateTime(field, value, errors);
+            case "TIME"     -> validateTime(field, value, errors);
+            case "ENTITY_REFERENCE", "USER_REFERENCE" -> validateReference(field, value, errors);
+            case "FILE", "IMAGE" -> validateFileOrImage(field, value, errors);
+            case "CURRENCY" -> validateCurrency(field, value, errors);
+            case "GEOLOCATION", "ADDRESS" -> validateStructured(field, value, errors);
+            // JSON is deliberately unvalidated beyond being valid JSON (already guaranteed by
+            // request deserialization) — an arbitrary nested payload is the entire point of the
+            // type, so there is no further structural check to apply generically here.
+            case "JSON" -> {}
+            default -> log.warn("No validator registered for field type '{}' on field '{}' — value stored unchecked",
+                    type, field.name());
         }
     }
 
@@ -82,12 +100,26 @@ public class RecordValidator {
         double num = ((Number) value).doubleValue();
         Map<String, Object> rules = field.validation();
         if (rules != null) {
-            if (rules.containsKey("min") && num < ((Number) rules.get("min")).doubleValue()) {
-                errors.add(field.name() + ": must be >= " + rules.get("min"));
-            }
-            if (rules.containsKey("max") && num > ((Number) rules.get("max")).doubleValue()) {
-                errors.add(field.name() + ": must be <= " + rules.get("max"));
-            }
+            asNumber(rules.get("min")).ifPresentOrElse(
+                    min -> { if (num < min.doubleValue()) errors.add(field.name() + ": must be >= " + min); },
+                    () -> warnIfPresent(rules, "min", field.name()));
+            asNumber(rules.get("max")).ifPresentOrElse(
+                    max -> { if (num > max.doubleValue()) errors.add(field.name() + ": must be <= " + max); },
+                    () -> warnIfPresent(rules, "max", field.name()));
+        }
+    }
+
+    /** Safely narrows a schema-author-supplied validationRules value to a Number, rather than an
+     *  unchecked cast that would throw ClassCastException (500) if it were mis-typed — e.g. a
+     *  string "10" instead of the number 10 in a field's rules JSON. */
+    private java.util.Optional<Number> asNumber(Object raw) {
+        return raw instanceof Number n ? java.util.Optional.of(n) : java.util.Optional.empty();
+    }
+
+    private void warnIfPresent(Map<String, Object> rules, String key, String fieldName) {
+        if (rules.containsKey(key)) {
+            log.warn("validationRules.{} for field '{}' is not a number ({}) — rule ignored",
+                    key, fieldName, rules.get(key));
         }
     }
 
@@ -104,13 +136,26 @@ public class RecordValidator {
         }
         Map<String, Object> rules = field.validation();
         if (rules != null) {
-            if (rules.containsKey("maxLength") && str.length() > ((Number) rules.get("maxLength")).intValue()) {
-                errors.add(field.name() + ": exceeds max length of " + rules.get("maxLength"));
-            }
-            if (rules.containsKey("pattern")) {
-                Pattern p = Pattern.compile((String) rules.get("pattern"));
-                if (!p.matcher(str).matches()) {
-                    errors.add(field.name() + ": does not match required pattern");
+            asNumber(rules.get("maxLength")).ifPresentOrElse(
+                    maxLen -> { if (str.length() > maxLen.intValue()) {
+                        errors.add(field.name() + ": exceeds max length of " + maxLen);
+                    } },
+                    () -> warnIfPresent(rules, "maxLength", field.name()));
+            if (rules.get("pattern") instanceof String patternStr) {
+                try {
+                    // A schema-author-supplied regex used to run uncached and uncaught here — a
+                    // malformed pattern threw PatternSyntaxException straight to a 500, and a
+                    // catastrophically-backtracking one could hang the request thread. Catching
+                    // the compile error turns the first into a clean validation error; the
+                    // matcher itself is still not run under a timeout, so a hostile pattern can
+                    // still be slow — full ReDoS protection would need matching on a bounded
+                    // executor, which is a larger change than this fix.
+                    if (!Pattern.compile(patternStr).matcher(str).matches()) {
+                        errors.add(field.name() + ": does not match required pattern");
+                    }
+                } catch (PatternSyntaxException e) {
+                    log.warn("validationRules.pattern for field '{}' is not a valid regex: {}", field.name(), e.getMessage());
+                    errors.add(field.name() + ": field is misconfigured (invalid validation pattern)");
                 }
             }
         }
@@ -167,7 +212,151 @@ public class RecordValidator {
         }
     }
 
+    private void validateDate(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof String str)) {
+            errors.add(field.name() + ": must be a string in ISO date format (yyyy-MM-dd)");
+            return;
+        }
+        try {
+            LocalDate.parse(str);
+        } catch (DateTimeParseException e) {
+            errors.add(field.name() + ": must be a valid ISO date (yyyy-MM-dd)");
+        }
+    }
+
+    private void validateDateTime(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof String str)) {
+            errors.add(field.name() + ": must be a string in ISO date-time format");
+            return;
+        }
+        // Accepts both an offset/zoned instant (2026-01-01T10:00:00Z) and a bare local
+        // date-time (2026-01-01T10:00:00) — events-ui's DynamicSchemaForm sends the latter for
+        // a plain <input type="datetime-local">, which OffsetDateTime.parse alone would reject.
+        try {
+            OffsetDateTime.parse(str);
+        } catch (DateTimeParseException e1) {
+            try {
+                java.time.LocalDateTime.parse(str);
+            } catch (DateTimeParseException e2) {
+                errors.add(field.name() + ": must be a valid ISO date-time");
+            }
+        }
+    }
+
+    private void validateTime(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof String str)) {
+            errors.add(field.name() + ": must be a string in ISO time format (HH:mm or HH:mm:ss)");
+            return;
+        }
+        try {
+            LocalTime.parse(str);
+        } catch (DateTimeParseException e) {
+            errors.add(field.name() + ": must be a valid ISO time (HH:mm or HH:mm:ss)");
+        }
+    }
+
+    /** ENTITY_REFERENCE/USER_REFERENCE: checked structurally (must be a real record/user id
+     *  shape) but not for existence — that would require a live cross-service lookup on every
+     *  field of every record write, which RecordValidator deliberately does not do. A malformed
+     *  reference like "not-a-uuid" is rejected here; a well-formed but dangling UUID is not
+     *  caught until whatever consumes the reference (workflow/search/UI) resolves it. */
+    private void validateReference(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof String str)) {
+            errors.add(field.name() + ": must be a record id (string)");
+            return;
+        }
+        try {
+            UUID.fromString(str);
+        } catch (IllegalArgumentException e) {
+            errors.add(field.name() + ": must be a valid UUID");
+        }
+    }
+
+    /** FILE/IMAGE fields hold the URL RecordFileController wrote back after upload — not the
+     *  raw multipart payload, which never travels through this JSON validation path. */
+    private void validateFileOrImage(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof String str) || str.isBlank()) {
+            errors.add(field.name() + ": must be a non-empty file/image URL");
+        }
+    }
+
+    /** Matches search-service's IndexMappingBuilder, which indexes CURRENCY as a plain double —
+     *  this is a bare numeric amount, not a {amount, currencyCode} structure (no such convention
+     *  exists anywhere else in the platform to validate against). */
+    private void validateCurrency(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof Number)) {
+            errors.add(field.name() + ": must be a number");
+        }
+    }
+
+    /** GEOLOCATION/ADDRESS have no established field-shape convention anywhere else in the
+     *  platform (frontend falls back to a plain text input for both). Enforcing a specific set
+     *  of sub-keys here would be inventing a contract nothing else agrees to, so this only
+     *  checks that the value is object-shaped rather than a bare scalar. */
+    private void validateStructured(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof Map)) {
+            errors.add(field.name() + ": must be an object");
+        }
+    }
+
+    /**
+     * Shallow structural check for ARRAY_OF_OBJECTS fields: value must be a List of Maps, and
+     * each item is checked against field.itemSchema() entries (keys: "name", "type", optional
+     * "required"). Nested ARRAY_OF_OBJECTS-within-items is not supported — one level deep only.
+     */
+    private void validateArrayOfObjects(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof List<?> items)) {
+            errors.add(field.name() + ": must be an array");
+            return;
+        }
+        List<Map<String, Object>> itemSchema = field.itemSchema();
+        if (itemSchema == null || itemSchema.isEmpty()) return;
+
+        for (int i = 0; i < items.size(); i++) {
+            Object item = items.get(i);
+            if (!(item instanceof Map<?, ?> itemMap)) {
+                errors.add(field.name() + "[" + i + "]: must be an object");
+                continue;
+            }
+            for (Map<String, Object> subField : itemSchema) {
+                String subName = String.valueOf(subField.get("name"));
+                Object subValue = itemMap.get(subName);
+                boolean subRequired = Boolean.TRUE.equals(subField.get("required"));
+                if (subRequired && (subValue == null || isBlank(subValue))) {
+                    errors.add(field.name() + "[" + i + "]." + subName + ": field is required");
+                    continue;
+                }
+                if (subValue == null) continue;
+
+                Object subType = subField.get("type");
+                if (subType != null) {
+                    validateSubFieldType(field.name() + "[" + i + "]." + subName, String.valueOf(subType), subValue, errors);
+                }
+            }
+        }
+    }
+
+    private void validateSubFieldType(String path, String type, Object value, List<String> errors) {
+        switch (type) {
+            case "NUMBER", "DECIMAL" -> {
+                if (!(value instanceof Number)) errors.add(path + ": must be a number");
+            }
+            case "BOOLEAN" -> {
+                if (!(value instanceof Boolean)) errors.add(path + ": must be true or false");
+            }
+            case "TEXT", "LONG_TEXT" -> {
+                if (!(value instanceof String)) errors.add(path + ": must be a string");
+            }
+            default -> {} // other types checked loosely / client-side, consistent with top-level validateByType
+        }
+    }
+
     private boolean isBlank(Object value) {
-        return value instanceof String str && str.isBlank();
+        // A required MULTI_SELECT/ARRAY_OF_OBJECTS field previously passed the required check
+        // with an empty [] — only String was ever considered "blank".
+        if (value instanceof String str) return str.isBlank();
+        if (value instanceof java.util.Collection<?> coll) return coll.isEmpty();
+        if (value instanceof Map<?, ?> map) return map.isEmpty();
+        return false;
     }
 }

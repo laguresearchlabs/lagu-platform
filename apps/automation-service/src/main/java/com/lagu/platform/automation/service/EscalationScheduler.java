@@ -22,6 +22,7 @@ public class EscalationScheduler {
     private final TriggerDefinitionRepository triggerRepo;
     private final ConditionEvaluator          conditionEvaluator;
     private final AutomationExecutor          executor;
+    private final RunawayLoopGuard            loopGuard;
 
     @Value("${platform.automation.approval-timeout-minutes:60}")
     private int approvalTimeoutMinutes;
@@ -41,8 +42,19 @@ public class EscalationScheduler {
 
             var triggers = triggerRepo.findActiveByEvent("APPROVAL_TIMEOUT", ctx.getOrgId());
             for (var trigger : triggers) {
-                if (conditionEvaluator.matches(trigger.getConditions(), ctx)) {
+                if (!conditionEvaluator.matches(trigger.getConditions(), ctx)) continue;
+                // Previously called executor.execute() with no guard at all, unlike
+                // PlatformEventConsumer's dispatch() — an approval left pending for hours would
+                // generate one escalation notification per scheduler tick per replica, forever.
+                if (loopGuard.isRunawayLoop(trigger, ctx)) continue;
+                try {
                     executor.execute(trigger, ctx);
+                } catch (Exception e) {
+                    // execute() now throws on failure so the Kafka path can retry/DLT — this
+                    // caller isn't Kafka-driven, so one failing escalation must not abort the
+                    // rest of this tick's batch; log and move on to the next timed-out approval.
+                    log.error("Escalation action failed for trigger {} on record {}: {}",
+                            trigger.getId(), ctx.getRecordId(), e.getMessage(), e);
                 }
             }
         }

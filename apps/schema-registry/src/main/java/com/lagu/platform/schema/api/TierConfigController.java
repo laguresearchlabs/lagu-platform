@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.domain.TierConfiguration;
 import com.lagu.platform.schema.dto.TierConfigRequest;
 import com.lagu.platform.schema.service.TierConfigService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class TierConfigController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "TIER_CONFIG", action = "CREATE")
     public ResponseEntity<ApiResponse<TierConfiguration>> create(
             @Valid @RequestBody TierConfigRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -40,6 +42,7 @@ public class TierConfigController {
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(resource = "TIER_CONFIG", action = "UPDATE")
     public ResponseEntity<ApiResponse<TierConfiguration>> update(
             @PathVariable UUID id,
             @Valid @RequestBody TierConfigRequest req) {

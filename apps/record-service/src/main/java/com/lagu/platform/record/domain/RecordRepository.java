@@ -13,6 +13,15 @@ public interface RecordRepository extends JpaRepository<Record, UUID> {
     @Query("SELECT r FROM Record r WHERE r.orgId = :orgId AND r.id = :id AND r.status != 'DELETED'")
     Optional<Record> findByIdAndOrgId(UUID id, UUID orgId);
 
+    /**
+     * Org-unscoped lookup for cross-org relationship targets (e.g. an event record in its own
+     * org linking to a vendor's VENUE/PHOTOGRAPHER/etc. record in a different org). Callers must
+     * apply their own visibility gating (see RelationshipService.create) — this alone is not an
+     * authorization check.
+     */
+    @Query("SELECT r FROM Record r WHERE r.id = :id AND r.status != 'DELETED'")
+    Optional<Record> findByIdExcludingDeleted(UUID id);
+
     Page<Record> findByOrgIdAndObjectTypeAndStatusNot(UUID orgId, String objectType,
                                                        String excludeStatus, Pageable pageable);
 

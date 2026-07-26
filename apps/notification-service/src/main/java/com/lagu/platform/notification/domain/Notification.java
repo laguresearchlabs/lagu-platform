@@ -47,6 +47,11 @@ public class Notification {
     @Column(name = "trigger_name")
     private String triggerName;
 
+    /** Dedup key — the originating AutomationEvent's eventId. Null for notifications created
+     *  directly via the REST API rather than by an automation. See NotificationDeliveryService. */
+    @Column(name = "source_event_id")
+    private UUID sourceEventId;
+
     @Column(name = "is_read", nullable = false)
     private boolean read = false;
 

@@ -1,5 +1,6 @@
 package com.lagu.platform.workflow.service;
 
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.workflow.domain.*;
@@ -7,6 +8,7 @@ import com.lagu.platform.workflow.dto.*;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,11 +25,17 @@ public class WorkflowDefinitionService {
     private final ApprovalDefinitionRepository   approvalDefRepo;
 
     public List<WorkflowDefinitionResponse> listAll() {
-        return wfRepo.findByActiveTrue().stream().map(w -> toResponse(w, false)).toList();
+        PlatformSecurityContext ctx = currentContext();
+        var definitions = ctx.isPlatformAdmin()
+                ? wfRepo.findByActiveTrue()
+                : wfRepo.findByActiveTrueAndOrgIdOrPlatformLevel(requireOrgId(ctx));
+        return definitions.stream().map(w -> toResponse(w, false)).toList();
     }
 
     public WorkflowDefinitionResponse getById(UUID id) {
-        return toResponse(findById(id), true);
+        WorkflowDefinition wf = findById(id);
+        requireReadable(wf);
+        return toResponse(wf, true);
     }
 
     @Transactional
@@ -45,6 +53,7 @@ public class WorkflowDefinitionService {
     @Transactional
     public WorkflowDefinitionResponse addState(UUID wfId, WorkflowStateRequest req) {
         WorkflowDefinition wf = findById(wfId);
+        requireWritable(wf);
         WorkflowState state = new WorkflowState();
         state.setWorkflow(wf);
         state.setName(req.getName().toUpperCase());
@@ -60,6 +69,7 @@ public class WorkflowDefinitionService {
     @Transactional
     public WorkflowDefinitionResponse addTransition(UUID wfId, WorkflowTransitionRequest req) {
         WorkflowDefinition wf = findById(wfId);
+        requireWritable(wf);
 
         boolean fromExists = wf.getStates().stream()
                 .anyMatch(s -> s.getName().equals(req.getFromState().toUpperCase()));
@@ -91,6 +101,43 @@ public class WorkflowDefinitionService {
     WorkflowDefinition findById(UUID id) {
         return wfRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("WorkflowDefinition", id.toString()));
+    }
+
+    /** Without this, a tenant's own CONFIG_ADMIN could pass a *different* tenant's workflow id
+     *  to addState/addTransition and silently modify it — findById alone has no notion of "whose
+     *  workflow is this". canWriteOrgScoped still lets CONFIG_ADMIN modify the platform-level
+     *  (orgId null) workflow, same as before — that's its documented, intended role. */
+    private void requireWritable(WorkflowDefinition wf) {
+        PlatformSecurityContext ctx = currentContext();
+        if (!ctx.isPlatformAdmin() && !ctx.canWriteOrgScoped(wf.getOrgId())) {
+            throw new PlatformException("FORBIDDEN",
+                    "Not permitted to modify this workflow definition", HttpStatus.FORBIDDEN);
+        }
+    }
+
+    private void requireReadable(WorkflowDefinition wf) {
+        PlatformSecurityContext ctx = currentContext();
+        if (!ctx.canReadOrgScoped(wf.getOrgId())) {
+            // 404, not 403 — a workflow definition's existence shouldn't be disclosed to a
+            // caller who can't see it.
+            throw new ResourceNotFoundException("WorkflowDefinition", wf.getId().toString());
+        }
+    }
+
+    private PlatformSecurityContext currentContext() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null) {
+            throw new PlatformException("AUTH_REQUIRED", "Authentication required", HttpStatus.UNAUTHORIZED);
+        }
+        return ctx;
+    }
+
+    private UUID requireOrgId(PlatformSecurityContext ctx) {
+        if (ctx.getOrgId() == null) {
+            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+                    "An organization context is required", HttpStatus.FORBIDDEN);
+        }
+        return ctx.getOrgId();
     }
 
     WorkflowDefinitionResponse toResponse(WorkflowDefinition w, boolean detail) {

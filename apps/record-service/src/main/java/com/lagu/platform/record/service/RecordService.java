@@ -160,8 +160,13 @@ public class RecordService {
      * Loads a record enforcing tenancy: everyone except PLATFORM_ADMIN must carry an org
      * context and only sees records of that org. A caller without an org gets 403, never an
      * unscoped lookup — an org-less-but-authenticated user must not reach other tenants' data.
+     *
+     * <p>This is the one place tenancy is decided for record reads — every other class that
+     * needs a record by id (RecordFileController, RecordVerificationService, RelationshipService)
+     * must call this rather than re-deriving the same check, since a hand-rolled copy is exactly
+     * how the org-scoping gaps in those classes happened.
      */
-    private Record findForContext(UUID id, PlatformSecurityContext ctx) {
+    public Record findForContext(UUID id, PlatformSecurityContext ctx) {
         if (ctx == null) {
             throw new PlatformException("AUTH_REQUIRED", "Authentication required",
                     HttpStatus.UNAUTHORIZED);

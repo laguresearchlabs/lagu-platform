@@ -48,7 +48,7 @@ public class MetadataClient {
                         f.searchable(), f.filterable(),
                         false,  // sortable — not exposed by schema-registry's schema endpoint; unused by current callers
                         false,  // unique — same
-                        f.enumValues(), f.validationRules(), null))
+                        f.enumValues(), f.validationRules(), null, f.itemSchema()))
                 .toList();
         return new ObjectTypeSchemaDto(response.getData().listingType(), fields);
     }
@@ -83,7 +83,10 @@ public class MetadataClient {
             boolean unique,
             List<String> enumValues,
             Map<String, Object> validation,
-            Map<String, Object> config
+            Map<String, Object> config,
+            // For ARRAY_OF_OBJECTS fields: each entry describes one sub-field of an item using
+            // the keys "name" (String), "type" (FieldType name), "required" (boolean, optional).
+            List<Map<String, Object>> itemSchema
     ) {}
 
     public record RelationshipDefinitionDto(

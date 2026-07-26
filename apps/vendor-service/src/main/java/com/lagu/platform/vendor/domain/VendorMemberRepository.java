@@ -10,4 +10,5 @@ public interface VendorMemberRepository extends JpaRepository<VendorMember, UUID
     List<VendorMember> findByOrgId(UUID orgId);
     Optional<VendorMember> findByOrgIdAndUserId(UUID orgId, UUID userId);
     boolean existsByOrgIdAndUserId(UUID orgId, UUID userId);
+    List<VendorMember> findByUserId(UUID userId);
 }

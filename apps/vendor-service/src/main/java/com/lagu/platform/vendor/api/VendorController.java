@@ -5,7 +5,6 @@ import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.vendor.dto.*;
 import com.lagu.platform.vendor.service.VendorService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,45 +21,49 @@ public class VendorController {
 
     private final VendorService vendorService;
 
-    /** Vendor self-registration — creates org, VENDOR record, and binds user to org. */
+    /**
+     * Registers a new vendor org. A user may register/belong to more than one — vendor orgs
+     * are never written back to the caller's IAM platformOrgId, see VendorService.register.
+     */
     @PostMapping("/register")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> register(
-            @Valid @RequestBody RegisterVendorRequest req,
-            HttpServletRequest httpRequest) {
+    public ResponseEntity<ApiResponse<VendorProfileResponse>> register(@Valid @RequestBody RegisterVendorRequest req) {
         PlatformSecurityContext ctx = requireContext();
-        String bearer = httpRequest.getHeader("Authorization");
-        VendorProfileResponse profile = vendorService.register(req, ctx.getUserId(), bearer);
+        VendorProfileResponse profile = vendorService.register(req, ctx.getUserId());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(profile));
     }
 
-    /** Authenticated vendor views their own profile. */
-    @GetMapping("/me")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> myProfile() {
+    /** All vendor orgs the caller is a member of (owner or invited). */
+    @GetMapping("/mine")
+    public ResponseEntity<ApiResponse<List<VendorProfileResponse>>> listMine() {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.getMyProfile(ctx.getUserId())));
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.listMine(ctx.getUserId())));
     }
 
-    /** Vendor submits profile for admin review. */
-    @PostMapping("/me/submit")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> submit() {
+    /** Any member of the vendor org may view it; config/platform admins may view any. */
+    @GetMapping("/{orgId}")
+    public ResponseEntity<ApiResponse<VendorProfileResponse>> getByOrgId(@PathVariable UUID orgId) {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.submit(ctx.getOrgId())));
+        VendorProfileResponse profile = ctx.isConfigAdmin()
+                ? vendorService.getByOrgIdAsAdmin(orgId)
+                : vendorService.getByOrgId(orgId, ctx.getUserId());
+        return ResponseEntity.ok(ApiResponse.ok(profile));
     }
 
-    /** Recompute KYC readiness for the authenticated vendor's org. */
-    @GetMapping("/me/kyc")
-    public ResponseEntity<ApiResponse<KycChecklistDto>> kycStatus() {
+    /** Vendor org's OWNER/ADMIN submits the profile for admin review. */
+    @PostMapping("/{orgId}/submit")
+    public ResponseEntity<ApiResponse<VendorProfileResponse>> submit(@PathVariable UUID orgId) {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.computeKyc(ctx.getOrgId())));
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.submit(orgId, ctx.getUserId())));
+    }
+
+    /** Recompute KYC readiness for a vendor org the caller is a member of. */
+    @GetMapping("/{orgId}/kyc")
+    public ResponseEntity<ApiResponse<KycChecklistDto>> kycStatus(@PathVariable UUID orgId) {
+        PlatformSecurityContext ctx = requireContext();
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.computeKyc(orgId, ctx.getUserId())));
     }
 
     // ── Admin endpoints ──────────────────────────────────────────────────────
-
-    @GetMapping("/{orgId}")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> getByOrgId(@PathVariable UUID orgId) {
-        requireAdmin();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.getByOrgId(orgId)));
-    }
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<VendorProfileResponse>>> list(
@@ -79,7 +82,7 @@ public class VendorController {
                 vendorService.updateStatus(orgId, req.status(), ctx.getUserId())));
     }
 
-    private PlatformSecurityContext requireContext() {
+    static PlatformSecurityContext requireContext() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         if (ctx == null || ctx.getUserId() == null) {
             throw new com.lagu.platform.common.exception.ValidationException("Authentication required");

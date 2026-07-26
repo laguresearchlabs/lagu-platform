@@ -1,13 +1,14 @@
 package com.lagu.platform.vendor.service;
 
-import com.lagu.platform.vendor.client.IamServiceClient;
 import com.lagu.platform.vendor.client.RecordServiceClient;
 import com.lagu.platform.vendor.domain.*;
 import com.lagu.platform.vendor.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.*;
@@ -22,14 +23,9 @@ public class VendorService {
     private final VendorMemberRepository      memberRepo;
     private final VendorKycChecklistRepository kycRepo;
     private final RecordServiceClient         recordClient;
-    private final IamServiceClient            iamClient;
 
     @Transactional
-    public VendorProfileResponse register(RegisterVendorRequest req, UUID userId, String bearerToken) {
-        if (profileRepo.findByOwnerUserId(userId).isPresent()) {
-            throw new IllegalStateException("User already has a vendor profile");
-        }
-
+    public VendorProfileResponse register(RegisterVendorRequest req, UUID userId) {
         UUID orgId = UUID.randomUUID();
 
         // Create the canonical VENDOR record in record-service
@@ -64,23 +60,34 @@ public class VendorService {
         kyc.setBusinessNameFilled(req.getBusinessName() != null && !req.getBusinessName().isBlank());
         kycRepo.save(kyc);
 
-        // Associate the user with the new org in IAM so the JWT starts carrying this orgId
-        iamClient.associateOrgWithUser(userId, orgId, bearerToken);
-
+        // Deliberately NOT associated with the user's IAM platformOrgId: a user can be a
+        // VendorMember of many vendor orgs at once (see VendorMember's org_id+user_id unique
+        // pair), but IAM's platformOrgId is a single scalar — writing it here would silently
+        // evict the user from acting as any other vendor org they already belong to. Tenancy
+        // for vendor-service's own endpoints is resolved from VendorMember, never from the
+        // caller's JWT orgId claim.
         log.info("Registered vendor org={} for user={}", orgId, userId);
         return toResponse(profile, null);
     }
 
-    public VendorProfileResponse getMyProfile(UUID userId) {
-        VendorProfile profile = profileRepo.findByOwnerUserId(userId)
-                .orElseThrow(() -> new NoSuchElementException("No vendor profile for user " + userId));
-        VendorKycChecklist kyc = kycRepo.findById(profile.getOrgId()).orElse(null);
+    /** All vendor orgs the caller belongs to (owner or invited member), not just owned ones. */
+    public List<VendorProfileResponse> listMine(UUID userId) {
+        return memberRepo.findByUserId(userId).stream()
+                .map(m -> profileRepo.findByOrgId(m.getOrgId()).map(p -> toResponse(p, null)))
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    public VendorProfileResponse getByOrgId(UUID orgId, UUID requesterId) {
+        VendorProfile profile = requireProfile(orgId);
+        requireMember(profile, requesterId);
+        VendorKycChecklist kyc = kycRepo.findById(orgId).orElse(null);
         return toResponse(profile, kyc);
     }
 
-    public VendorProfileResponse getByOrgId(UUID orgId) {
-        VendorProfile profile = profileRepo.findByOrgId(orgId)
-                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + orgId));
+    /** Cross-org admin lookup — bypasses membership entirely, callers must check isConfigAdmin(). */
+    public VendorProfileResponse getByOrgIdAsAdmin(UUID orgId) {
+        VendorProfile profile = requireProfile(orgId);
         VendorKycChecklist kyc = kycRepo.findById(orgId).orElse(null);
         return toResponse(profile, kyc);
     }
@@ -104,14 +111,16 @@ public class VendorService {
     }
 
     @Transactional
-    public VendorProfileResponse submit(UUID orgId) {
-        return updateStatus(orgId, "SUBMITTED", orgId);
+    public VendorProfileResponse submit(UUID orgId, UUID requesterId) {
+        VendorProfile profile = requireProfile(orgId);
+        requireManager(profile, requesterId);
+        return updateStatus(orgId, "SUBMITTED", requesterId);
     }
 
     @Transactional
-    public KycChecklistDto computeKyc(UUID orgId) {
-        VendorProfile profile = profileRepo.findByOrgId(orgId)
-                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + orgId));
+    public KycChecklistDto computeKyc(UUID orgId, UUID requesterId) {
+        VendorProfile profile = requireProfile(orgId);
+        requireMember(profile, requesterId);
 
         // Fetch document status from document-service via record-service client
         Map<String, Object> docStatus = recordClient.getDocumentStatus(orgId, profile.getOwnerUserId());
@@ -140,6 +149,24 @@ public class VendorService {
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private VendorProfile requireProfile(UUID orgId) {
+        return profileRepo.findByOrgId(orgId)
+                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + orgId));
+    }
+
+    private VendorMember requireMember(VendorProfile profile, UUID userId) {
+        return memberRepo.findByOrgIdAndUserId(profile.getOrgId(), userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this vendor org"));
+    }
+
+    private VendorMember requireManager(VendorProfile profile, UUID userId) {
+        VendorMember member = requireMember(profile, userId);
+        if (!"OWNER".equals(member.getRole()) && !"ADMIN".equals(member.getRole())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "OWNER or ADMIN role required");
+        }
+        return member;
+    }
 
     private boolean hasVerifiedDoc(Map<String, Object> docStatus, String code) {
         if (docStatus == null) return false;

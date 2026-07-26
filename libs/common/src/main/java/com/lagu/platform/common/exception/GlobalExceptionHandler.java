@@ -56,6 +56,27 @@ public class GlobalExceptionHandler {
                         .build()));
     }
 
+    /**
+     * Without this, RequirePermissionAspect's ResponseStatusException(FORBIDDEN) (and any other
+     * ResponseStatusException thrown anywhere in the platform) fell through to the generic
+     * Exception handler below and came back as 500 INTERNAL_ERROR — every permission denial was
+     * indistinguishable from a genuine server crash to callers and to monitoring alike.
+     */
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ApiResponse<Void>> handleResponseStatus(
+            org.springframework.web.server.ResponseStatusException ex) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
+        if (status.is5xxServerError()) {
+            log.error("Unhandled ResponseStatusException", ex);
+        }
+        return ResponseEntity.status(status)
+                .body(ApiResponse.fail(ApiError.builder()
+                        .code(status.name())
+                        .message(ex.getReason() != null ? ex.getReason() : status.getReasonPhrase())
+                        .build()));
+    }
+
     @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
     public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(
             org.springframework.orm.ObjectOptimisticLockingFailureException ex) {

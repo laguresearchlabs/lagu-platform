@@ -44,8 +44,15 @@ public class ListingSnapshot {
     @Column(name = "published_at", nullable = false)
     private Instant publishedAt = Instant.now();
 
+    // Real optimistic locking — this used to be a plain hand-incremented column
+    // ("snap.setVersion(snap.getVersion() + 1)"), which does nothing to prevent two concurrent
+    // read-modify-write cycles (e.g. a workflow transition racing a manual re-publish) from
+    // losing one's update, or two inserts racing on the record_id unique constraint. @Version
+    // makes Hibernate check-and-increment atomically and throw OptimisticLockException on a
+    // genuine conflict instead of silently overwriting.
+    @Version
     @Column(nullable = false)
-    private long version = 1;
+    private long version = 0;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();

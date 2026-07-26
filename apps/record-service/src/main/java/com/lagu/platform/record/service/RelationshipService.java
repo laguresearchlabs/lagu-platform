@@ -46,7 +46,11 @@ public class RelationshipService {
         Record source = recordRepo.findByIdAndOrgId(sourceId, orgId)
                 .orElseThrow(() -> new ResourceNotFoundException("Record", sourceId.toString()));
 
-        Record target = recordRepo.findByIdAndOrgId(req.getTargetRecordId(), orgId)
+        // Target lookup is intentionally org-unscoped: relationships routinely cross org
+        // boundaries (e.g. an event record linking to a vendor's VENUE/PHOTOGRAPHER record in a
+        // different org — every event and every vendor mints its own throwaway org). Visibility
+        // into the target is gated below instead of by org membership.
+        Record target = recordRepo.findByIdExcludingDeleted(req.getTargetRecordId())
                 .orElseThrow(() -> new ResourceNotFoundException("Record", req.getTargetRecordId().toString()));
 
         if (source.getId().equals(target.getId())) {
@@ -57,6 +61,16 @@ public class RelationshipService {
 
         // Validate against definition when available
         MetadataClient.RelationshipDefinitionDto relDef = metadataClient.getRelationshipDefinition(relName);
+        boolean crossOrg = !target.getOrgId().equals(orgId);
+        if (crossOrg && relDef == null) {
+            // Cross-org linking is only ever allowed for a known, schema-registry-declared
+            // relationship — never a blind link to an arbitrary record in another org.
+            throw new ValidationException("Relationship '" + relName + "' is not a recognized cross-org relationship type");
+        }
+        if (crossOrg && "DRAFT".equalsIgnoreCase(target.getStatus())) {
+            // Don't let a record in one org discover/link to another org's private draft record.
+            throw new ResourceNotFoundException("Record", req.getTargetRecordId().toString());
+        }
         if (relDef != null) {
             if (!source.getObjectType().equalsIgnoreCase(relDef.sourceObjectType())) {
                 throw new ValidationException("Source record type '" + source.getObjectType()
@@ -105,7 +119,9 @@ public class RelationshipService {
     }
 
     private RelationshipResponse toResponse(RecordRelationship rel) {
-        Record target = recordRepo.findById(rel.getTargetRecordId()).orElse(null);
+        // Excludes soft-deleted targets — a relationship pointing at a since-deleted record must
+        // stop surfacing that record's data, not keep echoing it back forever.
+        Record target = recordRepo.findByIdExcludingDeleted(rel.getTargetRecordId()).orElse(null);
         return RelationshipResponse.builder()
                 .id(rel.getId())
                 .relationshipName(rel.getRelationshipName())

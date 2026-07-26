@@ -12,9 +12,19 @@ import java.util.UUID;
 
 public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefinition, UUID> {
 
-    /** Returns active triggers matching eventType for the org (including platform-level where org_id IS NULL). */
+    /**
+     * Returns active triggers matching eventType for the org (including platform-level where
+     * org_id IS NULL) — with actions eagerly fetched (LEFT JOIN FETCH + DISTINCT to avoid
+     * duplicate rows per action). PlatformEventConsumer/EscalationScheduler pass these straight
+     * into AutomationExecutor.execute(), which iterates trigger.getActions() outside any
+     * transaction of its own; without eager fetch here, that access threw
+     * LazyInitializationException every single time a trigger fired (open-in-view is
+     * intentionally false — see TriggerDefinitionService for the same fix applied to the
+     * read/write API paths).
+     */
     @Query("""
-        SELECT t FROM TriggerDefinition t
+        SELECT DISTINCT t FROM TriggerDefinition t
+        LEFT JOIN FETCH t.actions
         WHERE t.isActive = true
           AND t.eventType = :eventType
           AND (t.orgId = :orgId OR t.orgId IS NULL)
@@ -27,7 +37,8 @@ public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefini
             @Param("objectType") String objectType);
 
     @Query("""
-        SELECT t FROM TriggerDefinition t
+        SELECT DISTINCT t FROM TriggerDefinition t
+        LEFT JOIN FETCH t.actions
         WHERE t.isActive = true
           AND t.eventType = :eventType
           AND (t.orgId = :orgId OR t.orgId IS NULL)
@@ -41,4 +52,6 @@ public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefini
 
     @Query("SELECT t FROM TriggerDefinition t WHERE t.id = :id AND (t.orgId = :orgId OR t.orgId IS NULL)")
     Optional<TriggerDefinition> findByIdAndOrg(@Param("id") UUID id, @Param("orgId") UUID orgId);
+
+    Optional<TriggerDefinition> findByNameAndOrgIdIsNull(String name);
 }

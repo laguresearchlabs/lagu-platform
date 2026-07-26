@@ -173,13 +173,29 @@ public class DocumentService {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * DefaultPermissionEvaluator's DOCUMENT:READ grant is role-shaped only ("any authenticated
+     * user can read", per its own comment, intending "read their own") — it has no way to know
+     * whose document a given id belongs to, so ownership has to be enforced here. This
+     * previously scoped by org only, meaning any employee could read any colleague's identity
+     * document (Aadhaar/passport scan) and its signed fileUrl within the same org. Reviewers
+     * (ORG_MANAGER/ORG_OWNER — the same roles DOCUMENT:REVIEW already requires) still need to
+     * see everyone's documents to do their job, so they're exempted the same way an admin is.
+     */
     private Document findForContext(UUID id, PlatformSecurityContext ctx) {
         if (ctx.isPlatformAdmin()) {
             return repository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Document", id.toString()));
         }
-        return repository.findByIdAndOrgId(id, ctx.getOrgId())
+        Document doc = repository.findByIdAndOrgId(id, ctx.getOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("Document", id.toString()));
+        boolean isOwner = doc.getUserId() != null && doc.getUserId().equals(ctx.getUserId());
+        boolean isReviewer = ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER");
+        if (!isOwner && !isReviewer) {
+            // 404, not 403 — a colleague's document shouldn't be disclosed to exist by id.
+            throw new ResourceNotFoundException("Document", id.toString());
+        }
+        return doc;
     }
 
     private PlatformSecurityContext requireContext() {
@@ -218,6 +234,45 @@ public class DocumentService {
             throw new com.lagu.platform.common.exception.ValidationException(
                     "Unsupported file extension: " + extension + ". Allowed: " + ALLOWED_EXTENSIONS);
         }
+
+        // Content-Type and extension are both entirely client-supplied — a renamed executable
+        // sent with Content-Type: application/pdf and a .pdf name passed both checks above with
+        // nothing to actually verify the bytes are a PDF. A magic-byte sniff closes that.
+        if (!matchesDeclaredType(file, contentType.toLowerCase())) {
+            throw new com.lagu.platform.common.exception.ValidationException(
+                    "File content does not match its declared type (" + contentType + ")");
+        }
+    }
+
+    private static final Map<String, byte[]> MAGIC_BYTES = Map.of(
+            "application/pdf", new byte[]{'%', 'P', 'D', 'F'},
+            "image/png",       new byte[]{(byte) 0x89, 'P', 'N', 'G'},
+            "image/jpeg",      new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}
+    );
+
+    /** WEBP has no fixed single signature check here (RIFF....WEBP, non-contiguous) — matched
+     *  separately rather than forcing it into the simple prefix table above. */
+    private boolean matchesDeclaredType(MultipartFile file, String contentType) {
+        byte[] header;
+        try (var in = file.getInputStream()) {
+            header = in.readNBytes(12);
+        } catch (java.io.IOException e) {
+            throw new com.lagu.platform.common.exception.ValidationException("Could not read uploaded file");
+        }
+
+        if ("image/webp".equals(contentType)) {
+            return header.length >= 12
+                    && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
+                    && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P';
+        }
+
+        byte[] expected = MAGIC_BYTES.get(contentType);
+        if (expected == null) return false; // unreachable given ALLOWED_CONTENT_TYPES, fail closed
+        if (header.length < expected.length) return false;
+        for (int i = 0; i < expected.length; i++) {
+            if (header[i] != expected[i]) return false;
+        }
+        return true;
     }
 
     private String extensionOf(String fileName) {

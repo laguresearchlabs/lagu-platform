@@ -6,7 +6,7 @@ spring:
   # hardcoded localhost DB/Kafka/Redis config. Activate it explicitly for local runs, e.g.
   # SPRING_PROFILES_ACTIVE=loc ./gradlew :apps:<name>:bootRun
   # profiles:
-  #   active: loc
+  #  active: loc
 
   datasource:
     url: ${SPRING_DATASOURCE_URL}

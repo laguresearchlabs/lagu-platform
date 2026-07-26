@@ -1,6 +1,7 @@
 package com.lagu.platform.listing.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
+import com.lagu.platform.listing.client.SchemaRegistryClient;
 import com.lagu.platform.listing.event.ListingEventPublisher;
 import com.lagu.platform.listing.domain.ListingSnapshot;
 import com.lagu.platform.listing.domain.ListingSnapshotRepository;
@@ -23,12 +24,10 @@ import java.util.*;
 @Transactional(readOnly = true)
 public class ListingSnapshotService {
 
-    private static final Set<String> VENDOR_LISTING_TYPES = Set.of(
-            "VENUE", "PHOTOGRAPHER", "CATERER", "DECORATOR", "MAKEUP_ARTIST");
-
     private final ListingSnapshotRepository snapshotRepo;
     private final ListingAvailabilityRepository availabilityRepo;
     private final ListingEventPublisher eventPublisher;
+    private final SchemaRegistryClient schemaRegistryClient;
 
     /**
      * Called by the Kafka consumer when a record transitions to ACTIVE/APPROVED, and by the
@@ -39,8 +38,16 @@ public class ListingSnapshotService {
     public ListingSnapshot publishSnapshot(UUID recordId, UUID orgId, String objectType,
                                            Map<String, Object> recordData,
                                            String verificationTier) {
-        if (!VENDOR_LISTING_TYPES.contains(objectType.toUpperCase())) {
-            log.debug("Skipping snapshot for non-listing objectType: {}", objectType);
+        // Source of truth is schema-registry's own ListingTypeDefinition.publishable/
+        // consumerSearchable flags — previously a hardcoded allowlist here, which drifted out
+        // of sync (event record types were never added to it despite having their own
+        // workflows). consumerSearchable was fetched but never actually checked: a listing type
+        // marked publishable=true but consumerSearchable=false was snapshotted and pushed into
+        // the public consumer search index anyway.
+        var flags = schemaRegistryClient.getFlags(objectType);
+        if (!flags.publishable() || !flags.consumerSearchable()) {
+            log.debug("Skipping snapshot for objectType {} (publishable={}, consumerSearchable={})",
+                    objectType, flags.publishable(), flags.consumerSearchable());
             return null;
         }
 
@@ -57,7 +64,7 @@ public class ListingSnapshotService {
         snap.setVerificationTier(tier);
         snap.setSearchBoost(boostForTier(tier));
         snap.setPublishedAt(Instant.now());
-        snap.setVersion(snap.getVersion() + 1);
+        // version is now a real @Version column — Hibernate increments it, not us.
 
         ListingSnapshot saved = snapshotRepo.save(snap);
         eventPublisher.publishPublished(saved);
@@ -79,7 +86,28 @@ public class ListingSnapshotService {
         };
     }
 
-    /** Depublish when listing is suspended/archived. */
+    /**
+     * Refreshes a snapshot's data when the source record is edited without a workflow
+     * transition (e.g. a vendor updates their listing's price/address/phone while it's already
+     * ACTIVE). Previously nothing consumed RecordEvent at all in this service — only
+     * WorkflowEvent TRANSITIONED — so an edit to an already-published listing never reached the
+     * snapshot table or the public search index; the marketplace served stale data indefinitely.
+     * A no-op if the record has never been published (nothing to refresh) or is currently
+     * UNPUBLISHED/SUSPENDED/etc — an edit must not silently re-publish something the workflow
+     * took down.
+     */
+    @Transactional
+    public void refreshSnapshotData(UUID recordId, Map<String, Object> recordData) {
+        snapshotRepo.findByRecordId(recordId).ifPresent(snap -> {
+            if (!"PUBLISHED".equals(snap.getStatus())) return;
+            snap.setData(recordData != null ? recordData : Map.of());
+            ListingSnapshot saved = snapshotRepo.save(snap);
+            eventPublisher.publishPublished(saved);
+            log.info("Refreshed snapshot data for record {}", recordId);
+        });
+    }
+
+    /** Depublish when listing is suspended/archived/deleted. */
     @Transactional
     public void unpublishSnapshot(UUID recordId) {
         snapshotRepo.findByRecordId(recordId).ifPresent(snap -> {

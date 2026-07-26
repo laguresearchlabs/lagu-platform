@@ -9,4 +9,7 @@ import java.util.UUID;
 public interface TransitionHistoryRepository extends JpaRepository<TransitionHistory, UUID> {
 
     Page<TransitionHistory> findByRecordIdOrderByTransitionedAtDesc(UUID recordId, Pageable pageable);
+
+    Page<TransitionHistory> findByRecordIdAndOrgIdOrderByTransitionedAtDesc(
+            UUID recordId, UUID orgId, Pageable pageable);
 }

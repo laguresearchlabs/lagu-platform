@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.domain.DocumentRequirement;
 import com.lagu.platform.schema.dto.DocumentRequirementRequest;
 import com.lagu.platform.schema.service.DocumentRequirementService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -38,6 +39,7 @@ public class DocumentRequirementController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "DOCUMENT_REQUIREMENT", action = "CREATE")
     public ResponseEntity<ApiResponse<DocumentRequirement>> create(
             @Valid @RequestBody DocumentRequirementRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -45,6 +47,7 @@ public class DocumentRequirementController {
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(resource = "DOCUMENT_REQUIREMENT", action = "UPDATE")
     public ResponseEntity<ApiResponse<DocumentRequirement>> update(
             @PathVariable UUID id,
             @Valid @RequestBody DocumentRequirementRequest req) {
@@ -52,11 +55,13 @@ public class DocumentRequirementController {
     }
 
     @PatchMapping("/{id}/active")
+    @RequirePermission(resource = "DOCUMENT_REQUIREMENT", action = "UPDATE")
     public ResponseEntity<ApiResponse<DocumentRequirement>> toggleActive(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(documentRequirementService.toggleActive(id)));
     }
 
     @DeleteMapping("/{id}")
+    @RequirePermission(resource = "DOCUMENT_REQUIREMENT", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
         documentRequirementService.delete(id);
         return ResponseEntity.ok(ApiResponse.ok(null));

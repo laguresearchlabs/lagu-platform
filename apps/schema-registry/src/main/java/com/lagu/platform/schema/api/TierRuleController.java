@@ -6,6 +6,7 @@ import com.lagu.platform.schema.dto.TierRuleRequest;
 import com.lagu.platform.schema.dto.TierRuleResponse;
 import com.lagu.platform.schema.service.TierCheckService;
 import com.lagu.platform.schema.service.TierRuleService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -36,6 +37,7 @@ public class TierRuleController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "TIER_RULE", action = "CREATE")
     public ResponseEntity<ApiResponse<TierRuleResponse>> create(
             @Valid @RequestBody TierRuleRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -43,11 +45,13 @@ public class TierRuleController {
     }
 
     @PatchMapping("/{id}/active")
+    @RequirePermission(resource = "TIER_RULE", action = "UPDATE")
     public ResponseEntity<ApiResponse<TierRuleResponse>> toggleActive(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(tierRuleService.toggleActive(id)));
     }
 
     @DeleteMapping("/{id}")
+    @RequirePermission(resource = "TIER_RULE", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
         tierRuleService.delete(id);
         return ResponseEntity.ok(ApiResponse.ok(null));

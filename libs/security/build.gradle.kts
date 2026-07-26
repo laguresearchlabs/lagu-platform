@@ -9,4 +9,7 @@ dependencies {
     api(rootProject.libs.aspectjweaver)
     compileOnly(rootProject.libs.lombok)
     annotationProcessor(rootProject.libs.lombok)
+
+    testImplementation(rootProject.libs.spring.boot.test)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

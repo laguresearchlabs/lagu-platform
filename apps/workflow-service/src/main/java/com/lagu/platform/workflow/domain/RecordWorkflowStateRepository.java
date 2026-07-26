@@ -10,5 +10,9 @@ public interface RecordWorkflowStateRepository extends JpaRepository<RecordWorkf
 
     Optional<RecordWorkflowState> findByRecordId(UUID recordId);
 
+    /** Tenancy-scoped lookup — see StateMachineEngine for why the unscoped variant above must
+     *  never be used to answer a request driven by caller-supplied identity. */
+    Optional<RecordWorkflowState> findByRecordIdAndOrgId(UUID recordId, UUID orgId);
+
     List<RecordWorkflowState> findByOrgIdAndObjectType(UUID orgId, String objectType);
 }

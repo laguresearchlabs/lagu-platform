@@ -2,14 +2,17 @@ package com.lagu.platform.workflow.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.dto.PageResult;
+import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
+import com.lagu.platform.security.RequirePermission;
 import com.lagu.platform.workflow.domain.TransitionHistory;
 import com.lagu.platform.workflow.domain.TransitionHistoryRepository;
 import com.lagu.platform.workflow.dto.RecordWorkflowStatusResponse;
 import com.lagu.platform.workflow.service.StateMachineEngine;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,20 +28,46 @@ public class RecordWorkflowController {
     private final TransitionHistoryRepository histRepo;
 
     @GetMapping
+    @RequirePermission(resource = "RECORD", action = "READ")
     public ResponseEntity<ApiResponse<RecordWorkflowStatusResponse>> getStatus(
             @PathVariable UUID recordId) {
-        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        Set<String> roles = ctx != null ? ctx.getRoles() : Set.of();
-        return ResponseEntity.ok(ApiResponse.ok(engine.getStatus(recordId, roles)));
+        PlatformSecurityContext ctx = requireContext();
+        Set<String> roles = ctx.getRoles();
+        UUID orgId = ctx.isPlatformAdmin() ? null : requireOrgId(ctx);
+        return ResponseEntity.ok(ApiResponse.ok(engine.getStatus(recordId, orgId, roles)));
     }
 
     @GetMapping("/history")
+    @RequirePermission(resource = "RECORD", action = "READ")
     public ResponseEntity<ApiResponse<PageResult<TransitionHistory>>> getHistory(
             @PathVariable UUID recordId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var results = histRepo.findByRecordIdOrderByTransitionedAtDesc(
-                recordId, PageRequest.of(page, size));
+        PlatformSecurityContext ctx = requireContext();
+        var pageReq = PageRequest.of(page, size);
+        var results = ctx.isPlatformAdmin()
+                ? histRepo.findByRecordIdOrderByTransitionedAtDesc(recordId, pageReq)
+                : histRepo.findByRecordIdAndOrgIdOrderByTransitionedAtDesc(recordId, requireOrgId(ctx), pageReq);
         return ResponseEntity.ok(ApiResponse.ok(PageResult.from(results)));
+    }
+
+    // Every other tenancy check in the platform (RecordService.findForContext,
+    // RecordVerificationService.getByRecordId) fails closed the same way — no org context on a
+    // non-admin caller is a 403, never a silent unscoped lookup. This endpoint previously had
+    // neither check at all.
+    private PlatformSecurityContext requireContext() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null) {
+            throw new PlatformException("AUTH_REQUIRED", "Authentication required", HttpStatus.UNAUTHORIZED);
+        }
+        return ctx;
+    }
+
+    private UUID requireOrgId(PlatformSecurityContext ctx) {
+        if (ctx.getOrgId() == null) {
+            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+                    "An organization context is required to access workflow state", HttpStatus.FORBIDDEN);
+        }
+        return ctx.getOrgId();
     }
 }

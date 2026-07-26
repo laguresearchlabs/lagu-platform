@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.schema.dto.FieldGroupRequest;
 import com.lagu.platform.schema.dto.FieldGroupResponse;
 import com.lagu.platform.schema.service.FieldGroupService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,7 @@ public class FieldGroupController {
 
     private final FieldGroupService fieldGroupService;
 
+    // Reads stay open — see FieldController for why.
     @GetMapping
     public ResponseEntity<ApiResponse<List<FieldGroupResponse>>> list() {
         return ResponseEntity.ok(ApiResponse.ok(fieldGroupService.listPlatformLevel()));
@@ -31,6 +33,7 @@ public class FieldGroupController {
     }
 
     @PostMapping
+    @RequirePermission(resource = "ATTRIBUTE", action = "CREATE")
     public ResponseEntity<ApiResponse<FieldGroupResponse>> create(
             @Valid @RequestBody FieldGroupRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -38,6 +41,7 @@ public class FieldGroupController {
     }
 
     @PutMapping("/{id}")
+    @RequirePermission(resource = "ATTRIBUTE", action = "UPDATE")
     public ResponseEntity<ApiResponse<FieldGroupResponse>> update(
             @PathVariable UUID id,
             @Valid @RequestBody FieldGroupRequest req) {
@@ -45,6 +49,7 @@ public class FieldGroupController {
     }
 
     @DeleteMapping("/{id}")
+    @RequirePermission(resource = "ATTRIBUTE", action = "DELETE")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
         fieldGroupService.deactivate(id);
         return ResponseEntity.ok(ApiResponse.ok(null));

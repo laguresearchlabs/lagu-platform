@@ -47,9 +47,24 @@ public class StateMachineEngine {
         // Resolve workflow for this object type
         WorkflowDefinition wf = resolveWorkflow(event.getObjectType(), orgId);
 
-        // Get or initialise runtime state
-        RecordWorkflowState rws = rwsRepo.findByRecordId(recordId)
+        // Scoped to (recordId, orgId) — an unscoped findByRecordId here would let a RecordEvent
+        // carrying a mismatched orgId resolve and mutate a different tenant's workflow state for
+        // the same recordId (record ids are not globally guaranteed unique in a way that makes
+        // this impossible, and it's cheap to just not rely on that).
+        RecordWorkflowState rws = rwsRepo.findByRecordIdAndOrgId(recordId, orgId)
                 .orElseGet(() -> initState(recordId, orgId, event.getObjectType(), wf));
+
+        // The event's objectType must agree with the state row's — otherwise a mismatched event
+        // (wrong topic routing, replay, bug) would resolve a transition from a *different*
+        // workflow's currentState and write a toState that doesn't exist in this record's real
+        // workflow, permanently stranding it (getStatus would then report zero allowed
+        // transitions with no way to recover except a manual DB fix).
+        if (!rws.getObjectType().equalsIgnoreCase(event.getObjectType())) {
+            log.warn("Ignoring transition request for record {}: event objectType '{}' does not " +
+                    "match its workflow state's objectType '{}'", recordId, event.getObjectType(),
+                    rws.getObjectType());
+            return;
+        }
 
         String currentState = rws.getCurrentState();
 
@@ -96,8 +111,12 @@ public class StateMachineEngine {
                 transition.getToState(), transition.getTriggerName());
     }
 
-    public RecordWorkflowStatusResponse getStatus(UUID recordId, Set<String> userRoles) {
-        RecordWorkflowState rws = rwsRepo.findByRecordId(recordId)
+    /** {@code orgId} null means the caller is a platform admin (checked by the controller before
+     *  calling this) — anyone else must pass their own org, and only ever sees that org's state. */
+    public RecordWorkflowStatusResponse getStatus(UUID recordId, UUID orgId, Set<String> userRoles) {
+        RecordWorkflowState rws = (orgId != null
+                ? rwsRepo.findByRecordIdAndOrgId(recordId, orgId)
+                : rwsRepo.findByRecordId(recordId))
                 .orElseThrow(() -> new ResourceNotFoundException("WorkflowState", recordId.toString()));
 
         WorkflowDefinition wf = rws.getWorkflow();
