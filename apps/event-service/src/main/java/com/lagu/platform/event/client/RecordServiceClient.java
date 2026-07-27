@@ -32,27 +32,27 @@ public class RecordServiceClient {
                 .build();
     }
 
-    public Map<String, Object> createRecord(UUID orgId, UUID actingUserId, String objectType,
+    public Map<String, Object> createRecord(UUID tenantId, UUID actingUserId, String objectType,
                                              Map<String, Object> data) {
         try {
             return restClient.post()
                     .uri("/api/v1/records")
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", actingUserId.toString())
                     .body(Map.of("objectType", objectType, "data", data))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
-            log.error("Failed to create {} record for org {}: {}", objectType, orgId, e.getMessage());
+            log.error("Failed to create {} record for org {}: {}", objectType, tenantId, e.getMessage());
             return null;
         }
     }
 
-    public Map<String, Object> getRecord(UUID recordId, UUID orgId) {
+    public Map<String, Object> getRecord(UUID recordId, UUID tenantId) {
         try {
             return restClient.get()
                     .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
@@ -61,12 +61,12 @@ public class RecordServiceClient {
         }
     }
 
-    public Map<String, Object> updateRecord(UUID recordId, UUID orgId, UUID actingUserId,
+    public Map<String, Object> updateRecord(UUID recordId, UUID tenantId, UUID actingUserId,
                                              Map<String, Object> data) {
         try {
             return restClient.put()
                     .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", actingUserId.toString())
                     .body(Map.of("data", data))
                     .retrieve()
@@ -78,11 +78,11 @@ public class RecordServiceClient {
     }
 
     /**
-     * Records of objectType belonging to orgId, newest first. A null status excludes only
+     * Records of objectType belonging to tenantId, newest first. A null status excludes only
      * DELETED (record-service's default); a non-null status filters to exactly that status.
      */
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> listRecords(UUID orgId, String objectType, String status, int page, int size) {
+    public List<Map<String, Object>> listRecords(UUID tenantId, String objectType, String status, int page, int size) {
         try {
             Map<String, Object> response = restClient.get()
                     .uri(uriBuilder -> {
@@ -93,7 +93,7 @@ public class RecordServiceClient {
                         if (status != null) b = b.queryParam("status", status);
                         return b.build();
                     })
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
             if (response == null) return List.of();
@@ -102,18 +102,18 @@ public class RecordServiceClient {
             Object content = ((Map<String, Object>) pageMap).get("content");
             return content instanceof List<?> ? (List<Map<String, Object>>) content : List.of();
         } catch (Exception e) {
-            log.warn("Failed to list {} records for org {}: {}", objectType, orgId, e.getMessage());
+            log.warn("Failed to list {} records for org {}: {}", objectType, tenantId, e.getMessage());
             return List.of();
         }
     }
 
     /** Server-side partial merge (record-service's PATCH), unlike updateRecord's full replace. */
-    public Map<String, Object> patchRecord(UUID recordId, UUID orgId, UUID actingUserId,
+    public Map<String, Object> patchRecord(UUID recordId, UUID tenantId, UUID actingUserId,
                                             Map<String, Object> partialData) {
         try {
             return restClient.patch()
                     .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", actingUserId.toString())
                     .body(partialData)
                     .retrieve()
@@ -124,20 +124,20 @@ public class RecordServiceClient {
         }
     }
 
-    public void deleteRecord(UUID recordId, UUID orgId) {
+    public void deleteRecord(UUID recordId, UUID tenantId) {
         restClient.delete()
                 .uri("/api/v1/records/{id}", recordId)
-                .header("X-Org-Id", orgId.toString())
+                .header("X-Tenant-Id", tenantId.toString())
                 .retrieve()
                 .toBodilessEntity();
     }
 
     /** POSTs a workflow trigger; record-service stages it via the outbox and processes it async. */
-    public Map<String, Object> requestTransition(UUID recordId, UUID orgId, UUID actingUserId, String trigger) {
+    public Map<String, Object> requestTransition(UUID recordId, UUID tenantId, UUID actingUserId, String trigger) {
         try {
             return restClient.post()
                     .uri("/api/v1/records/{id}/status", recordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", actingUserId.toString())
                     .body(Map.of("trigger", trigger))
                     .retrieve()
@@ -148,31 +148,31 @@ public class RecordServiceClient {
         }
     }
 
-    public void createRelationship(UUID sourceRecordId, UUID orgId, UUID actingUserId,
+    public void createRelationship(UUID sourceRecordId, UUID tenantId, UUID actingUserId,
                                     String relationshipName, UUID targetRecordId) {
         restClient.post()
                 .uri("/api/v1/records/{sourceId}/relationships", sourceRecordId)
-                .header("X-Org-Id", orgId.toString())
+                .header("X-Tenant-Id", tenantId.toString())
                 .header("X-User-Id", actingUserId.toString())
                 .body(Map.of("relationshipName", relationshipName, "targetRecordId", targetRecordId))
                 .retrieve()
                 .body(new ParameterizedTypeReference<Map<String, Object>>() {});
     }
 
-    public void deleteRelationship(UUID sourceRecordId, UUID orgId, String relationshipName, UUID targetRecordId) {
+    public void deleteRelationship(UUID sourceRecordId, UUID tenantId, String relationshipName, UUID targetRecordId) {
         restClient.delete()
                 .uri("/api/v1/records/{sourceId}/relationships/{relName}/{targetId}",
                         sourceRecordId, relationshipName, targetRecordId)
-                .header("X-Org-Id", orgId.toString())
+                .header("X-Tenant-Id", tenantId.toString())
                 .retrieve()
                 .toBodilessEntity();
     }
 
-    public List<Map<String, Object>> listRelationships(UUID sourceRecordId, UUID orgId) {
+    public List<Map<String, Object>> listRelationships(UUID sourceRecordId, UUID tenantId) {
         try {
             Map<String, Object> response = restClient.get()
                     .uri("/api/v1/records/{sourceId}/relationships", sourceRecordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
             if (response == null) return List.of();

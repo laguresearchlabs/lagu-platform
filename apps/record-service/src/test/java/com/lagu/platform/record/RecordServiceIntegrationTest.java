@@ -52,7 +52,7 @@ class RecordServiceIntegrationTest {
     /** Must be non-blank and not equal to ServiceSecurityConfig.INSECURE_DEFAULT_SECRET, or the
      *  app refuses to start; the test client below must present the exact same value via
      *  X-Platform-Gateway-Secret, or GatewayHeaderFilter treats every request as unauthenticated
-     *  regardless of the X-User-Id/X-Org-Id/X-User-Roles headers also being sent. */
+     *  regardless of the X-User-Id/X-Tenant-Id/X-User-Roles headers also being sent. */
     static final String TEST_GATEWAY_SECRET = "integration-test-shared-secret";
 
     @DynamicPropertySource
@@ -79,7 +79,7 @@ class RecordServiceIntegrationTest {
     @Autowired ObjectMapper json;
 
     static final String USER_ID = UUID.randomUUID().toString();
-    static final String ORG_ID  = UUID.randomUUID().toString();
+    static final String TENANT_ID  = UUID.randomUUID().toString();
 
     static final MetadataClient.ObjectTypeSchemaDto VENUE_SCHEMA =
             new MetadataClient.ObjectTypeSchemaDto("VENUE", List.of(
@@ -98,7 +98,7 @@ class RecordServiceIntegrationTest {
         client = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    USER_ID)
-                .defaultHeader("X-Org-Id",     ORG_ID)
+                .defaultHeader("X-Tenant-Id",     TENANT_ID)
                 .defaultHeader("X-User-Roles", "ORG_MANAGER")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -159,7 +159,7 @@ class RecordServiceIntegrationTest {
         RestClient otherOrgClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    UUID.randomUUID().toString())
-                .defaultHeader("X-Org-Id",     UUID.randomUUID().toString())
+                .defaultHeader("X-Tenant-Id",     UUID.randomUUID().toString())
                 .defaultHeader("X-User-Roles", "ORG_MANAGER")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -218,7 +218,7 @@ class RecordServiceIntegrationTest {
 
         client.delete().uri("/api/v1/records/" + id).retrieve().toBodilessEntity();
 
-        // RecordRepository.findByIdAndOrgId explicitly filters "status != 'DELETED'" — a
+        // RecordRepository.findByIdAndTenantId explicitly filters "status != 'DELETED'" — a
         // soft-deleted record is excluded from normal reads by design (matching every other
         // "excluding deleted" query in this repository), so getById 404s rather than returning
         // the record with status=DELETED.

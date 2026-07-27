@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public class IndexMappingBuilder {
 
-    // Index names are built by string concatenation of orgId/objectType; OpenSearch's _search
+    // Index names are built by string concatenation of tenantId/objectType; OpenSearch's _search
     // endpoint treats "," as a multi-index separator and "*" as a wildcard, so either character
     // (or a "/") in an unvalidated segment lets a caller query across other orgs' indices.
     private static final Pattern SAFE_INDEX_SEGMENT = Pattern.compile("^[a-zA-Z0-9_-]+$");
@@ -33,10 +33,10 @@ public class IndexMappingBuilder {
     @Value("${opensearch.index-prefix:platform}")
     private String indexPrefix;
 
-    public String indexName(String orgId, String objectType) {
-        validateSegment("orgId", orgId);
+    public String indexName(String tenantId, String objectType) {
+        validateSegment("tenantId", tenantId);
         validateSegment("objectType", objectType);
-        return indexPrefix + "-" + orgId.toLowerCase() + "-" + objectType.toLowerCase();
+        return indexPrefix + "-" + tenantId.toLowerCase() + "-" + objectType.toLowerCase();
     }
 
     /** Cross-org index of published listing snapshots backing consumer/marketplace search. */
@@ -55,8 +55,8 @@ public class IndexMappingBuilder {
      * Creates the OpenSearch index for the given org/objectType if it does not already exist.
      * Mapping is derived from the metadata-service schema.
      */
-    public void ensureIndex(String orgId, String objectType) {
-        createIfAbsent(indexName(orgId, objectType), objectType, false);
+    public void ensureIndex(String tenantId, String objectType) {
+        createIfAbsent(indexName(tenantId, objectType), objectType, false);
     }
 
     /** Same, for the cross-org consumer index (adds searchBoost/verificationTier/publishedAt). */
@@ -97,7 +97,7 @@ public class IndexMappingBuilder {
     private Map<String, Property> allProperties(Map<String, Property> dataProps) {
         Map<String, Property> props = new HashMap<>();
         props.put("recordId",   Property.of(p -> p.keyword(k -> k)));
-        props.put("orgId",      Property.of(p -> p.keyword(k -> k)));
+        props.put("tenantId",      Property.of(p -> p.keyword(k -> k)));
         props.put("objectType", Property.of(p -> p.keyword(k -> k)));
         props.put("status",     Property.of(p -> p.keyword(k -> k)));
         props.put("createdAt",  Property.of(p -> p.date(d -> d.format("strict_date_time||epoch_millis"))));

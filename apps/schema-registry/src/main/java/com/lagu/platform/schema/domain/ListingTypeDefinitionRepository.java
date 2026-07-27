@@ -8,16 +8,16 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface ListingTypeDefinitionRepository extends JpaRepository<ListingTypeDefinition, UUID> {
-    Optional<ListingTypeDefinition> findByNameAndOrgIdIsNull(String name);
-    Optional<ListingTypeDefinition> findByNameAndOrgId(String name, UUID orgId);
-    List<ListingTypeDefinition> findByOrgIdIsNullAndActiveTrue();
+    Optional<ListingTypeDefinition> findByNameAndTenantIdIsNull(String name);
+    Optional<ListingTypeDefinition> findByNameAndTenantId(String name, UUID tenantId);
+    List<ListingTypeDefinition> findByTenantIdIsNullAndActiveTrue();
     List<ListingTypeDefinition> findByConsumerSearchableTrueAndActiveTrue();
 
     @Query("""
         SELECT ltd FROM ListingTypeDefinition ltd
         LEFT JOIN FETCH ltd.sections s
         LEFT JOIN FETCH s.fieldGroup fg
-        WHERE ltd.name = :name AND ltd.orgId IS NULL AND ltd.active = true
+        WHERE ltd.name = :name AND ltd.tenantId IS NULL AND ltd.active = true
         """)
-    Optional<ListingTypeDefinition> findByNameWithSectionsAndOrgIdIsNull(String name);
+    Optional<ListingTypeDefinition> findByNameWithSectionsAndTenantIdIsNull(String name);
 }

@@ -39,16 +39,16 @@ class ListingControllerTest {
         if (gatewayMock != null) gatewayMock.close();
     }
 
-    private static ListingSnapshot snapshot(UUID orgId, String status) {
+    private static ListingSnapshot snapshot(UUID tenantId, String status) {
         ListingSnapshot s = new ListingSnapshot();
         s.setId(UUID.randomUUID());
-        s.setOrgId(orgId);
+        s.setTenantId(tenantId);
         s.setStatus(status);
         return s;
     }
 
-    private static PlatformSecurityContext ctx(UUID orgId, String... roles) {
-        return PlatformSecurityContext.builder().userId(UUID.randomUUID()).orgId(orgId)
+    private static PlatformSecurityContext ctx(UUID tenantId, String... roles) {
+        return PlatformSecurityContext.builder().userId(UUID.randomUUID()).tenantId(tenantId)
                 .roles(Set.of(roles)).build();
     }
 

@@ -10,7 +10,7 @@ public interface ChangeSetRepository extends JpaRepository<ChangeSet, UUID> {
 
     List<ChangeSet> findByRecordIdOrderBySubmittedAtDesc(UUID recordId);
 
-    List<ChangeSet> findByOrgIdAndStatusOrderBySubmittedAtDesc(UUID orgId, String status);
+    List<ChangeSet> findByTenantIdAndStatusOrderBySubmittedAtDesc(UUID tenantId, String status);
 
     Optional<ChangeSet> findFirstByRecordIdAndStatus(UUID recordId, String status);
 

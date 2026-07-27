@@ -23,7 +23,7 @@ public class DocumentEvent implements PlatformEvent {
 
     private UUID   documentId;
     private UUID   userId;
-    private UUID   orgId;
+    private UUID   tenantId;
 
     /** RESUME | IDENTITY_PROOF | PHOTOGRAPH | ACADEMIC_CERTIFICATE | ADDRESS_PROOF | OTHER */
     private String documentType;

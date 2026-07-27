@@ -22,7 +22,7 @@ public class DocumentEventPublisher {
                 .eventType(eventType)
                 .documentId(doc.getId())
                 .userId(doc.getUserId())
-                .orgId(doc.getOrgId())
+                .tenantId(doc.getTenantId())
                 .documentType(doc.getDocumentType())
                 .identitySubType(doc.getIdentitySubType())
                 .status(doc.getStatus())
@@ -31,7 +31,7 @@ public class DocumentEventPublisher {
                 .occurredAt(Instant.now())
                 .build();
 
-        String key = doc.getOrgId() + ":" + doc.getUserId();
+        String key = doc.getTenantId() + ":" + doc.getUserId();
         kafkaTemplate.send(PlatformTopics.DOCUMENT_EVENTS, key, event)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {

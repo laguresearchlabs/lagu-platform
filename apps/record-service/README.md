@@ -17,7 +17,7 @@ the decision back over Kafka.
 Package `com.lagu.platform.record`, four domain entities (schema `records` in the shared Postgres
 database, Flyway-managed):
 
-- **`Record`** (`record` table) — the core entity: `org_id`, `object_type`, `status` (default
+- **`Record`** (`record` table) — the core entity: `tenant_id`, `object_type`, `status` (default
   `DRAFT`), `data` (JSONB), optimistic-lock `version`, audit columns (`created_by`/`updated_by`/
   `created_at`/`updated_at`). Soft-deleted (`status = 'DELETED'`), never physically removed.
 - **`RecordAudit`** (`record_audit` table) — append-only history of `CREATED` / `UPDATED` /
@@ -189,7 +189,7 @@ this module — there is currently no automated test coverage.
   than `DRAFT` on create — this is intentional so vendors can't skip the approval workflow by
   posting directly into `ACTIVE`/`PUBLISHED`.
 - **Soft delete only.** `DELETE` sets `status = DELETED`; rows are never removed, and
-  `findByIdAndOrgId` filters out `DELETED` records so they effectively disappear from normal reads.
+  `findByIdAndTenantId` filters out `DELETED` records so they effectively disappear from normal reads.
 - **Optimistic locking** (`@Version` on `Record` and `RecordVerification`, added in migration V5)
   turns concurrent writes into an HTTP 409 rather than silently discarding one writer's changes.
 - **Transactional outbox pattern** (migration V4 + `libs:common`'s `TransactionalOutbox`) avoids
@@ -197,7 +197,7 @@ this module — there is currently no automated test coverage.
   the same transaction as the data change, and a separate `OutboxRelay` (in `libs:common`, not in
   this service's own source) delivers them to Kafka afterward.
 - **Multi-tenancy is enforced in the service layer**, not the database: every read/write path
-  checks `PlatformSecurityContext.orgId` against the record's `org_id` (except for
+  checks `PlatformSecurityContext.tenantId` against the record's `tenant_id` (except for
   `PLATFORM_ADMIN`, which sees all orgs). A caller with no org context gets a 403
   (`ORG_CONTEXT_REQUIRED`), never an unscoped lookup.
 - **Identity comes entirely from headers**, trusted only when accompanied by a matching

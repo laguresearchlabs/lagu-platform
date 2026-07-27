@@ -42,7 +42,7 @@ public class TemplateRenderer {
         }
         return switch (key) {
             case "recordId"       -> ctx.getRecordId()   != null ? ctx.getRecordId().toString()   : "";
-            case "orgId"          -> ctx.getOrgId()      != null ? ctx.getOrgId().toString()      : "";
+            case "tenantId"          -> ctx.getTenantId()      != null ? ctx.getTenantId().toString()      : "";
             case "objectType"     -> ctx.getObjectType() != null ? ctx.getObjectType()             : "";
             case "currentStatus"  -> ctx.getCurrentStatus()  != null ? ctx.getCurrentStatus()      : "";
             case "previousStatus" -> ctx.getPreviousStatus() != null ? ctx.getPreviousStatus()     : "";

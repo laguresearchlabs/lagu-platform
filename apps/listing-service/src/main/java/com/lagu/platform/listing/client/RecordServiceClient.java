@@ -32,10 +32,10 @@ public class RecordServiceClient {
      * exception to trigger retry/DLT, and a swallowed failure here would silently skip a
      * snapshot publication.
      */
-    public Map<String, Object> getRecord(UUID recordId, UUID orgId) {
+    public Map<String, Object> getRecord(UUID recordId, UUID tenantId) {
         return restClient.get()
                 .uri("/api/v1/records/{id}", recordId)
-                .header("X-Org-Id", orgId != null ? orgId.toString() : "")
+                .header("X-Tenant-Id", tenantId != null ? tenantId.toString() : "")
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
     }

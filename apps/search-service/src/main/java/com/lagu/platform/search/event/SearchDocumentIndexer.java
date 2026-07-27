@@ -39,16 +39,16 @@ public class SearchDocumentIndexer {
     }
 
     private void indexFull(RecordEvent event) throws IOException {
-        String orgId      = event.getOrgId().toString();
+        String tenantId      = event.getTenantId().toString();
         String objectType = event.getObjectType();
         String recordId   = event.getRecordId().toString();
 
-        mappingBuilder.ensureIndex(orgId, objectType);
-        String index = mappingBuilder.indexName(orgId, objectType);
+        mappingBuilder.ensureIndex(tenantId, objectType);
+        String index = mappingBuilder.indexName(tenantId, objectType);
 
         Map<String, Object> doc = new HashMap<>();
         doc.put("recordId",   recordId);
-        doc.put("orgId",      orgId);
+        doc.put("tenantId",      tenantId);
         doc.put("objectType", objectType);
         doc.put("status",     event.getCurrentStatus());
         doc.put("data",       event.getData() != null ? event.getData() : Map.of());
@@ -60,10 +60,10 @@ public class SearchDocumentIndexer {
     }
 
     private void partialUpdate(RecordEvent event) throws IOException {
-        String orgId      = event.getOrgId().toString();
+        String tenantId      = event.getTenantId().toString();
         String objectType = event.getObjectType();
         String recordId   = event.getRecordId().toString();
-        String index      = mappingBuilder.indexName(orgId, objectType);
+        String index      = mappingBuilder.indexName(tenantId, objectType);
 
         Map<String, Object> patch = Map.of(
                 "status",    event.getCurrentStatus(),
@@ -77,10 +77,10 @@ public class SearchDocumentIndexer {
     }
 
     private void delete(RecordEvent event) throws IOException {
-        String orgId      = event.getOrgId().toString();
+        String tenantId      = event.getTenantId().toString();
         String objectType = event.getObjectType();
         String recordId   = event.getRecordId().toString();
-        String index      = mappingBuilder.indexName(orgId, objectType);
+        String index      = mappingBuilder.indexName(tenantId, objectType);
 
         osClient.delete(r -> r.index(index).id(recordId));
         log.debug("Deleted record {} from {}", recordId, index);

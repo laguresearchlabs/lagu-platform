@@ -12,6 +12,7 @@ public class ApprovalInstanceResponse {
 
     private UUID   id;
     private UUID   recordId;
+    private UUID   tenantId;
     private String status;
     private int    currentStep;
     private int    totalSteps;

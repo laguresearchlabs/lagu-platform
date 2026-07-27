@@ -32,27 +32,27 @@ public class RecordServiceClient {
                 .build();
     }
 
-    public Map<String, Object> createRecord(UUID orgId, UUID actingUserId, String objectType,
+    public Map<String, Object> createRecord(UUID tenantId, UUID actingUserId, String objectType,
                                             Map<String, Object> data) {
         try {
             return restClient.post()
                     .uri("/api/v1/records")
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", actingUserId.toString())
                     .body(Map.of("objectType", objectType, "data", data))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
-            log.error("Failed to create {} record for org {}: {}", objectType, orgId, e.getMessage());
+            log.error("Failed to create {} record for org {}: {}", objectType, tenantId, e.getMessage());
             return null;
         }
     }
 
-    public Map<String, Object> getRecord(UUID recordId, UUID orgId) {
+    public Map<String, Object> getRecord(UUID recordId, UUID tenantId) {
         try {
             return restClient.get()
                     .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
@@ -61,16 +61,16 @@ public class RecordServiceClient {
         }
     }
 
-    public Map<String, Object> getDocumentStatus(UUID orgId, UUID userId) {
+    public Map<String, Object> getDocumentStatus(UUID tenantId, UUID userId) {
         try {
             return restClient.get()
                     .uri("/api/v1/documents/submission-status")
-                    .header("X-Org-Id", orgId.toString())
+                    .header("X-Tenant-Id", tenantId.toString())
                     .header("X-User-Id", userId.toString())
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
-            log.warn("Failed to get document status for org {}: {}", orgId, e.getMessage());
+            log.warn("Failed to get document status for org {}: {}", tenantId, e.getMessage());
             return Map.of();
         }
     }

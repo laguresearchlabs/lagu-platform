@@ -42,7 +42,7 @@ public class EventJoinRequestController {
                 memberService.approve(eventId, EventController.requireUserId(), joinRequestId)));
     }
 
-    @DeleteMapping("/{joinRequestId}/reject")
+    @PatchMapping("/{joinRequestId}/reject")
     public ResponseEntity<Void> reject(@PathVariable UUID eventId, @PathVariable UUID joinRequestId) {
         memberService.reject(eventId, EventController.requireUserId(), joinRequestId);
         return ResponseEntity.noContent().build();

@@ -45,13 +45,20 @@ public class PlatformEventConsumer {
         ack.acknowledge();
     }
 
+    @KafkaListener(topics = PlatformTopics.BOOKING_EVENTS, groupId = "automation-service-booking")
+    public void handleBookingEvent(String payload, Acknowledgment ack) {
+        AutomationEventContext ctx = parser.parseBookingEvent(payload);
+        if (ctx != null) dispatch(ctx);
+        ack.acknowledge();
+    }
+
     private void dispatch(AutomationEventContext ctx) {
-        if (ctx.getOrgId() == null) return;
+        if (ctx.getTenantId() == null) return;
 
         List<com.lagu.platform.automation.domain.TriggerDefinition> triggers =
                 ctx.getObjectType() != null
-                        ? triggerRepo.findActiveByEventAndType(ctx.getEventType(), ctx.getOrgId(), ctx.getObjectType())
-                        : triggerRepo.findActiveByEvent(ctx.getEventType(), ctx.getOrgId());
+                        ? triggerRepo.findActiveByEventAndType(ctx.getEventType(), ctx.getTenantId(), ctx.getObjectType())
+                        : triggerRepo.findActiveByEvent(ctx.getEventType(), ctx.getTenantId());
 
         log.debug("Event {} matched {} trigger(s)", ctx.getEventType(), triggers.size());
 

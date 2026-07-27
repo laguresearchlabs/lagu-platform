@@ -5,6 +5,6 @@ import java.util.UUID;
 
 public interface PlatformEvent {
     String getEventType();
-    UUID getOrgId();
+    UUID getTenantId();
     Instant getOccurredAt();
 }

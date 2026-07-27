@@ -26,10 +26,10 @@ public class VendorService {
 
     @Transactional
     public VendorProfileResponse register(RegisterVendorRequest req, UUID userId) {
-        UUID orgId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
 
         // Create the canonical VENDOR record in record-service
-        Map<String, Object> recordResponse = recordClient.createRecord(orgId, userId, "VENDOR", Map.of(
+        Map<String, Object> recordResponse = recordClient.createRecord(tenantId, userId, "VENDOR", Map.of(
             "businessName", req.getBusinessName(),
             "country", req.getCountry()
         ));
@@ -40,7 +40,7 @@ public class VendorService {
 
         // Persist local profile
         VendorProfile profile = new VendorProfile();
-        profile.setOrgId(orgId);
+        profile.setId(tenantId);
         profile.setRecordId(recordId);
         profile.setOwnerUserId(userId);
         profile.setBusinessName(req.getBusinessName());
@@ -49,46 +49,44 @@ public class VendorService {
 
         // Add owner as member
         VendorMember owner = new VendorMember();
-        owner.setOrgId(orgId);
+        owner.setTenantId(tenantId);
         owner.setUserId(userId);
         owner.setRole("OWNER");
         memberRepo.save(owner);
 
         // Initialise empty KYC checklist
         VendorKycChecklist kyc = new VendorKycChecklist();
-        kyc.setOrgId(orgId);
+        kyc.setTenantId(tenantId);
         kyc.setBusinessNameFilled(req.getBusinessName() != null && !req.getBusinessName().isBlank());
         kycRepo.save(kyc);
 
-        // Deliberately NOT associated with the user's IAM platformOrgId: a user can be a
-        // VendorMember of many vendor orgs at once (see VendorMember's org_id+user_id unique
-        // pair), but IAM's platformOrgId is a single scalar — writing it here would silently
-        // evict the user from acting as any other vendor org they already belong to. Tenancy
-        // for vendor-service's own endpoints is resolved from VendorMember, never from the
-        // caller's JWT orgId claim.
-        log.info("Registered vendor org={} for user={}", orgId, userId);
+        // Tenancy for vendor-service's own endpoints is resolved from VendorMember (which allows
+        // a user to belong to many vendor orgs via its tenant_id+user_id unique pair), never from
+        // the caller's JWT tenantId claim, which only ever reflects the single org a request
+        // targets — not the full set the user belongs to.
+        log.info("Registered vendor org={} for user={}", tenantId, userId);
         return toResponse(profile, null);
     }
 
     /** All vendor orgs the caller belongs to (owner or invited member), not just owned ones. */
     public List<VendorProfileResponse> listMine(UUID userId) {
         return memberRepo.findByUserId(userId).stream()
-                .map(m -> profileRepo.findByOrgId(m.getOrgId()).map(p -> toResponse(p, null)))
+                .map(m -> profileRepo.findById(m.getTenantId()).map(p -> toResponse(p, null)))
                 .flatMap(Optional::stream)
                 .toList();
     }
 
-    public VendorProfileResponse getByOrgId(UUID orgId, UUID requesterId) {
-        VendorProfile profile = requireProfile(orgId);
+    public VendorProfileResponse getByTenantId(UUID tenantId, UUID requesterId) {
+        VendorProfile profile = requireProfile(tenantId);
         requireMember(profile, requesterId);
-        VendorKycChecklist kyc = kycRepo.findById(orgId).orElse(null);
+        VendorKycChecklist kyc = kycRepo.findById(tenantId).orElse(null);
         return toResponse(profile, kyc);
     }
 
     /** Cross-org admin lookup — bypasses membership entirely, callers must check isConfigAdmin(). */
-    public VendorProfileResponse getByOrgIdAsAdmin(UUID orgId) {
-        VendorProfile profile = requireProfile(orgId);
-        VendorKycChecklist kyc = kycRepo.findById(orgId).orElse(null);
+    public VendorProfileResponse getByTenantIdAsAdmin(UUID tenantId) {
+        VendorProfile profile = requireProfile(tenantId);
+        VendorKycChecklist kyc = kycRepo.findById(tenantId).orElse(null);
         return toResponse(profile, kyc);
     }
 
@@ -99,35 +97,35 @@ public class VendorService {
     }
 
     @Transactional
-    public VendorProfileResponse updateStatus(UUID orgId, String newStatus, UUID actorId) {
-        VendorProfile profile = profileRepo.findByOrgId(orgId)
-                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + orgId));
+    public VendorProfileResponse updateStatus(UUID tenantId, String newStatus, UUID actorId) {
+        VendorProfile profile = profileRepo.findById(tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + tenantId));
 
         validateStatusTransition(profile.getStatus(), newStatus);
         profile.setStatus(newStatus.toUpperCase());
         profileRepo.save(profile);
-        log.info("Vendor {} status changed to {} by {}", orgId, newStatus, actorId);
+        log.info("Vendor {} status changed to {} by {}", tenantId, newStatus, actorId);
         return toResponse(profile, null);
     }
 
     @Transactional
-    public VendorProfileResponse submit(UUID orgId, UUID requesterId) {
-        VendorProfile profile = requireProfile(orgId);
+    public VendorProfileResponse submit(UUID tenantId, UUID requesterId) {
+        VendorProfile profile = requireProfile(tenantId);
         requireManager(profile, requesterId);
-        return updateStatus(orgId, "SUBMITTED", requesterId);
+        return updateStatus(tenantId, "SUBMITTED", requesterId);
     }
 
     @Transactional
-    public KycChecklistDto computeKyc(UUID orgId, UUID requesterId) {
-        VendorProfile profile = requireProfile(orgId);
+    public KycChecklistDto computeKyc(UUID tenantId, UUID requesterId) {
+        VendorProfile profile = requireProfile(tenantId);
         requireMember(profile, requesterId);
 
         // Fetch document status from document-service via record-service client
-        Map<String, Object> docStatus = recordClient.getDocumentStatus(orgId, profile.getOwnerUserId());
+        Map<String, Object> docStatus = recordClient.getDocumentStatus(tenantId, profile.getOwnerUserId());
 
-        VendorKycChecklist kyc = kycRepo.findById(orgId).orElseGet(() -> {
+        VendorKycChecklist kyc = kycRepo.findById(tenantId).orElseGet(() -> {
             VendorKycChecklist c = new VendorKycChecklist();
-            c.setOrgId(orgId);
+            c.setTenantId(tenantId);
             return c;
         });
 
@@ -150,13 +148,13 @@ public class VendorService {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private VendorProfile requireProfile(UUID orgId) {
-        return profileRepo.findByOrgId(orgId)
-                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + orgId));
+    private VendorProfile requireProfile(UUID tenantId) {
+        return profileRepo.findById(tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + tenantId));
     }
 
     private VendorMember requireMember(VendorProfile profile, UUID userId) {
-        return memberRepo.findByOrgIdAndUserId(profile.getOrgId(), userId)
+        return memberRepo.findByTenantIdAndUserIdAndStatus(profile.getTenantId(), userId, "ACTIVE")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this vendor org"));
     }
 
@@ -198,14 +196,14 @@ public class VendorService {
 
     private VendorProfileResponse toResponse(VendorProfile p, VendorKycChecklist kyc) {
         return VendorProfileResponse.builder()
-                .orgId(p.getOrgId())
+                .tenantId(p.getTenantId())
                 .recordId(p.getRecordId())
                 .businessName(p.getBusinessName())
                 .status(p.getStatus())
                 .country(p.getCountry())
                 .kycChecklist(kyc != null ? toKycDto(kyc) : null)
-                .createdAt(p.getCreatedAt())
-                .updatedAt(p.getUpdatedAt())
+                .createdAt(p.getCreatedAt() != null ? p.getCreatedAt().atOffset(java.time.ZoneOffset.UTC) : null)
+                .updatedAt(p.getUpdatedAt() != null ? p.getUpdatedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }
 

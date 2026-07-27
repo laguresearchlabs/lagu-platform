@@ -28,9 +28,9 @@ public class SearchService {
     private final OpenSearchClient    osClient;
     private final IndexMappingBuilder mappingBuilder;
 
-    public SearchResponse search(SearchRequest req, String orgId) throws IOException {
-        String index = mappingBuilder.indexName(orgId, req.getObjectType());
-        return execute(index, buildQuery(req, orgId), req);
+    public SearchResponse search(SearchRequest req, String tenantId) throws IOException {
+        String index = mappingBuilder.indexName(tenantId, req.getObjectType());
+        return execute(index, buildQuery(req, tenantId), req);
     }
 
     /**
@@ -95,14 +95,14 @@ public class SearchService {
     // ── query construction ────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
-    private Query buildQuery(SearchRequest req, String orgId) {
+    private Query buildQuery(SearchRequest req, String tenantId) {
         BoolQuery.Builder bool = new BoolQuery.Builder();
 
         // Defense-in-depth for org-scoped search: don't rely solely on per-org index-name
-        // isolation — filter every query by orgId at the document level too. Consumer search
+        // isolation — filter every query by tenantId at the document level too. Consumer search
         // passes null: its index is cross-org by design and holds only published snapshots.
-        if (orgId != null) {
-            bool.filter(f -> f.term(t -> t.field("orgId").value(v -> v.stringValue(orgId))));
+        if (tenantId != null) {
+            bool.filter(f -> f.term(t -> t.field("tenantId").value(v -> v.stringValue(tenantId))));
         }
 
         if (req.getQuery() != null && !req.getQuery().isBlank()) {

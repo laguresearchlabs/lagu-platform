@@ -52,9 +52,9 @@ public class TierRuleController {
 
     @DeleteMapping("/{id}")
     @RequirePermission(resource = "TIER_RULE", action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
+    public ResponseEntity<Void> delete(@PathVariable UUID id) {
         tierRuleService.delete(id);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/check")

@@ -2,6 +2,7 @@ package com.lagu.platform.search.api;
 
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
+import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.search.dto.SearchRequest;
 import com.lagu.platform.search.dto.SearchResponse;
@@ -13,6 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -30,8 +32,8 @@ public class SearchController {
     @PostMapping
     @Operation(summary = "Search records with full-text query, filters, sort, and facets")
     @RequirePermission(resource = "RECORD", action = "READ")
-    public SearchResponse search(@RequestBody @Valid SearchRequest req) throws IOException {
-        return searchService.search(req, requireOrgId().toString());
+    public ResponseEntity<ApiResponse<SearchResponse>> search(@RequestBody @Valid SearchRequest req) throws IOException {
+        return ResponseEntity.ok(ApiResponse.ok(searchService.search(req, requireTenantId().toString())));
     }
 
     /**
@@ -42,32 +44,32 @@ public class SearchController {
      */
     @PostMapping("/consumer")
     @Operation(summary = "Public marketplace search over published listings, tier-boosted")
-    public SearchResponse consumerSearch(@RequestBody @Valid SearchRequest req) throws IOException {
-        return searchService.searchConsumer(req);
+    public ResponseEntity<ApiResponse<SearchResponse>> consumerSearch(@RequestBody @Valid SearchRequest req) throws IOException {
+        return ResponseEntity.ok(ApiResponse.ok(searchService.searchConsumer(req)));
     }
 
     @GetMapping("/suggest")
     @Operation(summary = "Typeahead suggestions for a given field prefix")
     @RequirePermission(resource = "RECORD", action = "READ")
-    public List<String> suggest(
+    public ResponseEntity<ApiResponse<List<String>>> suggest(
             @RequestParam String objectType,
             @RequestParam String field,
             @RequestParam String prefix) throws IOException {
-        return suggestService.suggest(objectType, field, prefix, requireOrgId().toString());
+        return ResponseEntity.ok(ApiResponse.ok(suggestService.suggest(objectType, field, prefix, requireTenantId().toString())));
     }
 
     /**
-     * Both org-scoped endpoints previously did {@code GatewayHeaderFilter.current().getOrgId()
-     * .toString()} unguarded — an internal SVC_* caller (permitted READ with no X-Org-Id header;
+     * Both org-scoped endpoints previously did {@code GatewayHeaderFilter.current().getTenantId()
+     * .toString()} unguarded — an internal SVC_* caller (permitted READ with no X-Tenant-Id header;
      * see DefaultPermissionEvaluator) hit a raw NullPointerException (500) instead of a clean
      * error identifying the actual problem.
      */
-    private java.util.UUID requireOrgId() {
+    private java.util.UUID requireTenantId() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        if (ctx == null || ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+        if (ctx == null || ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required for this search", HttpStatus.FORBIDDEN);
         }
-        return ctx.getOrgId();
+        return ctx.getTenantId();
     }
 }

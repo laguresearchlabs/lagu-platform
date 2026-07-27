@@ -29,14 +29,14 @@ public class ReindexService {
      * for the given org. Runs asynchronously — the admin endpoint returns immediately.
      */
     @Async
-    public void reindex(String objectType, String orgId) {
-        log.info("Starting reindex: org={} objectType={}", orgId, objectType);
-        mappingBuilder.ensureIndex(orgId, objectType);
-        String index = mappingBuilder.indexName(orgId, objectType);
+    public void reindex(String objectType, String tenantId) {
+        log.info("Starting reindex: org={} objectType={}", tenantId, objectType);
+        mappingBuilder.ensureIndex(tenantId, objectType);
+        String index = mappingBuilder.indexName(tenantId, objectType);
 
         int page = 0, indexed = 0;
         while (true) {
-            Map<String, Object> resp = recordClient.listRecords(objectType, orgId, page, PAGE_SIZE);
+            Map<String, Object> resp = recordClient.listRecords(objectType, tenantId, page, PAGE_SIZE);
             if (resp == null || resp.isEmpty()) break;
 
             //noinspection unchecked
@@ -49,7 +49,7 @@ public class ReindexService {
             for (Map<String, Object> record : records) {
                 try {
                     String recordId = String.valueOf(record.get("id"));
-                    Map<String, Object> doc = buildDoc(record, orgId, objectType);
+                    Map<String, Object> doc = buildDoc(record, tenantId, objectType);
                     osClient.index(r -> r.index(index).id(recordId).document(doc));
                     indexed++;
                 } catch (IOException e) {
@@ -62,14 +62,14 @@ public class ReindexService {
             page++;
         }
 
-        log.info("Reindex complete: org={} objectType={} indexed={}", orgId, objectType, indexed);
+        log.info("Reindex complete: org={} objectType={} indexed={}", tenantId, objectType, indexed);
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> buildDoc(Map<String, Object> record, String orgId, String objectType) {
+    private Map<String, Object> buildDoc(Map<String, Object> record, String tenantId, String objectType) {
         Map<String, Object> doc = new HashMap<>();
         doc.put("recordId",   String.valueOf(record.get("id")));
-        doc.put("orgId",      orgId);
+        doc.put("tenantId",      tenantId);
         doc.put("objectType", objectType);
         doc.put("status",     record.get("status"));
         doc.put("data",       record.getOrDefault("data", Map.of()));

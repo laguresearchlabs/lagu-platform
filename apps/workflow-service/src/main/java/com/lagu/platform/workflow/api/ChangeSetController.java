@@ -27,7 +27,7 @@ public class ChangeSetController {
     public ResponseEntity<ApiResponse<ChangeSet>> submit(@RequestBody SubmitRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         ChangeSet cs = changeSetService.submit(
-                req.recordId(), req.orgId(), req.objectType(), req.workflowId(),
+                req.recordId(), req.tenantId(), req.objectType(), req.workflowId(),
                 req.originalData(), req.proposedData(),
                 ctx != null ? ctx.getUserId() : req.submittedBy());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(cs));
@@ -66,18 +66,18 @@ public class ChangeSetController {
     public ResponseEntity<ApiResponse<List<ChangeSet>>> byOrgAndStatus(
             @RequestParam(required = false, defaultValue = "PENDING") String status) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
-        if (orgId == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+        UUID tenantId = ctx != null ? ctx.getTenantId() : null;
+        if (tenantId == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "This endpoint lists change sets for the caller's own org; it requires a "
                             + "vendor-scoped account. Platform admins should use GET /api/v1/change-sets/pending "
                             + "for the cross-org pending list.",
                     HttpStatus.FORBIDDEN);
         }
-        return ResponseEntity.ok(ApiResponse.ok(changeSetService.listByOrgAndStatus(orgId, status)));
+        return ResponseEntity.ok(ApiResponse.ok(changeSetService.listByOrgAndStatus(tenantId, status)));
     }
 
-    record SubmitRequest(UUID recordId, UUID orgId, String objectType, UUID workflowId,
+    record SubmitRequest(UUID recordId, UUID tenantId, String objectType, UUID workflowId,
                          Map<String, Object> originalData, Map<String, Object> proposedData,
                          UUID submittedBy) {}
 

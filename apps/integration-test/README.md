@@ -60,7 +60,7 @@ A single test method drives the full lifecycle of a listing:
 - **Auth**: every service requires a non-default gateway shared secret
   (`PLATFORM_GATEWAY_SHARED_SECRET`); the test provisions its own
   (`it-e2e-gateway-secret`) since services now refuse to start on the well-known default.
-  Authenticated calls carry `X-User-Id`, `X-Org-Id`, `X-User-Roles`, and
+  Authenticated calls carry `X-User-Id`, `X-Tenant-Id`, `X-User-Roles`, and
   `X-Platform-Gateway-Secret` headers.
 - **Kafka networking**: `KafkaContainer`'s default listener only the test JVM (on the
   host) can reach; a second listener (`kafka:19092`) is added via `withListener()` so the

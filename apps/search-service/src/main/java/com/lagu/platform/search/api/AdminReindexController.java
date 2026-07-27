@@ -1,5 +1,6 @@
 package com.lagu.platform.search.api;
 
+import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
@@ -25,15 +26,15 @@ public class AdminReindexController {
     @PostMapping("/{objectType}")
     @Operation(summary = "Trigger a full reindex of all records for the given objectType")
     @RequirePermission(resource = "*", action = "UPDATE")
-    public ResponseEntity<Map<String, String>> reindex(@PathVariable String objectType) {
+    public ResponseEntity<ApiResponse<Map<String, String>>> reindex(@PathVariable String objectType) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        if (ctx == null || ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+        if (ctx == null || ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required to reindex", HttpStatus.FORBIDDEN);
         }
-        String orgId = ctx.getOrgId().toString();
-        reindexService.reindex(objectType, orgId);
+        String tenantId = ctx.getTenantId().toString();
+        reindexService.reindex(objectType, tenantId);
         return ResponseEntity.accepted()
-                .body(Map.of("status", "REINDEX_STARTED", "objectType", objectType, "orgId", orgId));
+                .body(ApiResponse.ok(Map.of("status", "REINDEX_STARTED", "objectType", objectType, "tenantId", tenantId)));
     }
 }

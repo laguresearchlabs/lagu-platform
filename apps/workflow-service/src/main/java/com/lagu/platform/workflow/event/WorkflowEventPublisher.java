@@ -45,13 +45,13 @@ public class WorkflowEventPublisher {
         WorkflowEvent event = WorkflowEvent.builder()
                 .eventType("APPROVAL_STEP_COMPLETED")
                 .recordId(instance.getRecordId())
-                .orgId(instance.getOrgId())
+                .tenantId(instance.getTenantId())
                 .approvalInstanceId(instance.getId())
                 .approvalStep(String.valueOf(step))
                 .actorUserId(actorId)
                 .occurredAt(Instant.now())
                 .build();
-        send(instance.getOrgId().toString(), event);
+        send(instance.getTenantId().toString(), event);
     }
 
     public void publishApprovalRejected(WorkflowDefinition wf, RecordWorkflowState rws,
@@ -59,7 +59,7 @@ public class WorkflowEventPublisher {
         WorkflowEvent event = WorkflowEvent.builder()
                 .eventType("APPROVAL_REJECTED")
                 .recordId(rws.getRecordId())
-                .orgId(rws.getOrgId())
+                .tenantId(rws.getTenantId())
                 .objectType(rws.getObjectType())
                 .workflowId(wf.getId())
                 .fromState(rws.getCurrentState())
@@ -67,7 +67,7 @@ public class WorkflowEventPublisher {
                 .actorUserId(actorId)
                 .occurredAt(Instant.now())
                 .build();
-        send(rws.getOrgId().toString(), event);
+        send(rws.getTenantId().toString(), event);
     }
 
     private void publish(String eventType, WorkflowDefinition wf, RecordWorkflowState rws,
@@ -76,7 +76,7 @@ public class WorkflowEventPublisher {
         WorkflowEvent event = WorkflowEvent.builder()
                 .eventType(eventType)
                 .recordId(rws.getRecordId())
-                .orgId(rws.getOrgId())
+                .tenantId(rws.getTenantId())
                 .objectType(rws.getObjectType())
                 .workflowId(wf.getId())
                 .fromState(tx.getFromState())
@@ -88,7 +88,7 @@ public class WorkflowEventPublisher {
                 .actorUserId(actorId)
                 .occurredAt(Instant.now())
                 .build();
-        send(rws.getOrgId().toString(), event);
+        send(rws.getTenantId().toString(), event);
     }
 
     private void send(String key, WorkflowEvent event) {

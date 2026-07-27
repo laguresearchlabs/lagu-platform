@@ -3,7 +3,7 @@ package com.lagu.platform.event.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Data
@@ -15,6 +15,6 @@ public class JoinRequestResponse {
     private String status;
     private String message;
     private UUID reviewedByUserId;
-    private Instant reviewedAt;
-    private Instant createdAt;
+    private OffsetDateTime reviewedAt;
+    private OffsetDateTime createdAt;
 }

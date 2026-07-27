@@ -40,7 +40,7 @@ public class EscalationScheduler {
             AutomationEventContext ctx = buildTimeoutContext(instance);
             if (ctx == null) continue;
 
-            var triggers = triggerRepo.findActiveByEvent("APPROVAL_TIMEOUT", ctx.getOrgId());
+            var triggers = triggerRepo.findActiveByEvent("APPROVAL_TIMEOUT", ctx.getTenantId());
             for (var trigger : triggers) {
                 if (!conditionEvaluator.matches(trigger.getConditions(), ctx)) continue;
                 // Previously called executor.execute() with no guard at all, unlike
@@ -62,13 +62,13 @@ public class EscalationScheduler {
 
     private AutomationEventContext buildTimeoutContext(Map<String, Object> instance) {
         try {
-            UUID orgId    = instance.get("orgId")    != null ? UUID.fromString(String.valueOf(instance.get("orgId")))    : null;
+            UUID tenantId    = instance.get("tenantId")    != null ? UUID.fromString(String.valueOf(instance.get("tenantId")))    : null;
             UUID recordId = instance.get("recordId") != null ? UUID.fromString(String.valueOf(instance.get("recordId"))) : null;
             UUID instanceId = instance.get("id")     != null ? UUID.fromString(String.valueOf(instance.get("id")))       : null;
 
             return AutomationEventContext.builder()
                     .eventType("APPROVAL_TIMEOUT")
-                    .orgId(orgId)
+                    .tenantId(tenantId)
                     .recordId(recordId)
                     .objectType((String) instance.get("objectType"))
                     .approvalInstanceId(instanceId)

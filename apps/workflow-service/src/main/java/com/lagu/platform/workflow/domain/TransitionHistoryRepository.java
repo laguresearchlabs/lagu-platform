@@ -10,6 +10,6 @@ public interface TransitionHistoryRepository extends JpaRepository<TransitionHis
 
     Page<TransitionHistory> findByRecordIdOrderByTransitionedAtDesc(UUID recordId, Pageable pageable);
 
-    Page<TransitionHistory> findByRecordIdAndOrgIdOrderByTransitionedAtDesc(
-            UUID recordId, UUID orgId, Pageable pageable);
+    Page<TransitionHistory> findByRecordIdAndTenantIdOrderByTransitionedAtDesc(
+            UUID recordId, UUID tenantId, Pageable pageable);
 }

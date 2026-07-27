@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Trusts X-User-Id/X-Org-Id/X-User-Roles only when accompanied by the shared
+ * Trusts X-User-Id/X-Tenant-Id/X-User-Roles only when accompanied by the shared
  * {@link #HEADER_GATEWAY_SECRET} header that gateway-service alone knows how to set.
  * Without a matching secret, a caller reaching a service directly (bypassing the gateway,
  * e.g. via docker-compose's published host ports) cannot forge identity — the request is
@@ -33,7 +33,7 @@ import java.util.UUID;
  *   <li><b>Internal service</b> — {@code X-Internal-Service: <service-name>} set by another
  *       lagu-platform service. The caller is granted a single {@code SVC_<NAME>} role (never
  *       user/admin roles; {@link DefaultPermissionEvaluator} defines what services may do).
- *       {@code X-User-Id}/{@code X-Org-Id} are optional and carry the acting user/org for
+ *       {@code X-User-Id}/{@code X-Tenant-Id} are optional and carry the acting user/org for
  *       tenancy scoping and audit attribution. The gateway strips {@code X-Internal-Service}
  *       from external requests, so this shape cannot be reached from outside.</li>
  * </ul>
@@ -42,7 +42,7 @@ import java.util.UUID;
 public class GatewayHeaderFilter extends OncePerRequestFilter {
 
     static final String HEADER_USER_ID          = "X-User-Id";
-    static final String HEADER_ORG_ID           = "X-Org-Id";
+    static final String HEADER_TENANT_ID           = "X-Tenant-Id";
     static final String HEADER_USER_ROLES       = "X-User-Roles";
     static final String HEADER_USER_EMAIL       = "X-User-Email";
     static final String HEADER_GATEWAY_SECRET   = "X-Platform-Gateway-Secret";
@@ -83,7 +83,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
             }
             chain.doFilter(req, res);
         } catch (IllegalArgumentException e) {
-            // Malformed X-User-Id/X-Org-Id (not a UUID) — reject cleanly rather than 500.
+            // Malformed X-User-Id/X-Tenant-Id (not a UUID) — reject cleanly rather than 500.
             res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid identity header");
         } finally {
             CONTEXT.remove();
@@ -93,7 +93,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
 
     private PlatformSecurityContext buildUserContext(HttpServletRequest req, String userIdHeader) {
         String rolesHeader = req.getHeader(HEADER_USER_ROLES);
-        String orgIdHeader = req.getHeader(HEADER_ORG_ID);
+        String tenantIdHeader = req.getHeader(HEADER_TENANT_ID);
 
         Set<String> roles = rolesHeader != null
                 ? new HashSet<>(Arrays.asList(rolesHeader.split(",")))
@@ -103,7 +103,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
 
         return PlatformSecurityContext.builder()
                 .userId(UUID.fromString(userIdHeader))
-                .orgId(orgIdHeader != null ? UUID.fromString(orgIdHeader) : null)
+                .tenantId(tenantIdHeader != null ? UUID.fromString(tenantIdHeader) : null)
                 .roles(roles)
                 .userEmail(req.getHeader(HEADER_USER_EMAIL))
                 .build();
@@ -116,11 +116,11 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
      */
     private PlatformSecurityContext buildServiceContext(HttpServletRequest req, String serviceName,
                                                         String actingUserIdHeader) {
-        String orgIdHeader = req.getHeader(HEADER_ORG_ID);
+        String tenantIdHeader = req.getHeader(HEADER_TENANT_ID);
         return PlatformSecurityContext.builder()
                 .userId(actingUserIdHeader != null ? UUID.fromString(actingUserIdHeader) : null)
-                .orgId(orgIdHeader != null && !orgIdHeader.isBlank()
-                        ? UUID.fromString(orgIdHeader) : null)
+                .tenantId(tenantIdHeader != null && !tenantIdHeader.isBlank()
+                        ? UUID.fromString(tenantIdHeader) : null)
                 .roles(Set.of(serviceRole(serviceName)))
                 .build();
     }

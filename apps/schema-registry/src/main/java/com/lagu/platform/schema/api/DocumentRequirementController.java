@@ -62,8 +62,8 @@ public class DocumentRequirementController {
 
     @DeleteMapping("/{id}")
     @RequirePermission(resource = "DOCUMENT_REQUIREMENT", action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
+    public ResponseEntity<Void> delete(@PathVariable UUID id) {
         documentRequirementService.delete(id);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.noContent().build();
     }
 }

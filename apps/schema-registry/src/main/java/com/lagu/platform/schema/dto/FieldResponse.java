@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public record FieldResponse(
         UUID id,
-        UUID orgId,
+        UUID tenantId,
         String name,
         String label,
         String description,

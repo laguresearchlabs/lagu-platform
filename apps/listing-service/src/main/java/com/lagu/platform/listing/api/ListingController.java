@@ -50,7 +50,7 @@ public class ListingController {
     private boolean isVisibleToCaller(ListingSnapshot snapshot) {
         if ("PUBLISHED".equals(snapshot.getStatus())) return true;
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        return ctx != null && (ctx.isPlatformAdmin() || snapshot.getOrgId().equals(ctx.getOrgId()));
+        return ctx != null && (ctx.isPlatformAdmin() || snapshot.getTenantId().equals(ctx.getTenantId()));
     }
 
     // ── Vendor (authenticated) endpoints ─────────────────────────────────────
@@ -59,7 +59,7 @@ public class ListingController {
     @GetMapping("/my")
     public ResponseEntity<ApiResponse<List<ListingSnapshot>>> myListings() {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(snapshotService.getByOrg(ctx.getOrgId())));
+        return ResponseEntity.ok(ApiResponse.ok(snapshotService.getByOrg(ctx.getTenantId())));
     }
 
     // ── Availability endpoints ────────────────────────────────────────────────
@@ -84,7 +84,7 @@ public class ListingController {
             @RequestBody AvailabilityRequest req) {
         PlatformSecurityContext ctx = requireContext();
         return ResponseEntity.ok(ApiResponse.ok(
-                snapshotService.setAvailability(recordId, ctx.getOrgId(),
+                snapshotService.setAvailability(recordId, ctx.getTenantId(),
                         req.from(), req.to(), req.slotType())));
     }
 
@@ -97,7 +97,7 @@ public class ListingController {
         // searchBoost is intentionally not accepted from the request — publishSnapshot derives
         // it from verificationTier so a caller can't set an arbitrary search-ranking boost.
         ListingSnapshot snap = snapshotService.publishSnapshot(
-                recordId, req.orgId(), req.objectType(), req.data(), req.verificationTier());
+                recordId, req.tenantId(), req.objectType(), req.data(), req.verificationTier());
         return snap != null
                 ? ResponseEntity.ok(ApiResponse.ok(snap))
                 : ResponseEntity.badRequest().build();
@@ -133,6 +133,6 @@ public class ListingController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             String slotType) {}
 
-    record PublishRequest(java.util.UUID orgId, String objectType,
+    record PublishRequest(java.util.UUID tenantId, String objectType,
                           java.util.Map<String, Object> data, String verificationTier) {}
 }

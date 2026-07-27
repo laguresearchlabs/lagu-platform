@@ -14,7 +14,7 @@ import java.util.UUID;
 public class RecordResponse {
 
     private UUID   id;
-    private UUID   orgId;
+    private UUID   tenantId;
     private String objectType;
     private String status;
     private Map<String, Object> data;

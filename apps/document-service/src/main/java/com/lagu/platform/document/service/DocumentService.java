@@ -47,7 +47,7 @@ public class DocumentService {
         String fileUrl = storageService.upload(file, ctx.getUserId(), documentType);
 
         Document doc = new Document();
-        doc.setOrgId(ctx.getOrgId());
+        doc.setTenantId(ctx.getTenantId());
         doc.setUserId(ctx.getUserId());
         doc.setDocumentType(documentType.toUpperCase());
         doc.setIdentitySubType(identitySubType != null ? identitySubType.toUpperCase() : null);
@@ -65,7 +65,7 @@ public class DocumentService {
 
     public List<DocumentDto> listMyDocuments() {
         PlatformSecurityContext ctx = requireContext();
-        return repository.findByUserIdAndOrgIdOrderByUploadedAtDesc(ctx.getUserId(), ctx.getOrgId())
+        return repository.findByUserIdAndTenantIdOrderByUploadedAtDesc(ctx.getUserId(), ctx.getTenantId())
                 .stream().map(DocumentDto::from).toList();
     }
 
@@ -76,8 +76,8 @@ public class DocumentService {
 
     public DocumentSubmissionStatusResponse getSubmissionStatus() {
         PlatformSecurityContext ctx = requireContext();
-        List<Document> myDocs = repository.findByUserIdAndOrgIdOrderByUploadedAtDesc(
-                ctx.getUserId(), ctx.getOrgId());
+        List<Document> myDocs = repository.findByUserIdAndTenantIdOrderByUploadedAtDesc(
+                ctx.getUserId(), ctx.getTenantId());
 
         Map<String, Document> latestByType = new LinkedHashMap<>();
         for (Document d : myDocs) {
@@ -109,7 +109,8 @@ public class DocumentService {
                     .documentId(doc != null ? doc.getId() : null)
                     .identitySubType(doc != null ? doc.getIdentitySubType() : null)
                     .rejectionReason(doc != null ? doc.getRejectionReason() : null)
-                    .uploadedAt(doc != null ? doc.getUploadedAt() : null)
+                    .uploadedAt(doc != null && doc.getUploadedAt() != null
+                            ? doc.getUploadedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                     .build());
         }
 
@@ -122,8 +123,8 @@ public class DocumentService {
 
     public PageResult<DocumentDto> getPendingReview(int page, int size) {
         PlatformSecurityContext ctx = requireContext();
-        var paged = repository.findByOrgIdAndStatusOrderByUploadedAtAsc(
-                ctx.getOrgId(), "UPLOADED",
+        var paged = repository.findByTenantIdAndStatusOrderByUploadedAtAsc(
+                ctx.getTenantId(), "UPLOADED",
                 PageRequest.of(page, size, Sort.by("uploadedAt").ascending()));
         return PageResult.from(paged.map(DocumentDto::from));
     }
@@ -187,7 +188,7 @@ public class DocumentService {
             return repository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Document", id.toString()));
         }
-        Document doc = repository.findByIdAndOrgId(id, ctx.getOrgId())
+        Document doc = repository.findByIdAndTenantId(id, ctx.getTenantId())
                 .orElseThrow(() -> new ResourceNotFoundException("Document", id.toString()));
         boolean isOwner = doc.getUserId() != null && doc.getUserId().equals(ctx.getUserId());
         boolean isReviewer = ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER");

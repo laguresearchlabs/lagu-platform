@@ -56,7 +56,7 @@ Consumer/public:
 
 Vendor (authenticated, requires a valid `PlatformSecurityContext` — see Security below):
 - `GET /api/v1/listings/my` — the caller's own org's listing snapshots
-  (`ListingSnapshotService.getByOrg`, scoped by `ctx.getOrgId()`).
+  (`ListingSnapshotService.getByOrg`, scoped by `ctx.getTenantId()`).
 
 Availability:
 - `GET /api/v1/listings/{recordId}/availability?from=&to=` — availability slots in a date
@@ -67,7 +67,7 @@ Availability:
 
 Admin only (`requireAdmin()` — requires `CONFIG_ADMIN` or `PLATFORM_ADMIN` role):
 - `POST /api/v1/listings/{recordId}/publish` — manually (re)publish a snapshot, bypassing the
-  normal workflow-transition path. Body: `{orgId, objectType, data, verificationTier}` — note
+  normal workflow-transition path. Body: `{tenantId, objectType, data, verificationTier}` — note
   `searchBoost` is deliberately **not** an accepted field.
 - `POST /api/v1/listings/{recordId}/unpublish` — manually unpublish a snapshot.
 
@@ -154,7 +154,7 @@ copy-pasted and does not reflect the real listening port.
 ## Security
 
 Identity comes from trusted headers set by an API gateway (`GatewayHeaderFilter`,
-`libs:security`), never from a JWT parsed locally: `X-User-Id`, `X-Org-Id`, `X-User-Roles`, or
+`libs:security`), never from a JWT parsed locally: `X-User-Id`, `X-Tenant-Id`, `X-User-Roles`, or
 `X-Internal-Service` for service-to-service calls — trusted only when accompanied by a matching
 `X-Platform-Gateway-Secret`. `ListingController` reads the resulting `PlatformSecurityContext`
 via `GatewayHeaderFilter.current()`. Endpoints under "Vendor" and "Availability" require a

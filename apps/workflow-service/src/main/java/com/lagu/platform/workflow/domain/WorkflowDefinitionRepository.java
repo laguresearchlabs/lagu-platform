@@ -9,18 +9,18 @@ import java.util.UUID;
 
 public interface WorkflowDefinitionRepository extends JpaRepository<WorkflowDefinition, UUID> {
 
-    /** Org-scoped takes priority over platform-level (org_id IS NULL). */
+    /** Org-scoped takes priority over platform-level (tenant_id IS NULL). */
     @Query("""
             SELECT w FROM WorkflowDefinition w
             WHERE w.active = true AND w.objectType = :objectType
-              AND (w.orgId = :orgId OR w.orgId IS NULL)
-            ORDER BY w.orgId NULLS LAST
+              AND (w.tenantId = :tenantId OR w.tenantId IS NULL)
+            ORDER BY w.tenantId NULLS LAST
             """)
-    List<WorkflowDefinition> findForObjectType(String objectType, UUID orgId);
+    List<WorkflowDefinition> findForObjectType(String objectType, UUID tenantId);
 
     List<WorkflowDefinition> findByActiveTrue();
 
     /** Org-scoped listing — see findForObjectType for the same "own org or platform-level" rule. */
-    @Query("SELECT w FROM WorkflowDefinition w WHERE w.active = true AND (w.orgId = :orgId OR w.orgId IS NULL)")
-    List<WorkflowDefinition> findByActiveTrueAndOrgIdOrPlatformLevel(UUID orgId);
+    @Query("SELECT w FROM WorkflowDefinition w WHERE w.active = true AND (w.tenantId = :tenantId OR w.tenantId IS NULL)")
+    List<WorkflowDefinition> findByActiveTrueAndTenantIdOrPlatformLevel(UUID tenantId);
 }

@@ -15,8 +15,8 @@ public class RecordRelationship {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "relationship_name", nullable = false)
     private String relationshipName;

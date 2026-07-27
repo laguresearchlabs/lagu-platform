@@ -21,8 +21,8 @@ public class ChangeSet {
     @Column(name = "record_id", nullable = false)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "object_type", length = 100)
     private String objectType;

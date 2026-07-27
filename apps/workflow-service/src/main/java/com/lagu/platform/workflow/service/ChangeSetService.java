@@ -29,12 +29,12 @@ public class ChangeSetService {
     }
 
     @Transactional
-    public ChangeSet submit(UUID recordId, UUID orgId, String objectType,
+    public ChangeSet submit(UUID recordId, UUID tenantId, String objectType,
                             UUID workflowId, Map<String, Object> originalData,
                             Map<String, Object> proposedData, UUID submittedBy) {
         ChangeSet cs = new ChangeSet();
         cs.setRecordId(recordId);
-        cs.setOrgId(orgId);
+        cs.setTenantId(tenantId);
         cs.setObjectType(objectType);
         if (workflowId != null) {
             stateRepo.findById(workflowId).ifPresent(s -> cs.setWorkflow(s.getWorkflow()));
@@ -85,7 +85,7 @@ public class ChangeSetService {
         return changeSetRepo.findByStatusOrderBySubmittedAtAsc("PENDING");
     }
 
-    public List<ChangeSet> listByOrgAndStatus(UUID orgId, String status) {
-        return changeSetRepo.findByOrgIdAndStatusOrderBySubmittedAtDesc(orgId, status);
+    public List<ChangeSet> listByOrgAndStatus(UUID tenantId, String status) {
+        return changeSetRepo.findByTenantIdAndStatusOrderBySubmittedAtDesc(tenantId, status);
     }
 }

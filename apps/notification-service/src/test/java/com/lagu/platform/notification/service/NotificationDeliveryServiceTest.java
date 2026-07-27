@@ -34,7 +34,7 @@ class NotificationDeliveryServiceTest {
                 .eventId(eventId)
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("SEND_NOTIFICATION")
-                .orgId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .triggerId(UUID.randomUUID())
                 .recordId(UUID.randomUUID())
                 .payload(payload)
@@ -158,7 +158,7 @@ class NotificationDeliveryServiceTest {
 
         AutomationEvent noId = AutomationEvent.builder()
                 .eventId(null).eventType("ACTION_SUCCEEDED").actionType("SEND_NOTIFICATION")
-                .orgId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .payload(Map.of("title", "Hi", "channel", "IN_APP"))
                 .build();
 

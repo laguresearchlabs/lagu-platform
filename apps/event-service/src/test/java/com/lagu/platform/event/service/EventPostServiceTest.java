@@ -36,7 +36,9 @@ class EventPostServiceTest {
     private final EventPostService service = new EventPostService(eventRepo, memberRepo, likeRepo, recordClient);
 
     private final UUID eventId = UUID.randomUUID();
-    private final UUID orgId = UUID.randomUUID();
+    // Event.id doubles as the org-partition key now (see Event.java) — alias kept so this file's
+    // existing "tenantId" naming for EventMember lookups didn't need a sweeping rename.
+    private final UUID tenantId = eventId;
     private final UUID recordId = UUID.randomUUID();
     private final UUID postId = UUID.randomUUID();
 
@@ -44,14 +46,13 @@ class EventPostServiceTest {
     void setUp() {
         Event event = new Event();
         event.setId(eventId);
-        event.setOrgId(orgId);
         event.setRecordId(recordId);
         when(eventRepo.findById(eventId)).thenReturn(Optional.of(event));
     }
 
     private EventMember memberWithRole(UUID userId, String role) {
         EventMember m = new EventMember();
-        m.setOrgId(orgId);
+        m.setTenantId(tenantId);
         m.setUserId(userId);
         m.setRole(role);
         m.setStatus("ACCEPTED");
@@ -66,7 +67,7 @@ class EventPostServiceTest {
     @Test
     void togglePinRejectsPlainMember() {
         UUID member = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, member))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, member))
                 .thenReturn(Optional.of(memberWithRole(member, "INVITEE")));
 
         assertThatThrownBy(() -> service.togglePin(eventId, postId, member))
@@ -79,21 +80,21 @@ class EventPostServiceTest {
     @Test
     void togglePinSucceedsForAdmin() {
         UUID admin = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, admin))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, admin))
                 .thenReturn(Optional.of(memberWithRole(admin, "ADMIN")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(admin, false)));
-        when(recordClient.patchRecord(eq(postId), eq(orgId), eq(admin), eq(Map.of("post_pinned", true))))
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(admin, false)));
+        when(recordClient.patchRecord(eq(postId), eq(tenantId), eq(admin), eq(Map.of("post_pinned", true))))
                 .thenReturn(Map.of("data", postRecord(admin, false)));
 
         service.togglePin(eventId, postId, admin);
 
-        verify(recordClient).patchRecord(postId, orgId, admin, Map.of("post_pinned", true));
+        verify(recordClient).patchRecord(postId, tenantId, admin, Map.of("post_pinned", true));
     }
 
     @Test
     void approveRejectsPlainMember() {
         UUID member = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, member))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, member))
                 .thenReturn(Optional.of(memberWithRole(member, "INVITEE")));
 
         assertThatThrownBy(() -> service.approvePost(eventId, postId, member))
@@ -104,7 +105,7 @@ class EventPostServiceTest {
     @Test
     void listPendingRejectsPlainMember() {
         UUID member = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, member))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, member))
                 .thenReturn(Optional.of(memberWithRole(member, "INVITEE")));
 
         assertThatThrownBy(() -> service.listPendingPosts(eventId, member, 0, 20))
@@ -115,9 +116,9 @@ class EventPostServiceTest {
     void deletePostRejectsNonAuthorNonModerator() {
         UUID author = UUID.randomUUID();
         UUID stranger = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, stranger))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, stranger))
                 .thenReturn(Optional.of(memberWithRole(stranger, "INVITEE")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(author, false)));
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(author, false)));
 
         assertThatThrownBy(() -> service.deletePost(eventId, postId, stranger))
                 .isInstanceOf(ResponseStatusException.class);
@@ -127,35 +128,35 @@ class EventPostServiceTest {
     @Test
     void deletePostSucceedsForAuthor() {
         UUID author = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, author))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, author))
                 .thenReturn(Optional.of(memberWithRole(author, "INVITEE")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(author, false)));
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(author, false)));
 
         service.deletePost(eventId, postId, author);
 
-        verify(recordClient).deleteRecord(postId, orgId);
+        verify(recordClient).deleteRecord(postId, tenantId);
     }
 
     @Test
     void deletePostSucceedsForModeratorEvenIfNotAuthor() {
         UUID author = UUID.randomUUID();
         UUID admin = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, admin))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, admin))
                 .thenReturn(Optional.of(memberWithRole(admin, "MAINTAINER")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(author, false)));
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(author, false)));
 
         service.deletePost(eventId, postId, admin);
 
-        verify(recordClient).deleteRecord(postId, orgId);
+        verify(recordClient).deleteRecord(postId, tenantId);
     }
 
     @Test
     void addCommentRejectedWhenPostLocked() {
         UUID member = UUID.randomUUID();
         UUID author = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, member))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, member))
                 .thenReturn(Optional.of(memberWithRole(member, "INVITEE")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(author, true)));
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(author, true)));
 
         assertThatThrownBy(() -> service.addComment(eventId, postId, member, new CreateCommentRequest()))
                 .isInstanceOf(ValidationException.class);
@@ -165,9 +166,9 @@ class EventPostServiceTest {
     @Test
     void toggleLikeTogglesOnAndOff() {
         UUID liker = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, liker))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, liker))
                 .thenReturn(Optional.of(memberWithRole(liker, "INVITEE")));
-        when(recordClient.getRecord(postId, orgId)).thenReturn(Map.of("data", postRecord(liker, false)));
+        when(recordClient.getRecord(postId, tenantId)).thenReturn(Map.of("data", postRecord(liker, false)));
         when(likeRepo.existsByPostRecordIdAndUserId(postId, liker)).thenReturn(false).thenReturn(true);
 
         service.toggleLike(eventId, postId, liker);
@@ -179,12 +180,12 @@ class EventPostServiceTest {
     @Test
     void createPostUsesPublishTriggerWhenApprovalNotRequired() {
         UUID author = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, author))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, author))
                 .thenReturn(Optional.of(memberWithRole(author, "INVITEE")));
         Map<String, Object> createResponse = Map.of("data", Map.of("id", postId.toString()));
-        when(recordClient.createRecord(eq(orgId), eq(author), eq("EVENT_POST"), any())).thenReturn(createResponse);
+        when(recordClient.createRecord(eq(tenantId), eq(author), eq("EVENT_POST"), any())).thenReturn(createResponse);
         when(recordClient.extractRecordId(createResponse)).thenReturn(postId);
-        when(recordClient.getRecord(recordId, orgId)).thenReturn(Map.of("data", Map.of("data", Map.of())));
+        when(recordClient.getRecord(recordId, tenantId)).thenReturn(Map.of("data", Map.of("data", Map.of())));
 
         CreatePostRequest req = new CreatePostRequest();
         req.setContent("hello");
@@ -192,18 +193,18 @@ class EventPostServiceTest {
         var response = service.createPost(eventId, author, req);
 
         assertThat(response.getStatus()).isEqualTo("PUBLISHED");
-        verify(recordClient).requestTransition(postId, orgId, author, "publish");
+        verify(recordClient).requestTransition(postId, tenantId, author, "publish");
     }
 
     @Test
     void createPostUsesSubmitForApprovalTriggerWhenRequired() {
         UUID author = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, author))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, author))
                 .thenReturn(Optional.of(memberWithRole(author, "INVITEE")));
         Map<String, Object> createResponse = Map.of("data", Map.of("id", postId.toString()));
-        when(recordClient.createRecord(eq(orgId), eq(author), eq("EVENT_POST"), any())).thenReturn(createResponse);
+        when(recordClient.createRecord(eq(tenantId), eq(author), eq("EVENT_POST"), any())).thenReturn(createResponse);
         when(recordClient.extractRecordId(createResponse)).thenReturn(postId);
-        when(recordClient.getRecord(recordId, orgId))
+        when(recordClient.getRecord(recordId, tenantId))
                 .thenReturn(Map.of("data", Map.of("data", Map.of("post_approval_required", true))));
 
         CreatePostRequest req = new CreatePostRequest();
@@ -212,6 +213,6 @@ class EventPostServiceTest {
         var response = service.createPost(eventId, author, req);
 
         assertThat(response.getStatus()).isEqualTo("PENDING");
-        verify(recordClient).requestTransition(postId, orgId, author, "submit_for_approval");
+        verify(recordClient).requestTransition(postId, tenantId, author, "submit_for_approval");
     }
 }

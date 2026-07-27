@@ -33,9 +33,21 @@ spring:
 server:
   port: ${SERVER_PORT:8109}
 
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
 platform:
-  listing-service.url: ${LISTING_SERVICE_URL:http://listing-service:8108}
-  metadata-service.url: ${METADATA_SERVICE_URL:http://metadata-service:8080}
+  outbox:
+    enabled: true
+    table: booking_outbox
 
 management:
   endpoints.web.exposure.include: health,info,prometheus

@@ -7,7 +7,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface VendorProfileRepository extends JpaRepository<VendorProfile, UUID> {
-    Optional<VendorProfile> findByOrgId(UUID orgId);
     Optional<VendorProfile> findByOwnerUserId(UUID userId);
     List<VendorProfile> findByStatus(String status);
 }

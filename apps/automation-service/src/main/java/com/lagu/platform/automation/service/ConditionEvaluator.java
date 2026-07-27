@@ -52,7 +52,7 @@ public class ConditionEvaluator {
             case "previousStatus" -> ctx.getPreviousStatus();
             case "objectType"     -> ctx.getObjectType();
             case "eventType"      -> ctx.getEventType();
-            case "orgId"          -> ctx.getOrgId() != null ? ctx.getOrgId().toString() : null;
+            case "tenantId"          -> ctx.getTenantId() != null ? ctx.getTenantId().toString() : null;
             default               -> null;
         };
     }

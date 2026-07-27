@@ -20,8 +20,8 @@ public class ApprovalInstance {
     @Column(name = "record_id", nullable = false)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "approval_def_id", nullable = false)

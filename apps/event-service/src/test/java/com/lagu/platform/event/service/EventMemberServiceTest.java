@@ -9,11 +9,14 @@ import com.lagu.platform.event.domain.EventMemberRepository;
 import com.lagu.platform.event.domain.EventRepository;
 import com.lagu.platform.event.dto.CreateJoinRequestRequest;
 import com.lagu.platform.event.dto.InviteMemberRequest;
+import com.lagu.platform.event.dto.UpdateMemberRoleRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,7 +32,10 @@ class EventMemberServiceTest {
     private final EventMemberService service = new EventMemberService(eventRepo, memberRepo, joinRequestRepo);
 
     private final UUID eventId = UUID.randomUUID();
-    private final UUID orgId = UUID.randomUUID();
+    // Event.id doubles as the org-partition key now (see Event.java) — kept as a separate local
+    // so the rest of this file's existing "tenantId" naming for EventMember/EventJoinRequest lookups
+    // didn't need a sweeping rename, it's just an alias for eventId.
+    private final UUID tenantId = eventId;
     private final UUID ownerId = UUID.randomUUID();
 
     private Event event;
@@ -38,18 +44,22 @@ class EventMemberServiceTest {
     void setUp() {
         event = new Event();
         event.setId(eventId);
-        event.setOrgId(orgId);
         event.setOwnerUserId(ownerId);
         when(eventRepo.findById(eventId)).thenReturn(Optional.of(event));
     }
 
     private EventMember memberWithRole(UUID userId, String role) {
         EventMember m = new EventMember();
-        m.setOrgId(orgId);
+        m.setTenantId(tenantId);
         m.setUserId(userId);
         m.setRole(role);
         m.setStatus("ACCEPTED");
         return m;
+    }
+
+    private void stubManager(UUID userId, String role) {
+        when(memberRepo.findByTenantIdAndUserIdAndStatusNot(tenantId, userId, "REMOVED"))
+                .thenReturn(Optional.of(memberWithRole(userId, role)));
     }
 
     // ── invite() ─────────────────────────────────────────────────────────────
@@ -57,8 +67,7 @@ class EventMemberServiceTest {
     @Test
     void inviteRejectedFromNonManager() {
         UUID requester = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, requester))
-                .thenReturn(Optional.of(memberWithRole(requester, "INVITEE")));
+        stubManager(requester, "INVITEE");
 
         InviteMemberRequest req = new InviteMemberRequest();
         req.setUserId(UUID.randomUUID());
@@ -71,23 +80,24 @@ class EventMemberServiceTest {
 
     @Test
     void inviteRejectsAlreadyExistingMember() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
         UUID targetUser = UUID.randomUUID();
-        when(memberRepo.existsByOrgIdAndUserId(orgId, targetUser)).thenReturn(true);
+        EventMember existing = memberWithRole(targetUser, "INVITEE");
+        existing.setId(UUID.randomUUID());
+        existing.setStatus("ACCEPTED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, targetUser)).thenReturn(Optional.of(existing));
 
         InviteMemberRequest req = new InviteMemberRequest();
         req.setUserId(targetUser);
 
         assertThatThrownBy(() -> service.invite(eventId, ownerId, req))
                 .isInstanceOf(ValidationException.class);
-        verify(memberRepo, never()).save(argThat(m -> m.getUserId().equals(targetUser)));
+        verify(memberRepo, never()).save(any());
     }
 
     @Test
     void inviteRejectsInvalidRole() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
 
         InviteMemberRequest req = new InviteMemberRequest();
         req.setUserId(UUID.randomUUID());
@@ -99,10 +109,9 @@ class EventMemberServiceTest {
 
     @Test
     void inviteSucceedsFromAdmin() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
         UUID targetUser = UUID.randomUUID();
-        when(memberRepo.existsByOrgIdAndUserId(orgId, targetUser)).thenReturn(false);
+        when(memberRepo.findByTenantIdAndUserId(tenantId, targetUser)).thenReturn(Optional.empty());
 
         InviteMemberRequest req = new InviteMemberRequest();
         req.setUserId(targetUser);
@@ -114,29 +123,116 @@ class EventMemberServiceTest {
                 && "MAINTAINER".equals(m.getRole()) && "INVITED".equals(m.getStatus())));
     }
 
+    @Test
+    void inviteReactivatesDeclinedMember() {
+        stubManager(ownerId, "ADMIN");
+        UUID targetUser = UUID.randomUUID();
+        EventMember declined = memberWithRole(targetUser, "INVITEE");
+        declined.setId(UUID.randomUUID());
+        declined.setStatus("DECLINED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, targetUser)).thenReturn(Optional.of(declined));
+
+        InviteMemberRequest req = new InviteMemberRequest();
+        req.setUserId(targetUser);
+        req.setRole("INVITEE");
+
+        service.invite(eventId, ownerId, req);
+
+        verify(memberRepo).save(argThat(m -> m.getUserId().equals(targetUser) && "INVITED".equals(m.getStatus())));
+    }
+
+    @Test
+    void inviteReactivatesRemovedMember() {
+        stubManager(ownerId, "ADMIN");
+        UUID targetUser = UUID.randomUUID();
+        EventMember removed = memberWithRole(targetUser, "INVITEE");
+        removed.setId(UUID.randomUUID());
+        removed.setStatus("REMOVED");
+        removed.setRemovedBy(UUID.randomUUID());
+        removed.setRemovedAt(Instant.now());
+        when(memberRepo.findByTenantIdAndUserId(tenantId, targetUser)).thenReturn(Optional.of(removed));
+
+        InviteMemberRequest req = new InviteMemberRequest();
+        req.setUserId(targetUser);
+        req.setRole("INVITEE");
+
+        service.invite(eventId, ownerId, req);
+
+        verify(memberRepo).save(argThat(m -> m.getUserId().equals(targetUser)
+                && "INVITED".equals(m.getStatus()) && m.getRemovedBy() == null && m.getRemovedAt() == null));
+    }
+
+    // ── updateRole() ─────────────────────────────────────────────────────────
+
+    @Test
+    void updateRoleRejectsSelfAction() {
+        stubManager(ownerId, "ADMIN");
+
+        UpdateMemberRoleRequest req = new UpdateMemberRoleRequest();
+        req.setRole("MAINTAINER");
+
+        assertThatThrownBy(() -> service.updateRole(eventId, ownerId, ownerId, req))
+                .isInstanceOf(ValidationException.class);
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
+    void updateRoleRejectsDemotingLastAdminEvenWithMaintainerPresent() {
+        // Proves the last-manager guard uses the narrower {ADMIN} set, not canManage()'s
+        // {ADMIN, MAINTAINER} authorization gate — a remaining MAINTAINER must NOT count as
+        // "another manager" for this guard, or the sole ADMIN could be demoted with no one
+        // left able to approve join requests / manage roles.
+        UUID requester = UUID.randomUUID();
+        stubManager(requester, "ADMIN");
+        UUID target = UUID.randomUUID();
+        EventMember soleAdmin = memberWithRole(target, "ADMIN");
+        when(memberRepo.findByTenantIdAndUserIdAndStatusNot(tenantId, target, "REMOVED"))
+                .thenReturn(Optional.of(soleAdmin));
+        EventMember maintainer = memberWithRole(UUID.randomUUID(), "MAINTAINER");
+        when(memberRepo.findByTenantId(tenantId)).thenReturn(List.of(soleAdmin, maintainer));
+
+        UpdateMemberRoleRequest req = new UpdateMemberRoleRequest();
+        req.setRole("MAINTAINER");
+
+        assertThatThrownBy(() -> service.updateRole(eventId, requester, target, req))
+                .isInstanceOf(ValidationException.class);
+    }
+
     // ── remove() ─────────────────────────────────────────────────────────────
 
     @Test
     void removeRejectsRemovingTheEventOwner() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        UUID admin = UUID.randomUUID();
+        stubManager(admin, "ADMIN");
 
-        assertThatThrownBy(() -> service.remove(eventId, ownerId, ownerId))
+        assertThatThrownBy(() -> service.remove(eventId, admin, ownerId))
                 .isInstanceOf(ValidationException.class);
         verify(memberRepo, never()).delete(any());
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
+    void removeRejectsSelfAction() {
+        UUID admin = UUID.randomUUID();
+        stubManager(admin, "ADMIN");
+
+        assertThatThrownBy(() -> service.remove(eventId, admin, admin))
+                .isInstanceOf(ValidationException.class);
+        verify(memberRepo, never()).save(any());
     }
 
     @Test
     void removeSucceedsForNonOwnerTarget() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
         UUID targetUser = UUID.randomUUID();
         EventMember target = memberWithRole(targetUser, "INVITEE");
-        when(memberRepo.findByOrgIdAndUserId(orgId, targetUser)).thenReturn(Optional.of(target));
+        when(memberRepo.findByTenantIdAndUserIdAndStatusNot(tenantId, targetUser, "REMOVED"))
+                .thenReturn(Optional.of(target));
 
         service.remove(eventId, ownerId, targetUser);
 
-        verify(memberRepo).delete(target);
+        verify(memberRepo, never()).delete(any());
+        verify(memberRepo).save(argThat(m -> "REMOVED".equals(m.getStatus()) && m.getRemovedBy().equals(ownerId)));
     }
 
     // ── respondToInvite() ───────────────────────────────────────────────────────
@@ -146,7 +242,7 @@ class EventMemberServiceTest {
         UUID invitee = UUID.randomUUID();
         EventMember accepted = memberWithRole(invitee, "INVITEE");
         accepted.setStatus("ACCEPTED");
-        when(memberRepo.findByOrgIdAndUserId(orgId, invitee)).thenReturn(Optional.of(accepted));
+        when(memberRepo.findByTenantIdAndUserId(tenantId, invitee)).thenReturn(Optional.of(accepted));
 
         assertThatThrownBy(() -> service.respondToInvite(eventId, invitee, true))
                 .isInstanceOf(ValidationException.class);
@@ -157,7 +253,7 @@ class EventMemberServiceTest {
         UUID invitee = UUID.randomUUID();
         EventMember invited = memberWithRole(invitee, "INVITEE");
         invited.setStatus("INVITED");
-        when(memberRepo.findByOrgIdAndUserId(orgId, invitee)).thenReturn(Optional.of(invited));
+        when(memberRepo.findByTenantIdAndUserId(tenantId, invitee)).thenReturn(Optional.of(invited));
         when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         var response = service.respondToInvite(eventId, invitee, true);
@@ -169,7 +265,7 @@ class EventMemberServiceTest {
         UUID invitee = UUID.randomUUID();
         EventMember invited = memberWithRole(invitee, "INVITEE");
         invited.setStatus("INVITED");
-        when(memberRepo.findByOrgIdAndUserId(orgId, invitee)).thenReturn(Optional.of(invited));
+        when(memberRepo.findByTenantIdAndUserId(tenantId, invitee)).thenReturn(Optional.of(invited));
         when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         var response = service.respondToInvite(eventId, invitee, false);
@@ -181,17 +277,32 @@ class EventMemberServiceTest {
     @Test
     void requestToJoinRejectedIfAlreadyMember() {
         UUID requester = UUID.randomUUID();
-        when(memberRepo.existsByOrgIdAndUserId(orgId, requester)).thenReturn(true);
+        EventMember existing = memberWithRole(requester, "INVITEE");
+        existing.setStatus("ACCEPTED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> service.requestToJoin(eventId, requester, new CreateJoinRequestRequest()))
                 .isInstanceOf(ValidationException.class);
     }
 
     @Test
+    void requestToJoinAllowedAfterPriorDecline() {
+        UUID requester = UUID.randomUUID();
+        EventMember declined = memberWithRole(requester, "INVITEE");
+        declined.setStatus("DECLINED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.of(declined));
+        when(joinRequestRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+
+        service.requestToJoin(eventId, requester, new CreateJoinRequestRequest());
+
+        verify(joinRequestRepo).save(any());
+    }
+
+    @Test
     void requestToJoinRejectedIfAlreadyPending() {
         UUID requester = UUID.randomUUID();
-        when(memberRepo.existsByOrgIdAndUserId(orgId, requester)).thenReturn(false);
-        when(joinRequestRepo.findByOrgIdAndUserId(orgId, requester))
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+        when(joinRequestRepo.findByTenantIdAndUserId(tenantId, requester))
                 .thenReturn(Optional.of(new EventJoinRequest()));
 
         assertThatThrownBy(() -> service.requestToJoin(eventId, requester, new CreateJoinRequestRequest()))
@@ -200,12 +311,11 @@ class EventMemberServiceTest {
 
     @Test
     void approveRejectsJoinRequestFromAnotherEvent() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
 
         EventJoinRequest foreign = new EventJoinRequest();
         foreign.setId(UUID.randomUUID());
-        foreign.setOrgId(UUID.randomUUID()); // different event's org
+        foreign.setTenantId(UUID.randomUUID()); // different event's org
         when(joinRequestRepo.findById(foreign.getId())).thenReturn(Optional.of(foreign));
 
         assertThatThrownBy(() -> service.approve(eventId, ownerId, foreign.getId()))
@@ -214,22 +324,69 @@ class EventMemberServiceTest {
 
     @Test
     void approveCreatesAcceptedMemberWithRequestedRole() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
-                .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN")));
+        stubManager(ownerId, "ADMIN");
 
         UUID requesterUserId = UUID.randomUUID();
         EventJoinRequest jr = new EventJoinRequest();
         jr.setId(UUID.randomUUID());
-        jr.setOrgId(orgId);
+        jr.setTenantId(tenantId);
         jr.setUserId(requesterUserId);
         jr.setRequestedRole("MAINTAINER");
         when(joinRequestRepo.findById(jr.getId())).thenReturn(Optional.of(jr));
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requesterUserId)).thenReturn(Optional.empty());
         when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.approve(eventId, ownerId, jr.getId());
 
         verify(memberRepo).save(argThat(m -> m.getUserId().equals(requesterUserId)
                 && "MAINTAINER".equals(m.getRole()) && "ACCEPTED".equals(m.getStatus())));
+        verify(joinRequestRepo).save(argThat(r -> "APPROVED".equals(r.getStatus())));
+    }
+
+    @Test
+    void approveRejectsWhenTargetAlreadyActiveMember() {
+        stubManager(ownerId, "ADMIN");
+
+        UUID requesterUserId = UUID.randomUUID();
+        EventJoinRequest jr = new EventJoinRequest();
+        jr.setId(UUID.randomUUID());
+        jr.setTenantId(tenantId);
+        jr.setUserId(requesterUserId);
+        jr.setRequestedRole("INVITEE");
+        when(joinRequestRepo.findById(jr.getId())).thenReturn(Optional.of(jr));
+
+        EventMember alreadyActive = memberWithRole(requesterUserId, "MAINTAINER");
+        alreadyActive.setStatus("ACCEPTED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requesterUserId)).thenReturn(Optional.of(alreadyActive));
+
+        assertThatThrownBy(() -> service.approve(eventId, ownerId, jr.getId()))
+                .isInstanceOf(ValidationException.class);
+        verify(joinRequestRepo).save(argThat(r -> "REJECTED".equals(r.getStatus())));
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
+    void approveReactivatesRemovedMember() {
+        stubManager(ownerId, "ADMIN");
+
+        UUID requesterUserId = UUID.randomUUID();
+        EventJoinRequest jr = new EventJoinRequest();
+        jr.setId(UUID.randomUUID());
+        jr.setTenantId(tenantId);
+        jr.setUserId(requesterUserId);
+        jr.setRequestedRole("MAINTAINER");
+        when(joinRequestRepo.findById(jr.getId())).thenReturn(Optional.of(jr));
+
+        EventMember removed = memberWithRole(requesterUserId, "INVITEE");
+        removed.setId(UUID.randomUUID());
+        removed.setStatus("REMOVED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requesterUserId)).thenReturn(Optional.of(removed));
+        when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.approve(eventId, ownerId, jr.getId());
+
+        verify(memberRepo).save(argThat(m -> m.getId().equals(removed.getId())
+                && "ACCEPTED".equals(m.getStatus()) && "MAINTAINER".equals(m.getRole())));
         verify(joinRequestRepo).save(argThat(r -> "APPROVED".equals(r.getStatus())));
     }
 }

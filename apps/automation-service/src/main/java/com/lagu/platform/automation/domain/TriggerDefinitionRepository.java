@@ -14,7 +14,7 @@ public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefini
 
     /**
      * Returns active triggers matching eventType for the org (including platform-level where
-     * org_id IS NULL) — with actions eagerly fetched (LEFT JOIN FETCH + DISTINCT to avoid
+     * tenant_id IS NULL) — with actions eagerly fetched (LEFT JOIN FETCH + DISTINCT to avoid
      * duplicate rows per action). PlatformEventConsumer/EscalationScheduler pass these straight
      * into AutomationExecutor.execute(), which iterates trigger.getActions() outside any
      * transaction of its own; without eager fetch here, that access threw
@@ -27,13 +27,13 @@ public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefini
         LEFT JOIN FETCH t.actions
         WHERE t.isActive = true
           AND t.eventType = :eventType
-          AND (t.orgId = :orgId OR t.orgId IS NULL)
+          AND (t.tenantId = :tenantId OR t.tenantId IS NULL)
           AND (t.objectType IS NULL OR t.objectType = :objectType)
-        ORDER BY t.orgId NULLS LAST
+        ORDER BY t.tenantId NULLS LAST
         """)
     List<TriggerDefinition> findActiveByEventAndType(
             @Param("eventType")  String eventType,
-            @Param("orgId")      UUID orgId,
+            @Param("tenantId")      UUID tenantId,
             @Param("objectType") String objectType);
 
     @Query("""
@@ -41,17 +41,17 @@ public interface TriggerDefinitionRepository extends JpaRepository<TriggerDefini
         LEFT JOIN FETCH t.actions
         WHERE t.isActive = true
           AND t.eventType = :eventType
-          AND (t.orgId = :orgId OR t.orgId IS NULL)
+          AND (t.tenantId = :tenantId OR t.tenantId IS NULL)
         """)
     List<TriggerDefinition> findActiveByEvent(
             @Param("eventType") String eventType,
-            @Param("orgId")     UUID orgId);
+            @Param("tenantId")     UUID tenantId);
 
-    @Query("SELECT t FROM TriggerDefinition t WHERE t.orgId = :orgId OR t.orgId IS NULL")
-    Page<TriggerDefinition> findAllForOrg(@Param("orgId") UUID orgId, Pageable pageable);
+    @Query("SELECT t FROM TriggerDefinition t WHERE t.tenantId = :tenantId OR t.tenantId IS NULL")
+    Page<TriggerDefinition> findAllForOrg(@Param("tenantId") UUID tenantId, Pageable pageable);
 
-    @Query("SELECT t FROM TriggerDefinition t WHERE t.id = :id AND (t.orgId = :orgId OR t.orgId IS NULL)")
-    Optional<TriggerDefinition> findByIdAndOrg(@Param("id") UUID id, @Param("orgId") UUID orgId);
+    @Query("SELECT t FROM TriggerDefinition t WHERE t.id = :id AND (t.tenantId = :tenantId OR t.tenantId IS NULL)")
+    Optional<TriggerDefinition> findByIdAndOrg(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 
-    Optional<TriggerDefinition> findByNameAndOrgIdIsNull(String name);
+    Optional<TriggerDefinition> findByNameAndTenantIdIsNull(String name);
 }

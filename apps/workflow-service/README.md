@@ -24,8 +24,8 @@ Three loosely related concerns live in this service, backed by the `workflow` Po
 1. **Generic state machine** (`WorkflowDefinition` / `WorkflowState` / `WorkflowTransition` /
    `RecordWorkflowState` / `TransitionHistory`, driven by `StateMachineEngine`):
    - A `WorkflowDefinition` is keyed by `objectType` (e.g. `VENUE`, `WEDDING_EVENT`) and
-     optionally scoped to an `orgId`; an org-scoped definition takes priority over a
-     platform-level one (`orgId IS NULL`) for the same object type
+     optionally scoped to an `tenantId`; an org-scoped definition takes priority over a
+     platform-level one (`tenantId IS NULL`) for the same object type
      (`WorkflowDefinitionRepository.findForObjectType`).
    - `RecordWorkflowState` is the one row of runtime state per record (`record_id` is unique),
      tracking `currentState`. It's created lazily on the first transition request for that
@@ -150,7 +150,7 @@ Topic names come from `libs/events/.../PlatformTopics.java`.
   lists `APPROVAL_APPROVED`/`APPROVAL_TIMEOUT`, but no code path in this service publishes
   those two — worth checking if a timeout/escalation feature was planned but not implemented;
   `ApprovalStep.timeoutHours`/`escalateToRole` columns exist in the schema but nothing reads
-  them.) Partition key is `"{orgId}:{recordId}"` (or just `orgId` if `recordId` is null).
+  them.) Partition key is `"{tenantId}:{recordId}"` (or just `tenantId` if `recordId` is null).
 
 Publishing does **not** go straight to `KafkaTemplate`. `WorkflowEventPublisher` stages
 events into the `workflow_outbox` table (via `libs/common`'s `TransactionalOutbox`) inside the

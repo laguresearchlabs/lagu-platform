@@ -4,6 +4,7 @@ include(
     "libs:common",
     "libs:events",
     "libs:security",
+    "libs:membership",
     "apps:schema-registry",
     "apps:record-service",
     "apps:workflow-service",
@@ -14,5 +15,6 @@ include(
     "apps:vendor-service",
     "apps:listing-service",
     "apps:event-service",
+    "apps:booking-service",
     "apps:integration-test"
 )

@@ -45,11 +45,11 @@ public class RecordVerificationService {
             // Fail closed: a caller without an org context must not fall through to an unscoped
             // lookup — that was exactly the bug here (any guessed recordId leaked another org's
             // verification tier/status/notes to any authenticated, org-less caller).
-            if (ctx.getOrgId() == null) {
-                throw new PlatformException("ORG_CONTEXT_REQUIRED",
+            if (ctx.getTenantId() == null) {
+                throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                         "An organization context is required to access records", HttpStatus.FORBIDDEN);
             }
-            v = verificationRepository.findByRecordIdAndOrgId(recordId, ctx.getOrgId())
+            v = verificationRepository.findByRecordIdAndTenantId(recordId, ctx.getTenantId())
                     .orElseThrow(() -> new ResourceNotFoundException("RecordVerification", recordId.toString()));
         }
 
@@ -66,7 +66,7 @@ public class RecordVerificationService {
                 .orElseGet(() -> {
                     RecordVerification nv = new RecordVerification();
                     nv.setRecordId(recordId);
-                    nv.setOrgId(record.getOrgId());
+                    nv.setTenantId(record.getTenantId());
                     return nv;
                 });
 
@@ -127,8 +127,8 @@ public class RecordVerificationService {
     private Record findRecordInScope(UUID recordId, PlatformSecurityContext ctx) {
         Record record = recordRepository.findById(recordId)
                 .orElseThrow(() -> new ResourceNotFoundException("Record", recordId.toString()));
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
-        if (!isPlatformAdmin(ctx) && (orgId == null || !orgId.equals(record.getOrgId()))) {
+        UUID tenantId = ctx != null ? ctx.getTenantId() : null;
+        if (!isPlatformAdmin(ctx) && (tenantId == null || !tenantId.equals(record.getTenantId()))) {
             throw new ResourceNotFoundException("Record", recordId.toString());
         }
         return record;

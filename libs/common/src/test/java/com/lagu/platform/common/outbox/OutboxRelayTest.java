@@ -51,7 +51,7 @@ class OutboxRelayTest {
         RecordEvent event = RecordEvent.builder()
                 .eventType("CREATED")
                 .recordId(UUID.randomUUID())
-                .orgId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .objectType("VENUE")
                 .occurredAt(Instant.now())
                 .build();

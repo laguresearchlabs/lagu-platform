@@ -23,8 +23,8 @@ public class RelationshipDefinitionService {
     private final RelationshipDefinitionRepository relDefRepo;
 
     public List<RelationshipDefinitionResponse> list() {
-        UUID orgId = orgId();
-        return (orgId != null ? relDefRepo.findAllForOrg(orgId) : relDefRepo.findAllPlatformLevel())
+        UUID tenantId = tenantId();
+        return (tenantId != null ? relDefRepo.findAllForOrg(tenantId) : relDefRepo.findAllPlatformLevel())
                 .stream().map(this::toResponse).toList();
     }
 
@@ -33,29 +33,29 @@ public class RelationshipDefinitionService {
     }
 
     public RelationshipDefinitionResponse getByName(String name) {
-        UUID orgId = orgId();
-        RelationshipDefinition def = (orgId != null
-                ? relDefRepo.findByNameAndOrgId(name.toUpperCase(), orgId)
-                        .or(() -> relDefRepo.findByNameAndOrgIdIsNull(name.toUpperCase()))
-                : relDefRepo.findByNameAndOrgIdIsNull(name.toUpperCase()))
+        UUID tenantId = tenantId();
+        RelationshipDefinition def = (tenantId != null
+                ? relDefRepo.findByNameAndTenantId(name.toUpperCase(), tenantId)
+                        .or(() -> relDefRepo.findByNameAndTenantIdIsNull(name.toUpperCase()))
+                : relDefRepo.findByNameAndTenantIdIsNull(name.toUpperCase()))
                 .orElseThrow(() -> new ResourceNotFoundException("RelationshipDefinition", name));
         return toResponse(def);
     }
 
     @Transactional
     public RelationshipDefinitionResponse create(RelationshipDefinitionRequest req) {
-        UUID orgId = orgId();
+        UUID tenantId = tenantId();
         String name = req.getName().toUpperCase();
 
-        if (orgId != null && relDefRepo.findByNameAndOrgId(name, orgId).isPresent()) {
+        if (tenantId != null && relDefRepo.findByNameAndTenantId(name, tenantId).isPresent()) {
             throw new ValidationException("Relationship definition '" + name + "' already exists");
         }
-        if (orgId == null && relDefRepo.findByNameAndOrgIdIsNull(name).isPresent()) {
+        if (tenantId == null && relDefRepo.findByNameAndTenantIdIsNull(name).isPresent()) {
             throw new ValidationException("Relationship definition '" + name + "' already exists");
         }
 
         RelationshipDefinition def = new RelationshipDefinition();
-        def.setOrgId(orgId);
+        def.setTenantId(tenantId);
         def.setName(name);
         def.setLabel(req.getLabel());
         def.setSourceListingType(req.getSourceListingType().toUpperCase());
@@ -90,7 +90,7 @@ public class RelationshipDefinitionService {
 
     private RelationshipDefinition findReadableById(UUID id) {
         RelationshipDefinition def = findById(id);
-        if (!currentCtx().canReadOrgScoped(def.getOrgId())) {
+        if (!currentCtx().canReadTenantScoped(def.getTenantId())) {
             throw new ResourceNotFoundException("RelationshipDefinition", id.toString());
         }
         return def;
@@ -98,14 +98,14 @@ public class RelationshipDefinitionService {
 
     private RelationshipDefinition findWritableById(UUID id) {
         RelationshipDefinition def = findById(id);
-        if (!currentCtx().canWriteOrgScoped(def.getOrgId())) {
+        if (!currentCtx().canWriteTenantScoped(def.getTenantId())) {
             throw new ResourceNotFoundException("RelationshipDefinition", id.toString());
         }
         return def;
     }
 
-    private UUID orgId() {
-        return currentCtx().getOrgId();
+    private UUID tenantId() {
+        return currentCtx().getTenantId();
     }
 
     private PlatformSecurityContext currentCtx() {
@@ -115,7 +115,7 @@ public class RelationshipDefinitionService {
 
     private RelationshipDefinitionResponse toResponse(RelationshipDefinition d) {
         return RelationshipDefinitionResponse.builder()
-                .id(d.getId()).orgId(d.getOrgId()).name(d.getName()).label(d.getLabel())
+                .id(d.getId()).tenantId(d.getTenantId()).name(d.getName()).label(d.getLabel())
                 .sourceListingType(d.getSourceListingType()).targetListingType(d.getTargetListingType())
                 .relationshipType(d.getRelationshipType()).required(d.isRequired())
                 .cascadeDelete(d.isCascadeDelete()).active(d.isActive())

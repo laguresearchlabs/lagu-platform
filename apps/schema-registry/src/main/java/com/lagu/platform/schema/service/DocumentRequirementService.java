@@ -28,7 +28,7 @@ public class DocumentRequirementService {
 
     /** Full platform-level catalog regardless of listingType — used by document-service. */
     public List<DocumentRequirement> catalog() {
-        return repository.findByOrgIdIsNullAndActiveTrueOrderByDisplayOrder();
+        return repository.findByTenantIdIsNullAndActiveTrueOrderByDisplayOrder();
     }
 
     public DocumentRequirement getById(UUID id) {

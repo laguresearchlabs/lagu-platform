@@ -20,7 +20,7 @@ public class TriggerDefinition {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    private UUID orgId;
+    private UUID tenantId;
 
     @Column(nullable = false, length = 100)
     private String name;

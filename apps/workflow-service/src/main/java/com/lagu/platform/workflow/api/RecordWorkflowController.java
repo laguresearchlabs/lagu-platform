@@ -33,8 +33,8 @@ public class RecordWorkflowController {
             @PathVariable UUID recordId) {
         PlatformSecurityContext ctx = requireContext();
         Set<String> roles = ctx.getRoles();
-        UUID orgId = ctx.isPlatformAdmin() ? null : requireOrgId(ctx);
-        return ResponseEntity.ok(ApiResponse.ok(engine.getStatus(recordId, orgId, roles)));
+        UUID tenantId = ctx.isPlatformAdmin() ? null : requireTenantId(ctx);
+        return ResponseEntity.ok(ApiResponse.ok(engine.getStatus(recordId, tenantId, roles)));
     }
 
     @GetMapping("/history")
@@ -47,7 +47,7 @@ public class RecordWorkflowController {
         var pageReq = PageRequest.of(page, size);
         var results = ctx.isPlatformAdmin()
                 ? histRepo.findByRecordIdOrderByTransitionedAtDesc(recordId, pageReq)
-                : histRepo.findByRecordIdAndOrgIdOrderByTransitionedAtDesc(recordId, requireOrgId(ctx), pageReq);
+                : histRepo.findByRecordIdAndTenantIdOrderByTransitionedAtDesc(recordId, requireTenantId(ctx), pageReq);
         return ResponseEntity.ok(ApiResponse.ok(PageResult.from(results)));
     }
 
@@ -63,11 +63,11 @@ public class RecordWorkflowController {
         return ctx;
     }
 
-    private UUID requireOrgId(PlatformSecurityContext ctx) {
-        if (ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+    private UUID requireTenantId(PlatformSecurityContext ctx) {
+        if (ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required to access workflow state", HttpStatus.FORBIDDEN);
         }
-        return ctx.getOrgId();
+        return ctx.getTenantId();
     }
 }

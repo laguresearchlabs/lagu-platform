@@ -36,26 +36,29 @@ public class EventService {
 
     @Transactional
     public EventResponse create(CreateEventRequest req, UUID userId) {
-        UUID orgId = UUID.randomUUID();
+        // Generated up front (not left to JPA at save time) since the same value doubles as the
+        // org-partition key record-service needs before the Record even exists — see Event.id's
+        // doc comment.
+        UUID id = UUID.randomUUID();
 
         // Create the canonical record in record-service — validated against the schema-registry
         // definition for this objectType (BIRTHDAY_EVENT, WEDDING_EVENT, ...).
         Map<String, Object> recordResponse = recordClient.createRecord(
-                orgId, userId, req.getObjectType().toUpperCase(), req.getData());
+                id, userId, req.getObjectType().toUpperCase(), req.getData());
         UUID recordId = recordClient.extractRecordId(recordResponse);
         if (recordId == null) {
             throw new ValidationException("Failed to create " + req.getObjectType() + " record");
         }
 
         Event event = new Event();
-        event.setOrgId(orgId);
+        event.setId(id);
         event.setRecordId(recordId);
         event.setObjectType(req.getObjectType().toUpperCase());
         event.setOwnerUserId(userId);
         eventRepo.save(event);
 
         EventMember owner = new EventMember();
-        owner.setOrgId(orgId);
+        owner.setTenantId(id);
         owner.setUserId(userId);
         owner.setRole("ADMIN");
         owner.setStatus("ACCEPTED");
@@ -76,7 +79,7 @@ public class EventService {
         Event event = requireEvent(eventId);
         Map<String, Object> data = fetchData(event);
 
-        Optional<EventMember> member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId);
+        Optional<EventMember> member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId);
         if (member.isEmpty()) {
             // Non-members may view a PUBLIC event read-only, well enough to send a join
             // request (mirrors event-nest's old share-link preview) — anything else is 403.
@@ -93,7 +96,7 @@ public class EventService {
     public List<EventResponse> listMine(UUID userId) {
         return memberRepo.findByUserId(userId).stream()
                 .filter(m -> !"DECLINED".equals(m.getStatus()))
-                .map(m -> eventRepo.findByOrgId(m.getOrgId()).map(e -> toResponse(e, m, null)))
+                .map(m -> eventRepo.findById(m.getTenantId()).map(e -> toResponse(e, m, null)))
                 .flatMap(java.util.Optional::stream)
                 .toList();
     }
@@ -104,7 +107,7 @@ public class EventService {
         EventMember member = requireManager(event, userId);
 
         Map<String, Object> recordResponse = recordClient.updateRecord(
-                event.getRecordId(), event.getOrgId(), userId, req.getData());
+                event.getRecordId(), event.getTenantId(), userId, req.getData());
         if (recordResponse == null) {
             throw new ValidationException("Failed to update event data");
         }
@@ -118,14 +121,14 @@ public class EventService {
         // Fire-and-forget: record-service stages this via its outbox and workflow-service
         // processes it asynchronously. Current authoritative state is available via
         // GET /api/v1/records/{recordId}/workflow (record-service, gatewayed directly to callers).
-        recordClient.requestTransition(event.getRecordId(), event.getOrgId(), userId, req.getTrigger());
+        recordClient.requestTransition(event.getRecordId(), event.getTenantId(), userId, req.getTrigger());
     }
 
     @Transactional
     public void linkVendor(UUID eventId, UUID userId, LinkVendorRequest req) {
         Event event = requireEvent(eventId);
         requireManager(event, userId);
-        recordClient.createRelationship(event.getRecordId(), event.getOrgId(), userId,
+        recordClient.createRelationship(event.getRecordId(), event.getTenantId(), userId,
                 req.getRelationshipName(), req.getTargetRecordId());
     }
 
@@ -133,13 +136,13 @@ public class EventService {
     public void unlinkVendor(UUID eventId, UUID userId, String relationshipName, UUID targetRecordId) {
         Event event = requireEvent(eventId);
         requireManager(event, userId);
-        recordClient.deleteRelationship(event.getRecordId(), event.getOrgId(), relationshipName, targetRecordId);
+        recordClient.deleteRelationship(event.getRecordId(), event.getTenantId(), relationshipName, targetRecordId);
     }
 
     public List<Map<String, Object>> listVendorLinks(UUID eventId, UUID userId) {
         Event event = requireEvent(eventId);
         requireMember(event, userId);
-        return recordClient.listRelationships(event.getRecordId(), event.getOrgId());
+        return recordClient.listRelationships(event.getRecordId(), event.getTenantId());
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -151,7 +154,7 @@ public class EventService {
 
     /** Any accepted member (ADMIN/MAINTAINER/INVITEE) may read. */
     EventMember requireMember(Event event, UUID userId) {
-        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+        EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
         if (!"ACCEPTED".equals(member.getStatus())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Membership not accepted");
@@ -169,7 +172,7 @@ public class EventService {
     }
 
     private Map<String, Object> fetchData(Event event) {
-        Map<String, Object> record = recordClient.getRecord(event.getRecordId(), event.getOrgId());
+        Map<String, Object> record = recordClient.getRecord(event.getRecordId(), event.getTenantId());
         return extractData(record);
     }
 
@@ -194,8 +197,8 @@ public class EventService {
                 .myRole(viewer != null ? viewer.getRole() : null)
                 .myStatus(viewer != null ? viewer.getStatus() : null)
                 .data(data)
-                .createdAt(event.getCreatedAt())
-                .updatedAt(event.getUpdatedAt())
+                .createdAt(event.getCreatedAt().atOffset(java.time.ZoneOffset.UTC))
+                .updatedAt(event.getUpdatedAt().atOffset(java.time.ZoneOffset.UTC))
                 .build();
     }
 }

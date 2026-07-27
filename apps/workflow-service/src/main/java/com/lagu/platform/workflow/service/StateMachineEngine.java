@@ -41,18 +41,18 @@ public class StateMachineEngine {
     @Transactional
     public void processTransitionRequest(RecordEvent event) {
         UUID recordId  = event.getRecordId();
-        UUID orgId     = event.getOrgId();
+        UUID tenantId     = event.getTenantId();
         String trigger = event.getTriggerName();
 
         // Resolve workflow for this object type
-        WorkflowDefinition wf = resolveWorkflow(event.getObjectType(), orgId);
+        WorkflowDefinition wf = resolveWorkflow(event.getObjectType(), tenantId);
 
-        // Scoped to (recordId, orgId) — an unscoped findByRecordId here would let a RecordEvent
-        // carrying a mismatched orgId resolve and mutate a different tenant's workflow state for
+        // Scoped to (recordId, tenantId) — an unscoped findByRecordId here would let a RecordEvent
+        // carrying a mismatched tenantId resolve and mutate a different tenant's workflow state for
         // the same recordId (record ids are not globally guaranteed unique in a way that makes
         // this impossible, and it's cheap to just not rely on that).
-        RecordWorkflowState rws = rwsRepo.findByRecordIdAndOrgId(recordId, orgId)
-                .orElseGet(() -> initState(recordId, orgId, event.getObjectType(), wf));
+        RecordWorkflowState rws = rwsRepo.findByRecordIdAndTenantId(recordId, tenantId)
+                .orElseGet(() -> initState(recordId, tenantId, event.getObjectType(), wf));
 
         // The event's objectType must agree with the state row's — otherwise a mismatched event
         // (wrong topic routing, replay, bug) would resolve a transition from a *different*
@@ -111,11 +111,11 @@ public class StateMachineEngine {
                 transition.getToState(), transition.getTriggerName());
     }
 
-    /** {@code orgId} null means the caller is a platform admin (checked by the controller before
+    /** {@code tenantId} null means the caller is a platform admin (checked by the controller before
      *  calling this) — anyone else must pass their own org, and only ever sees that org's state. */
-    public RecordWorkflowStatusResponse getStatus(UUID recordId, UUID orgId, Set<String> userRoles) {
-        RecordWorkflowState rws = (orgId != null
-                ? rwsRepo.findByRecordIdAndOrgId(recordId, orgId)
+    public RecordWorkflowStatusResponse getStatus(UUID recordId, UUID tenantId, Set<String> userRoles) {
+        RecordWorkflowState rws = (tenantId != null
+                ? rwsRepo.findByRecordIdAndTenantId(recordId, tenantId)
                 : rwsRepo.findByRecordId(recordId))
                 .orElseThrow(() -> new ResourceNotFoundException("WorkflowState", recordId.toString()));
 
@@ -149,19 +149,19 @@ public class StateMachineEngine {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private WorkflowDefinition resolveWorkflow(String objectType, UUID orgId) {
-        List<WorkflowDefinition> matches = wfRepo.findForObjectType(objectType.toUpperCase(), orgId);
+    private WorkflowDefinition resolveWorkflow(String objectType, UUID tenantId) {
+        List<WorkflowDefinition> matches = wfRepo.findForObjectType(objectType.toUpperCase(), tenantId);
         if (matches.isEmpty()) {
             throw new ResourceNotFoundException("WorkflowDefinition", "objectType=" + objectType);
         }
         return matches.getFirst(); // org-scoped wins over platform-level per ORDER BY
     }
 
-    private RecordWorkflowState initState(UUID recordId, UUID orgId, String objectType,
+    private RecordWorkflowState initState(UUID recordId, UUID tenantId, String objectType,
                                           WorkflowDefinition wf) {
         RecordWorkflowState rws = new RecordWorkflowState();
         rws.setRecordId(recordId);
-        rws.setOrgId(orgId);
+        rws.setTenantId(tenantId);
         rws.setObjectType(objectType.toUpperCase());
         rws.setWorkflow(wf);
         rws.setCurrentState(wf.getInitialStatus().toUpperCase());
@@ -172,7 +172,7 @@ public class StateMachineEngine {
                                String fromState, UUID actorId, String comment) {
         TransitionHistory h = new TransitionHistory();
         h.setRecordId(rws.getRecordId());
-        h.setOrgId(rws.getOrgId());
+        h.setTenantId(rws.getTenantId());
         h.setWorkflowId(rws.getWorkflow().getId());
         h.setFromState(fromState);
         h.setToState(tx.getToState());

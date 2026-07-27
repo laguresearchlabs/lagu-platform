@@ -22,8 +22,8 @@ public class VendorController {
     private final VendorService vendorService;
 
     /**
-     * Registers a new vendor org. A user may register/belong to more than one — vendor orgs
-     * are never written back to the caller's IAM platformOrgId, see VendorService.register.
+     * Registers a new vendor org. A user may register/belong to more than one — see
+     * VendorService.register for how tenancy is tracked via VendorMember.
      */
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<VendorProfileResponse>> register(@Valid @RequestBody RegisterVendorRequest req) {
@@ -40,27 +40,27 @@ public class VendorController {
     }
 
     /** Any member of the vendor org may view it; config/platform admins may view any. */
-    @GetMapping("/{orgId}")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> getByOrgId(@PathVariable UUID orgId) {
+    @GetMapping("/{tenantId}")
+    public ResponseEntity<ApiResponse<VendorProfileResponse>> getByTenantId(@PathVariable UUID tenantId) {
         PlatformSecurityContext ctx = requireContext();
         VendorProfileResponse profile = ctx.isConfigAdmin()
-                ? vendorService.getByOrgIdAsAdmin(orgId)
-                : vendorService.getByOrgId(orgId, ctx.getUserId());
+                ? vendorService.getByTenantIdAsAdmin(tenantId)
+                : vendorService.getByTenantId(tenantId, ctx.getUserId());
         return ResponseEntity.ok(ApiResponse.ok(profile));
     }
 
     /** Vendor org's OWNER/ADMIN submits the profile for admin review. */
-    @PostMapping("/{orgId}/submit")
-    public ResponseEntity<ApiResponse<VendorProfileResponse>> submit(@PathVariable UUID orgId) {
+    @PostMapping("/{tenantId}/submit")
+    public ResponseEntity<ApiResponse<VendorProfileResponse>> submit(@PathVariable UUID tenantId) {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.submit(orgId, ctx.getUserId())));
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.submit(tenantId, ctx.getUserId())));
     }
 
     /** Recompute KYC readiness for a vendor org the caller is a member of. */
-    @GetMapping("/{orgId}/kyc")
-    public ResponseEntity<ApiResponse<KycChecklistDto>> kycStatus(@PathVariable UUID orgId) {
+    @GetMapping("/{tenantId}/kyc")
+    public ResponseEntity<ApiResponse<KycChecklistDto>> kycStatus(@PathVariable UUID tenantId) {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.computeKyc(orgId, ctx.getUserId())));
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.computeKyc(tenantId, ctx.getUserId())));
     }
 
     // ── Admin endpoints ──────────────────────────────────────────────────────
@@ -73,13 +73,13 @@ public class VendorController {
     }
 
     /** Admin changes vendor status (approve/suspend/reject). */
-    @PatchMapping("/{orgId}/status")
+    @PatchMapping("/{tenantId}/status")
     public ResponseEntity<ApiResponse<VendorProfileResponse>> updateStatus(
-            @PathVariable UUID orgId,
+            @PathVariable UUID tenantId,
             @RequestBody StatusRequest req) {
         PlatformSecurityContext ctx = requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(
-                vendorService.updateStatus(orgId, req.status(), ctx.getUserId())));
+                vendorService.updateStatus(tenantId, req.status(), ctx.getUserId())));
     }
 
     static PlatformSecurityContext requireContext() {

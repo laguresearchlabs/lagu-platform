@@ -50,7 +50,7 @@ public class ListingEventConsumer {
 
         Map<String, Object> doc = new HashMap<>();
         doc.put("recordId",         event.getRecordId().toString());
-        doc.put("orgId",            event.getOrgId().toString());
+        doc.put("tenantId",            event.getTenantId().toString());
         doc.put("objectType",       objectType);
         doc.put("status",           "PUBLISHED");
         doc.put("data",             event.getData() != null ? event.getData() : Map.of());

@@ -97,7 +97,7 @@ public class NotificationDeliveryService {
     private Notification buildNotification(AutomationEvent event, String title, String message,
                                             String channel, UUID recipientUserId) {
         Notification n = new Notification();
-        n.setOrgId(event.getOrgId());
+        n.setTenantId(event.getTenantId());
         n.setRecipientUserId(recipientUserId);
         n.setTitle(title);
         n.setMessage(message);

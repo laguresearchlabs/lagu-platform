@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "category_definition",
-       uniqueConstraints = @UniqueConstraint(columnNames = {"slug", "org_id"}))
+       uniqueConstraints = @UniqueConstraint(columnNames = {"slug", "tenant_id"}))
 @Data
 @NoArgsConstructor
 public class CategoryDefinition {
@@ -20,8 +20,8 @@ public class CategoryDefinition {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id")
-    private UUID orgId;
+    @Column(name = "tenant_id")
+    private UUID tenantId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")

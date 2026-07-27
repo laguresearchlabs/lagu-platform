@@ -28,15 +28,15 @@ public class RecordClient {
     }
 
     /** Returns page of records for the given objectType. Org header must be set per request. */
-    public Map<String, Object> listRecords(String objectType, String orgId, int page, int size) {
+    public Map<String, Object> listRecords(String objectType, String tenantId, int page, int size) {
         try {
             return restClient.get()
                     .uri("/api/v1/records?objectType={t}&page={p}&size={s}", objectType, page, size)
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
-            log.error("Failed to list records for {}/{}: {}", orgId, objectType, e.getMessage());
+            log.error("Failed to list records for {}/{}: {}", tenantId, objectType, e.getMessage());
             return Map.of();
         }
     }

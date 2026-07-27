@@ -19,8 +19,8 @@ public class Notification {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id")
-    private UUID orgId;
+    @Column(name = "tenant_id")
+    private UUID tenantId;
 
     @Column(name = "recipient_user_id")
     private UUID recipientUserId;

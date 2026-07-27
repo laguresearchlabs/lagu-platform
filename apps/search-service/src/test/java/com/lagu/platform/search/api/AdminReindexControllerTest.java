@@ -37,20 +37,20 @@ class AdminReindexControllerTest {
 
     @Test
     void noOrgContextThrowsCleanErrorNotNpe() {
-        asCaller(PlatformSecurityContext.builder().roles(Set.of("PLATFORM_ADMIN")).orgId(null).build());
+        asCaller(PlatformSecurityContext.builder().roles(Set.of("PLATFORM_ADMIN")).tenantId(null).build());
 
         assertThatThrownBy(() -> controller.reindex("VENUE")).isInstanceOf(PlatformException.class);
     }
 
     @Test
     void validContextTriggersReindex() {
-        UUID orgId = UUID.randomUUID();
-        asCaller(PlatformSecurityContext.builder().orgId(orgId).roles(Set.of("PLATFORM_ADMIN")).build());
+        UUID tenantId = UUID.randomUUID();
+        asCaller(PlatformSecurityContext.builder().tenantId(tenantId).roles(Set.of("PLATFORM_ADMIN")).build());
 
         var resp = controller.reindex("VENUE");
 
         assertThat(resp.getStatusCode().value()).isEqualTo(202);
-        verify(reindexService).reindex("VENUE", orgId.toString());
+        verify(reindexService).reindex("VENUE", tenantId.toString());
     }
 
     /**
@@ -65,7 +65,7 @@ class AdminReindexControllerTest {
     void plainOrgManagerCannotPassTheWildcardResourceGate() {
         DefaultPermissionEvaluator evaluator = new DefaultPermissionEvaluator();
         PlatformSecurityContext orgManager = PlatformSecurityContext.builder()
-                .userId(UUID.randomUUID()).orgId(UUID.randomUUID())
+                .userId(UUID.randomUUID()).tenantId(UUID.randomUUID())
                 .roles(Set.of("ORG_MANAGER")).build();
 
         assertThat(evaluator.canAccess(orgManager, "*", "UPDATE")).isFalse();

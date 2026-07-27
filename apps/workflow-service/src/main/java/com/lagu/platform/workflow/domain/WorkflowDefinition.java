@@ -17,8 +17,8 @@ public class WorkflowDefinition {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id")
-    private UUID orgId;
+    @Column(name = "tenant_id")
+    private UUID tenantId;
 
     @Column(nullable = false, length = 100)
     private String name;

@@ -39,8 +39,8 @@ public class SearchDefinitionController {
 
     @DeleteMapping("/{listingType}")
     @RequirePermission(resource = "SEARCH_DEFINITION", action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable String listingType) {
+    public ResponseEntity<Void> delete(@PathVariable String listingType) {
         searchDefinitionService.delete(listingType);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.noContent().build();
     }
 }

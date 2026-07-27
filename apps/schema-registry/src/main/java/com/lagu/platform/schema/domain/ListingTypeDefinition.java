@@ -14,7 +14,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "listing_type_definition",
-       uniqueConstraints = @UniqueConstraint(columnNames = {"name", "org_id"}))
+       uniqueConstraints = @UniqueConstraint(columnNames = {"name", "tenant_id"}))
 @Data
 @NoArgsConstructor
 public class ListingTypeDefinition {
@@ -23,8 +23,8 @@ public class ListingTypeDefinition {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id")
-    private UUID orgId;
+    @Column(name = "tenant_id")
+    private UUID tenantId;
 
     @Column(nullable = false, length = 100)
     private String name;

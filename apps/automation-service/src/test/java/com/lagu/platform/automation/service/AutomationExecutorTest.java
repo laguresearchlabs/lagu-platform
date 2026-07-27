@@ -51,7 +51,7 @@ class AutomationExecutorTest {
 
     private static AutomationEventContext ctx() {
         return AutomationEventContext.builder()
-                .eventType("RECORD_CREATED").orgId(UUID.randomUUID()).recordId(UUID.randomUUID())
+                .eventType("RECORD_CREATED").tenantId(UUID.randomUUID()).recordId(UUID.randomUUID())
                 .build();
     }
 

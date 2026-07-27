@@ -29,7 +29,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("CREATED")
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .currentStatus(record.getStatus())
                 .data(record.getData())
@@ -42,7 +42,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("UPDATED")
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .currentStatus(record.getStatus())
                 .data(record.getData())
@@ -55,7 +55,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("DELETED")
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .previousStatus(record.getStatus())
                 .currentStatus("DELETED")
@@ -70,7 +70,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("STATUS_TRANSITION_REQUESTED")
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .currentStatus(record.getStatus())
                 .triggerName(trigger)
@@ -86,7 +86,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.RECORD_EVENTS, recordKey(record), RecordEvent.builder()
                 .eventType("STATUS_CHANGED")
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .previousStatus(previousStatus)
                 .currentStatus(record.getStatus())
@@ -102,7 +102,7 @@ public class RecordEventPublisher {
         enqueue(PlatformTopics.VERIFICATION_EVENTS, recordKey(record), VerificationEvent.builder()
                 .eventType(eventType)
                 .recordId(record.getId())
-                .orgId(record.getOrgId())
+                .tenantId(record.getTenantId())
                 .objectType(record.getObjectType())
                 .previousTier(previousTier)
                 .newTier(newTier)
@@ -116,6 +116,6 @@ public class RecordEventPublisher {
     }
 
     private String recordKey(Record record) {
-        return record.getOrgId() + ":" + record.getId();
+        return record.getTenantId() + ":" + record.getId();
     }
 }

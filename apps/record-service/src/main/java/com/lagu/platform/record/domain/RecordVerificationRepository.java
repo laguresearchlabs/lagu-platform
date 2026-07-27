@@ -14,7 +14,7 @@ public interface RecordVerificationRepository extends JpaRepository<RecordVerifi
 
     Optional<RecordVerification> findByRecordId(UUID recordId);
 
-    Optional<RecordVerification> findByRecordIdAndOrgId(UUID recordId, UUID orgId);
+    Optional<RecordVerification> findByRecordIdAndTenantId(UUID recordId, UUID tenantId);
 
     @Query("SELECT v FROM RecordVerification v WHERE v.status = 'VERIFIED' AND v.expiresAt < :now")
     List<RecordVerification> findExpired(@Param("now") OffsetDateTime now);

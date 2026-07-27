@@ -15,7 +15,7 @@ import java.util.UUID;
 public class AutomationEventContext {
 
     private String             eventType;       // maps to AutomationEventType names
-    private UUID               orgId;
+    private UUID               tenantId;
     private UUID               recordId;
     private String             objectType;
     private String             previousStatus;

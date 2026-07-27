@@ -3,7 +3,7 @@ package com.lagu.platform.document.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,6 +26,6 @@ public class DocumentSubmissionStatusResponse {
         private UUID    documentId;
         private String  identitySubType;
         private String  rejectionReason;
-        private Instant uploadedAt;
+        private OffsetDateTime uploadedAt;
     }
 }

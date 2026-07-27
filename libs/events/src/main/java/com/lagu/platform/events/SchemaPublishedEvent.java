@@ -27,6 +27,6 @@ public class SchemaPublishedEvent implements PlatformEvent {
     private String changeClassification;
 
     private String publishedBy;
-    private java.util.UUID orgId;    // null = platform-level publish
+    private java.util.UUID tenantId;    // null = platform-level publish
     private Instant occurredAt;
 }

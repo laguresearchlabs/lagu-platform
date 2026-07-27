@@ -43,7 +43,7 @@ public class WorkflowEventConsumer {
      */
     private void handlePublish(WorkflowEvent event) {
         Map<String, Object> record = recordClient.getRecord(
-                event.getRecordId(), event.getOrgId());
+                event.getRecordId(), event.getTenantId());
 
         if (record == null) {
             throw new IllegalStateException(
@@ -55,7 +55,7 @@ public class WorkflowEventConsumer {
         String verificationTier = extractString(record, "verificationTier", "NONE");
 
         snapshotService.publishSnapshot(
-                event.getRecordId(), event.getOrgId(),
+                event.getRecordId(), event.getTenantId(),
                 event.getObjectType(), data,
                 verificationTier);
     }

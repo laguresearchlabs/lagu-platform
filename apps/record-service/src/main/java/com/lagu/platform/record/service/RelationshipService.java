@@ -29,11 +29,11 @@ public class RelationshipService {
 
     public List<RelationshipResponse> list(UUID sourceId, String relationshipName) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
+        UUID tenantId = ctx != null ? ctx.getTenantId() : null;
 
         List<RecordRelationship> rels = relationshipName != null
-                ? relRepo.findByOrgIdAndSourceRecordIdAndRelationshipName(orgId, sourceId, relationshipName.toUpperCase())
-                : relRepo.findByOrgIdAndSourceRecordId(orgId, sourceId);
+                ? relRepo.findByTenantIdAndSourceRecordIdAndRelationshipName(tenantId, sourceId, relationshipName.toUpperCase())
+                : relRepo.findByTenantIdAndSourceRecordId(tenantId, sourceId);
 
         return rels.stream().map(this::toResponse).toList();
     }
@@ -41,9 +41,9 @@ public class RelationshipService {
     @Transactional
     public RelationshipResponse create(UUID sourceId, CreateRelationshipRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
+        UUID tenantId = ctx != null ? ctx.getTenantId() : null;
 
-        Record source = recordRepo.findByIdAndOrgId(sourceId, orgId)
+        Record source = recordRepo.findByIdAndTenantId(sourceId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Record", sourceId.toString()));
 
         // Target lookup is intentionally org-unscoped: relationships routinely cross org
@@ -61,7 +61,7 @@ public class RelationshipService {
 
         // Validate against definition when available
         MetadataClient.RelationshipDefinitionDto relDef = metadataClient.getRelationshipDefinition(relName);
-        boolean crossOrg = !target.getOrgId().equals(orgId);
+        boolean crossOrg = !target.getTenantId().equals(tenantId);
         if (crossOrg && relDef == null) {
             // Cross-org linking is only ever allowed for a known, schema-registry-declared
             // relationship — never a blind link to an arbitrary record in another org.
@@ -82,7 +82,7 @@ public class RelationshipService {
             }
             if ("ONE_TO_ONE".equals(relDef.relationshipType())) {
                 List<RecordRelationship> existing =
-                        relRepo.findByOrgIdAndSourceRecordIdAndRelationshipName(orgId, sourceId, relName);
+                        relRepo.findByTenantIdAndSourceRecordIdAndRelationshipName(tenantId, sourceId, relName);
                 if (!existing.isEmpty()) {
                     throw new ValidationException("A ONE_TO_ONE relationship '" + relName + "' already exists for this record");
                 }
@@ -93,7 +93,7 @@ public class RelationshipService {
                 .ifPresent(r -> { throw new ValidationException("Relationship already exists"); });
 
         RecordRelationship rel = new RecordRelationship();
-        rel.setOrgId(orgId);
+        rel.setTenantId(tenantId);
         rel.setRelationshipName(relName);
         rel.setSourceRecordId(sourceId);
         rel.setTargetRecordId(target.getId());
@@ -105,10 +105,10 @@ public class RelationshipService {
     @Transactional
     public void delete(UUID sourceId, String relationshipName, UUID targetId) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        UUID orgId = ctx != null ? ctx.getOrgId() : null;
+        UUID tenantId = ctx != null ? ctx.getTenantId() : null;
 
         // Verify source belongs to this org
-        recordRepo.findByIdAndOrgId(sourceId, orgId)
+        recordRepo.findByIdAndTenantId(sourceId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Record", sourceId.toString()));
 
         String relName = relationshipName.toUpperCase();

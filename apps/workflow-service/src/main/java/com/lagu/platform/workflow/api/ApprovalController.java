@@ -25,15 +25,23 @@ public class ApprovalController {
     @GetMapping("/pending")
     public ResponseEntity<ApiResponse<List<ApprovalInstanceResponse>>> pending(
             @RequestParam(required = false) Integer olderThanMinutes) {
-        PlatformSecurityContext ctx = requireContext();
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        // Internal callers (e.g. automation-service's approval-timeout escalation scheduler) have
+        // no user/org of their own — they need the platform-wide view across every org, not one
+        // caller's org+role-filtered slice.
+        if (ctx != null && ctx.isInternalService()) {
+            return ResponseEntity.ok(ApiResponse.ok(
+                    engine.getAllTimedOut(olderThanMinutes != null ? olderThanMinutes : 0)));
+        }
+        ctx = requireContext();
         return ResponseEntity.ok(ApiResponse.ok(
-                engine.getPendingForUser(ctx.getOrgId(), ctx.getRoles(), olderThanMinutes)));
+                engine.getPendingForUser(ctx.getTenantId(), ctx.getRoles(), olderThanMinutes)));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ApprovalInstanceResponse>> getById(@PathVariable UUID id) {
         PlatformSecurityContext ctx = requireContext();
-        return ResponseEntity.ok(ApiResponse.ok(engine.getById(id, ctx.getOrgId())));
+        return ResponseEntity.ok(ApiResponse.ok(engine.getById(id, ctx.getTenantId())));
     }
 
     @PostMapping("/{id}/decide")
@@ -41,7 +49,7 @@ public class ApprovalController {
             @PathVariable UUID id, @Valid @RequestBody ApprovalDecisionRequest req) {
         PlatformSecurityContext ctx = requireContext();
         return ResponseEntity.ok(ApiResponse.ok(
-                engine.decide(id, req, ctx.getUserId(), ctx.getOrgId(), ctx.getRoles())));
+                engine.decide(id, req, ctx.getUserId(), ctx.getTenantId(), ctx.getRoles())));
     }
 
     private PlatformSecurityContext requireContext() {

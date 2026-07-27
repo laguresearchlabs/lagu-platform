@@ -8,6 +8,7 @@ import com.lagu.platform.listing.domain.ListingSnapshotRepository;
 import com.lagu.platform.listing.event.ListingEventPublisher;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,10 +33,10 @@ class ListingSnapshotServiceTest {
     private final ListingSnapshotService service = new ListingSnapshotService(
             snapshotRepo, availabilityRepo, eventPublisher, schemaRegistryClient);
 
-    private static ListingSnapshot published(UUID recordId, UUID orgId) {
+    private static ListingSnapshot published(UUID recordId, UUID tenantId) {
         ListingSnapshot s = new ListingSnapshot();
         s.setRecordId(recordId);
-        s.setOrgId(orgId);
+        s.setTenantId(tenantId);
         s.setObjectType("VENUE");
         s.setStatus("PUBLISHED");
         s.setData(Map.of("name", "Old Name"));
@@ -158,5 +159,50 @@ class ListingSnapshotServiceTest {
         assertThat(ListingSnapshotService.boostForTier("BASIC")).isEqualByComparingTo("1.5");
         assertThat(ListingSnapshotService.boostForTier("ENHANCED")).isEqualByComparingTo("1.8");
         assertThat(ListingSnapshotService.boostForTier("PREMIUM")).isEqualByComparingTo("2.0");
+    }
+
+    // ---- bookSlot / releaseSlot: the atomic claim primitive booking-service depends on ----
+
+    @Test
+    void bookSlotReturnsTrueWhenRowFlipped() {
+        UUID recordId = UUID.randomUUID();
+        UUID bookingRef = UUID.randomUUID();
+        LocalDate date = LocalDate.now().plusDays(1);
+        when(availabilityRepo.markBooked(recordId, date, bookingRef)).thenReturn(1);
+
+        assertThat(service.bookSlot(recordId, date, bookingRef)).isTrue();
+    }
+
+    @Test
+    void bookSlotReturnsFalseWhenSlotAlreadyTaken() {
+        // The core race-safety property: markBooked's WHERE slotType='AVAILABLE' guard means a
+        // second caller trying to book an already-BOOKED (or BLOCKED) slot affects zero rows.
+        UUID recordId = UUID.randomUUID();
+        UUID bookingRef = UUID.randomUUID();
+        LocalDate date = LocalDate.now().plusDays(1);
+        when(availabilityRepo.markBooked(recordId, date, bookingRef)).thenReturn(0);
+
+        assertThat(service.bookSlot(recordId, date, bookingRef)).isFalse();
+    }
+
+    @Test
+    void releaseSlotReturnsTrueWhenClaimReleased() {
+        UUID recordId = UUID.randomUUID();
+        UUID bookingRef = UUID.randomUUID();
+        LocalDate date = LocalDate.now().plusDays(1);
+        when(availabilityRepo.releaseBooked(recordId, date, bookingRef)).thenReturn(1);
+
+        assertThat(service.releaseSlot(recordId, date, bookingRef)).isTrue();
+    }
+
+    @Test
+    void releaseSlotReturnsFalseWhenBookingRefDoesNotMatch() {
+        // Guards against a stale/wrong release clearing someone else's claim.
+        UUID recordId = UUID.randomUUID();
+        UUID bookingRef = UUID.randomUUID();
+        LocalDate date = LocalDate.now().plusDays(1);
+        when(availabilityRepo.releaseBooked(recordId, date, bookingRef)).thenReturn(0);
+
+        assertThat(service.releaseSlot(recordId, date, bookingRef)).isFalse();
     }
 }

@@ -12,7 +12,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "document_requirement",
-       uniqueConstraints = @UniqueConstraint(columnNames = {"code", "org_id"}))
+       uniqueConstraints = @UniqueConstraint(columnNames = {"code", "tenant_id"}))
 @Data
 @NoArgsConstructor
 public class DocumentRequirement {
@@ -21,8 +21,8 @@ public class DocumentRequirement {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id")
-    private UUID orgId;
+    @Column(name = "tenant_id")
+    private UUID tenantId;
 
     @Column(name = "listing_type", length = 100)
     private String listingType;

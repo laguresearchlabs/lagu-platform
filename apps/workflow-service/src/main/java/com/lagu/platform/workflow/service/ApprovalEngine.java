@@ -32,7 +32,7 @@ public class ApprovalEngine {
     public void startApproval(RecordWorkflowState rws, WorkflowTransition transition, UUID requestedBy) {
         ApprovalInstance instance = new ApprovalInstance();
         instance.setRecordId(rws.getRecordId());
-        instance.setOrgId(rws.getOrgId());
+        instance.setTenantId(rws.getTenantId());
         instance.setApprovalDefinition(transition.getApprovalDefinition());
         instance.setTransition(transition);
         instance.setStatus("PENDING");
@@ -47,13 +47,13 @@ public class ApprovalEngine {
 
     @Transactional
     public ApprovalInstanceResponse decide(UUID instanceId, ApprovalDecisionRequest req, UUID actorId,
-                                            UUID actorOrgId, Set<String> actorRoles) {
+                                            UUID actorTenantId, Set<String> actorRoles) {
         ApprovalInstance instance = instanceRepo.findById(instanceId)
                 .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", instanceId.toString()));
 
         // Tenant isolation: an approval instance belongs to the org that owns the underlying
         // record. Treat a cross-org lookup the same as "not found" rather than leaking existence.
-        if (!instance.getOrgId().equals(actorOrgId)) {
+        if (!instance.getTenantId().equals(actorTenantId)) {
             throw new ResourceNotFoundException("ApprovalInstance", instanceId.toString());
         }
 
@@ -177,18 +177,25 @@ public class ApprovalEngine {
         }
     }
 
-    public List<ApprovalInstanceResponse> getPendingForUser(UUID orgId, Set<String> roles, Integer olderThanMinutes) {
+    public List<ApprovalInstanceResponse> getPendingForUser(UUID tenantId, Set<String> roles, Integer olderThanMinutes) {
         List<String> roleList = List.copyOf(roles);
         List<ApprovalInstance> instances = olderThanMinutes != null
-                ? instanceRepo.findPendingForRolesOlderThan(orgId, roleList, OffsetDateTime.now().minusMinutes(olderThanMinutes))
-                : instanceRepo.findPendingForRoles(orgId, roleList);
+                ? instanceRepo.findPendingForRolesOlderThan(tenantId, roleList, OffsetDateTime.now().minusMinutes(olderThanMinutes))
+                : instanceRepo.findPendingForRoles(tenantId, roleList);
         return instances.stream().map(this::toResponse).toList();
     }
 
-    public ApprovalInstanceResponse getById(UUID id, UUID orgId) {
+    /** Platform-wide (cross-org, no role filter) — for automation-service's escalation scheduler. */
+    public List<ApprovalInstanceResponse> getAllTimedOut(int olderThanMinutes) {
+        List<ApprovalInstance> instances =
+                instanceRepo.findPendingOlderThan(OffsetDateTime.now().minusMinutes(olderThanMinutes));
+        return instances.stream().map(this::toResponse).toList();
+    }
+
+    public ApprovalInstanceResponse getById(UUID id, UUID tenantId) {
         ApprovalInstance instance = instanceRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", id.toString()));
-        if (!instance.getOrgId().equals(orgId)) {
+        if (!instance.getTenantId().equals(tenantId)) {
             throw new ResourceNotFoundException("ApprovalInstance", id.toString());
         }
         return toResponse(instance);
@@ -212,7 +219,7 @@ public class ApprovalEngine {
                 .toList();
 
         return ApprovalInstanceResponse.builder()
-                .id(ai.getId()).recordId(ai.getRecordId()).status(ai.getStatus())
+                .id(ai.getId()).recordId(ai.getRecordId()).tenantId(ai.getTenantId()).status(ai.getStatus())
                 .currentStep(ai.getCurrentStep()).totalSteps(totalSteps)
                 .approvalType(def.getApprovalType()).currentApproverRole(currentRole)
                 .decisions(decisions).createdAt(ai.getCreatedAt()).completedAt(ai.getCompletedAt())

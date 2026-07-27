@@ -11,13 +11,14 @@ import java.util.UUID;
 @Data
 public class Event {
 
+    /**
+     * Assigned explicitly by EventService.create() (not JPA-generated) — the same value is used
+     * as record-service's tenancy/org-partition key, so it must be known before the local row is
+     * saved. There used to be a separate `tenantId` column for that purpose; it was always unique
+     * per event and never diverged from this id, so it was pure redundancy — see getTenantId().
+     */
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-
-    /** Throwaway, internal-only partition key minted at creation — never propagated to IAM. */
-    @Column(name = "org_id", nullable = false, unique = true)
-    private UUID orgId;
 
     @Column(name = "record_id", nullable = false, unique = true)
     private UUID recordId;
@@ -44,4 +45,15 @@ public class Event {
 
     @PreUpdate
     void onUpdate() { updatedAt = Instant.now(); }
+
+    /**
+     * Event.id doubles as the org-partition key record-service's generic engine expects — kept
+     * as a separate accessor (rather than inlining `getId()` at every call site) so every
+     * existing `event.getTenantId()` caller (record-service tenancy calls, EventMember/
+     * EventJoinRequest's own tenant_id columns, EventMembershipPermissionEvaluator) keeps working
+     * unchanged.
+     */
+    public UUID getTenantId() {
+        return id;
+    }
 }

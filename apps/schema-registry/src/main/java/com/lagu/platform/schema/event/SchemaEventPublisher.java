@@ -23,7 +23,7 @@ public class SchemaEventPublisher {
 
     public void publishSchemaPublished(String listingType, int version,
                                        String changeClassification, String publishedBy) {
-        // orgId is null for platform-level schema publishes
+        // tenantId is null for platform-level schema publishes
         SchemaPublishedEvent event = SchemaPublishedEvent.builder()
                 .eventType("SCHEMA_PUBLISHED")
                 .listingType(listingType)

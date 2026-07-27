@@ -26,20 +26,20 @@ public class ListingTypeService {
     private final FieldGroupRepository fieldGroupRepo;
 
     public List<ListingTypeResponse> list() {
-        return listingTypeRepo.findByOrgIdIsNullAndActiveTrue().stream()
+        return listingTypeRepo.findByTenantIdIsNullAndActiveTrue().stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     public ListingTypeResponse getByName(String name) {
-        ListingTypeDefinition def = listingTypeRepo.findByNameAndOrgIdIsNull(name)
+        ListingTypeDefinition def = listingTypeRepo.findByNameAndTenantIdIsNull(name)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", name));
         return toResponse(def);
     }
 
     @Cacheable(value = CACHE_SCHEMA, key = "#name")
     public ListingTypeSchemaDto getSchema(String name) {
-        ListingTypeDefinition def = listingTypeRepo.findByNameWithSectionsAndOrgIdIsNull(name)
+        ListingTypeDefinition def = listingTypeRepo.findByNameWithSectionsAndTenantIdIsNull(name)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", name));
         return toSchemaDto(def);
     }
@@ -58,7 +58,7 @@ public class ListingTypeService {
         if (req.sections() != null) {
             List<ListingTypeSection> sections = new ArrayList<>();
             for (ListingTypeRequest.SectionRequest secReq : req.sections()) {
-                FieldGroup fg = fieldGroupRepo.findByNameWithFieldsAndOrgIdIsNull(secReq.fieldGroupName())
+                FieldGroup fg = fieldGroupRepo.findByNameWithFieldsAndTenantIdIsNull(secReq.fieldGroupName())
                         .orElseThrow(() -> new ResourceNotFoundException("FieldGroup", secReq.fieldGroupName()));
                 ListingTypeSection sec = new ListingTypeSection();
                 sec.setListingType(def);
@@ -80,10 +80,10 @@ public class ListingTypeService {
     @Transactional
     @CacheEvict(value = CACHE_SCHEMA, key = "#name")
     public ListingTypeResponse addSection(String name, ListingTypeRequest.SectionRequest secReq) {
-        ListingTypeDefinition def = listingTypeRepo.findByNameAndOrgIdIsNull(name)
+        ListingTypeDefinition def = listingTypeRepo.findByNameAndTenantIdIsNull(name)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", name));
 
-        FieldGroup fg = fieldGroupRepo.findByNameWithFieldsAndOrgIdIsNull(secReq.fieldGroupName())
+        FieldGroup fg = fieldGroupRepo.findByNameWithFieldsAndTenantIdIsNull(secReq.fieldGroupName())
                 .orElseThrow(() -> new ResourceNotFoundException("FieldGroup", secReq.fieldGroupName()));
 
         ListingTypeSection sec = new ListingTypeSection();
@@ -203,7 +203,7 @@ public class ListingTypeService {
 
     private FieldResponse toFieldResponse(FieldDefinition f) {
         return new FieldResponse(
-                f.getId(), f.getOrgId(), f.getName(), f.getLabel(), f.getDescription(),
+                f.getId(), f.getTenantId(), f.getName(), f.getLabel(), f.getDescription(),
                 f.getFieldType(), f.getEnumValues(), f.getItemSchema(), f.getReferenceType(),
                 f.isRequired(), f.isUnique(), f.getValidationRules(), f.getDefaultValue(),
                 f.isSearchable(), f.isFilterable(), f.isSortable(), f.isFacetable(),

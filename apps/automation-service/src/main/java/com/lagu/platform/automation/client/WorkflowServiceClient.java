@@ -36,9 +36,8 @@ public class WorkflowServiceClient {
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
             if (resp == null) return List.of();
-            Map<?, ?> data = (Map<?, ?>) resp.get("data");
-            if (data == null) return List.of();
-            return (List<Map<String, Object>>) data.get("content");
+            List<Map<String, Object>> data = (List<Map<String, Object>>) resp.get("data");
+            return data != null ? data : List.of();
         } catch (Exception e) {
             log.warn("Could not fetch timed-out approvals: {}", e.getMessage());
             return List.of();

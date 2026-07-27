@@ -8,10 +8,10 @@ import java.util.UUID;
 
 public interface RecordRelationshipRepository extends JpaRepository<RecordRelationship, UUID> {
 
-    List<RecordRelationship> findByOrgIdAndSourceRecordIdAndRelationshipName(
-            UUID orgId, UUID sourceRecordId, String relationshipName);
+    List<RecordRelationship> findByTenantIdAndSourceRecordIdAndRelationshipName(
+            UUID tenantId, UUID sourceRecordId, String relationshipName);
 
-    List<RecordRelationship> findByOrgIdAndSourceRecordId(UUID orgId, UUID sourceRecordId);
+    List<RecordRelationship> findByTenantIdAndSourceRecordId(UUID tenantId, UUID sourceRecordId);
 
     Optional<RecordRelationship> findByRelationshipNameAndSourceRecordIdAndTargetRecordId(
             String relationshipName, UUID sourceRecordId, UUID targetRecordId);

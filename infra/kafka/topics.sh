@@ -16,7 +16,7 @@ create() {
 
 # Main topics — partition counts reflect relative throughput
 create platform.metadata.changed  3
-create platform.record.events     12   # highest throughput; keyed by orgId:recordId
+create platform.record.events     12   # highest throughput; keyed by tenantId:recordId
 create platform.workflow.events   6
 create platform.team.events       3
 create platform.automation.events 3

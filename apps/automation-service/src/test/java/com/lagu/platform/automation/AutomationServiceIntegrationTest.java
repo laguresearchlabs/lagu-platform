@@ -79,7 +79,7 @@ class AutomationServiceIntegrationTest {
 
     @LocalServerPort int port;
 
-    static final String ORG_ID  = UUID.randomUUID().toString();
+    static final String TENANT_ID  = UUID.randomUUID().toString();
     static final String USER_ID = UUID.randomUUID().toString();
 
     RestClient client;
@@ -89,7 +89,7 @@ class AutomationServiceIntegrationTest {
         client = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    USER_ID)
-                .defaultHeader("X-Org-Id",     ORG_ID)
+                .defaultHeader("X-Tenant-Id",     TENANT_ID)
                 .defaultHeader("X-User-Roles", "CONFIG_ADMIN")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -106,7 +106,7 @@ class AutomationServiceIntegrationTest {
                 "objectType","EMPLOYEE"
         ));
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(resp.getBody()).containsKey("id");
+        assertThat(data(resp.getBody())).containsKey("id");
     }
 
     @Test
@@ -116,7 +116,7 @@ class AutomationServiceIntegrationTest {
         ResponseEntity<Map> resp = client.get().uri("/api/v1/triggers/" + id)
                 .retrieve().toEntity(Map.class);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(resp.getBody().get("id")).isEqualTo(id);
+        assertThat(data(resp.getBody()).get("id")).isEqualTo(id);
     }
 
     @Test
@@ -128,9 +128,8 @@ class AutomationServiceIntegrationTest {
                 .retrieve().toEntity(Map.class);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> page = resp.getBody();
-        assertThat(((Number) page.get("totalElements")).intValue()).isGreaterThanOrEqualTo(2);
+        Map<String, Object> page = data(resp.getBody());
+        assertThat(((Number) page.get("total")).intValue()).isGreaterThanOrEqualTo(2);
     }
 
     @Test
@@ -143,7 +142,7 @@ class AutomationServiceIntegrationTest {
                 "config", Map.of("message", "Record created: {{recordId}}")
         ));
         assertThat(addResp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        String actionId = (String) addResp.getBody().get("id");
+        String actionId = (String) data(addResp.getBody()).get("id");
         assertThat(actionId).isNotNull();
 
         ResponseEntity<Map> updateResp = client.put()
@@ -170,12 +169,12 @@ class AutomationServiceIntegrationTest {
                 "config",         Map.of("message", "Employee record created")
         ));
 
-        UUID orgId    = UUID.fromString(ORG_ID);
+        UUID tenantId    = UUID.fromString(TENANT_ID);
         UUID recordId = UUID.randomUUID();
 
         RecordEvent event = RecordEvent.builder()
                 .eventType("RECORD_CREATED")
-                .orgId(orgId)
+                .tenantId(tenantId)
                 .recordId(recordId)
                 .objectType("EMPLOYEE")
                 .currentStatus("DRAFT")
@@ -184,7 +183,7 @@ class AutomationServiceIntegrationTest {
                 .build();
 
         // JSON producer → consumer's StringDeserializer reads the UTF-8 JSON bytes as a String
-        kafkaTemplate.send(PlatformTopics.RECORD_EVENTS, ORG_ID, event);
+        kafkaTemplate.send(PlatformTopics.RECORD_EVENTS, TENANT_ID, event);
 
         Awaitility.await()
                 .atMost(10, TimeUnit.SECONDS)
@@ -194,7 +193,7 @@ class AutomationServiceIntegrationTest {
                     // with a null recordId in this same shared Testcontainers database — guard
                     // against that instead of NPEing on them.
                     var runs = runRepository.findAll().stream()
-                            .filter(r -> orgId.equals(r.getOrgId()) && recordId.equals(r.getRecordId()))
+                            .filter(r -> tenantId.equals(r.getTenantId()) && recordId.equals(r.getRecordId()))
                             .toList();
                     assertThat(runs).isNotEmpty();
                     assertThat(runs.get(0).getStatus()).isIn("SUCCESS", "RUNNING");
@@ -207,7 +206,7 @@ class AutomationServiceIntegrationTest {
 
         RecordEvent event = RecordEvent.builder()
                 .eventType("RECORD_CREATED")
-                .orgId(UUID.randomUUID())    // different org — no trigger exists for it
+                .tenantId(UUID.randomUUID())    // different org — no trigger exists for it
                 .recordId(UUID.randomUUID())
                 .objectType("UNKNOWN_TYPE")
                 .currentStatus("DRAFT")
@@ -233,7 +232,7 @@ class AutomationServiceIntegrationTest {
 
         ResponseEntity<Map> resp = post("/api/v1/triggers/" + id + "/test",
                 Map.of("name", "Alice", "status", "DRAFT"));
-        assertThat(resp.getBody().get("status")).isEqualTo("DRY_RUN_COMPLETE");
+        assertThat(data(resp.getBody()).get("status")).isEqualTo("DRY_RUN_COMPLETE");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -242,14 +241,13 @@ class AutomationServiceIntegrationTest {
         return createTrigger(name, "RECORD_CREATED", "EMPLOYEE");
     }
 
-    @SuppressWarnings("unchecked")
     private String createTrigger(String name, String eventType, String objectType) {
-        return (String) post("/api/v1/triggers", Map.of(
+        return (String) data(post("/api/v1/triggers", Map.of(
                 "name",       name,
                 "label",      name,
                 "eventType",  eventType,
                 "objectType", objectType
-        )).getBody().get("id");
+        )).getBody()).get("id");
     }
 
     @SuppressWarnings("unchecked")
@@ -259,5 +257,10 @@ class AutomationServiceIntegrationTest {
                 .body(body)
                 .retrieve()
                 .toEntity(Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> data(Map body) {
+        return (Map<String, Object>) body.get("data");
     }
 }

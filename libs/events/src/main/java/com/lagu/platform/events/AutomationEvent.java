@@ -31,7 +31,7 @@ public class AutomationEvent implements PlatformEvent {
     /** TRIGGER_FIRED | ACTION_SUCCEEDED | ACTION_FAILED | ESCALATION_FIRED */
     private String              eventType;
 
-    private UUID                orgId;
+    private UUID                tenantId;
     private UUID                triggerId;
     private String              triggerName;
     private UUID                recordId;

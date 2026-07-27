@@ -27,7 +27,7 @@ public class AutomationRunService {
     public AutomationRun createRun(TriggerDefinition trigger, AutomationEventContext ctx) {
         AutomationRun run = new AutomationRun();
         run.setTrigger(trigger);
-        run.setOrgId(ctx.getOrgId());
+        run.setTenantId(ctx.getTenantId());
         run.setRecordId(ctx.getRecordId());
         run.setEventType(ctx.getEventType());
         run.setStatus("RUNNING");

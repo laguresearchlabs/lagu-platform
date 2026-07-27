@@ -14,9 +14,9 @@ import java.util.UUID;
 @Entity
 @Table(name = "record",
        indexes = {
-           @Index(name = "idx_record_org_type",   columnList = "org_id, object_type"),
-           @Index(name = "idx_record_org_status",  columnList = "org_id, object_type, status"),
-           @Index(name = "idx_record_created_at",  columnList = "org_id, object_type, created_at")
+           @Index(name = "idx_record_org_type",   columnList = "tenant_id, object_type"),
+           @Index(name = "idx_record_org_status",  columnList = "tenant_id, object_type, status"),
+           @Index(name = "idx_record_created_at",  columnList = "tenant_id, object_type, created_at")
        })
 @Data
 @NoArgsConstructor
@@ -26,8 +26,8 @@ public class Record {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "object_type", nullable = false, length = 100)
     private String objectType;

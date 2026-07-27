@@ -12,6 +12,8 @@ dependencies {
     implementation(rootProject.libs.spring.boot.data.jpa)
     implementation(rootProject.libs.spring.boot.validation)
     implementation(rootProject.libs.spring.boot.actuator)
+    implementation(rootProject.libs.eureka.client)
+    implementation(rootProject.libs.loadbalancer)
     implementation(rootProject.libs.spring.boot.kafka)
     implementation(rootProject.libs.springdoc.openapi)
     implementation(rootProject.libs.micrometer.prometheus)
@@ -28,4 +30,5 @@ dependencies {
     testImplementation(rootProject.libs.testcontainers.junit)
     testImplementation(rootProject.libs.testcontainers.postgresql)
     testImplementation(rootProject.libs.spring.kafka.test)
+    testImplementation(rootProject.libs.awaitility)
 }

@@ -2,11 +2,15 @@ package com.lagu.platform.automation.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.automation.model.AutomationEventContext;
+import com.lagu.platform.events.BookingEvent;
 import com.lagu.platform.events.RecordEvent;
 import com.lagu.platform.events.WorkflowEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -20,7 +24,7 @@ public class AutomationEventParser {
             RecordEvent e = objectMapper.readValue(json, RecordEvent.class);
             return AutomationEventContext.builder()
                     .eventType(toAutomationEventType(e.getEventType()))
-                    .orgId(e.getOrgId())
+                    .tenantId(e.getTenantId())
                     .recordId(e.getRecordId())
                     .objectType(e.getObjectType())
                     .previousStatus(e.getPreviousStatus())
@@ -47,7 +51,7 @@ public class AutomationEventParser {
 
             return AutomationEventContext.builder()
                     .eventType(autoType)
-                    .orgId(e.getOrgId())
+                    .tenantId(e.getTenantId())
                     .recordId(e.getRecordId())
                     .objectType(e.getObjectType())
                     .currentStatus(e.getToState())
@@ -56,6 +60,40 @@ public class AutomationEventParser {
                     .build();
         } catch (Exception ex) {
             log.warn("Failed to parse WorkflowEvent: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * booking-service's own eventType vocabulary (INQUIRED|QUOTED|CONFIRMED|COMPLETED|CANCELLED)
+     * is used directly as the trigger's eventType — no translation table needed, unlike
+     * RecordEvent's CREATED->RECORD_CREATED. BookingEvent isn't schema-registry-driven, so
+     * objectType is left null; dispatch() falls back to findActiveByEvent(eventType, tenantId),
+     * which doesn't filter by objectType at all.
+     */
+    public AutomationEventContext parseBookingEvent(String json) {
+        try {
+            BookingEvent e = objectMapper.readValue(json, BookingEvent.class);
+            Map<String, Object> data = new HashMap<>();
+            data.put("consumerUserId", e.getConsumerUserId() != null ? e.getConsumerUserId().toString() : null);
+            data.put("vendorTenantId", e.getVendorTenantId() != null ? e.getVendorTenantId().toString() : null);
+            data.put("listingRecordId", e.getListingRecordId() != null ? e.getListingRecordId().toString() : null);
+            data.put("quotedPrice", e.getQuotedPrice());
+            data.put("commissionAmount", e.getCommissionAmount());
+            data.put("eventDate", e.getEventDate() != null ? e.getEventDate().toString() : null);
+
+            return AutomationEventContext.builder()
+                    .eventType(e.getEventType())
+                    .tenantId(e.getVendorTenantId())
+                    .recordId(e.getBookingId())
+                    .objectType(null)
+                    .previousStatus(e.getPreviousStatus())
+                    .currentStatus(e.getCurrentStatus())
+                    .data(data)
+                    .changedBy(e.getChangedBy())
+                    .build();
+        } catch (Exception ex) {
+            log.warn("Failed to parse BookingEvent: {}", ex.getMessage());
             return null;
         }
     }

@@ -210,7 +210,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         int seeded = 0;
         for (FieldSpec s : specs) {
-            if (fieldRepo.findByNameAndOrgIdIsNull(s.name()).isEmpty()) {
+            if (fieldRepo.findByNameAndTenantIdIsNull(s.name()).isEmpty()) {
                 FieldDefinition def = new FieldDefinition();
                 def.setName(s.name());
                 def.setLabel(s.label());
@@ -257,7 +257,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         int seeded = 0;
         for (ArraySpec s : specs) {
-            if (fieldRepo.findByNameAndOrgIdIsNull(s.name()).isEmpty()) {
+            if (fieldRepo.findByNameAndTenantIdIsNull(s.name()).isEmpty()) {
                 FieldDefinition def = new FieldDefinition();
                 def.setName(s.name());
                 def.setLabel(s.label());
@@ -549,7 +549,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         int seeded = 0;
         for (DocSpec s : vendorDocs) {
-            if (docReqRepo.findByCodeAndOrgIdIsNull(s.code()).isEmpty()) {
+            if (docReqRepo.findByCodeAndTenantIdIsNull(s.code()).isEmpty()) {
                 DocumentRequirement doc = new DocumentRequirement();
                 doc.setListingType("VENDOR");
                 doc.setCode(s.code());
@@ -579,7 +579,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         );
         int order = 0;
         for (HrDocSpec s : hrDocs) {
-            if (docReqRepo.findByCodeAndOrgIdIsNull(s.code()).isEmpty()) {
+            if (docReqRepo.findByCodeAndTenantIdIsNull(s.code()).isEmpty()) {
                 DocumentRequirement doc = new DocumentRequirement();
                 doc.setListingType(null);
                 doc.setCode(s.code());
@@ -704,7 +704,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     // ── Helper methods ────────────────────────────────────────────────────────
 
     private void ensureFieldGroup(String name, String label, List<FgeSpec> entrySpecs) {
-        if (fieldGroupRepo.findByNameAndOrgIdIsNull(name).isPresent()) return;
+        if (fieldGroupRepo.findByNameAndTenantIdIsNull(name).isPresent()) return;
 
         FieldGroup group = new FieldGroup();
         group.setName(name);
@@ -712,7 +712,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         List<FieldGroupEntry> entries = new ArrayList<>();
         for (FgeSpec spec : entrySpecs) {
-            fieldRepo.findByNameAndOrgIdIsNull(spec.fieldName()).ifPresent(fd -> {
+            fieldRepo.findByNameAndTenantIdIsNull(spec.fieldName()).ifPresent(fd -> {
                 FieldGroupEntry entry = new FieldGroupEntry();
                 entry.setFieldGroup(group);
                 entry.setField(fd);
@@ -729,7 +729,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     private void ensureListingType(String name, String label, String description,
                                    List<SecSpec> sections, boolean publishable,
                                    boolean consumerSearchable) {
-        if (listingTypeRepo.findByNameAndOrgIdIsNull(name).isPresent()) return;
+        if (listingTypeRepo.findByNameAndTenantIdIsNull(name).isPresent()) return;
 
         ListingTypeDefinition def = new ListingTypeDefinition();
         def.setName(name);
@@ -740,7 +740,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         List<ListingTypeSection> secs = new ArrayList<>();
         for (SecSpec spec : sections) {
-            fieldGroupRepo.findByNameAndOrgIdIsNull(spec.groupName()).ifPresent(fg -> {
+            fieldGroupRepo.findByNameAndTenantIdIsNull(spec.groupName()).ifPresent(fg -> {
                 ListingTypeSection sec = new ListingTypeSection();
                 sec.setListingType(def);
                 sec.setFieldGroup(fg);
@@ -757,7 +757,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
     private CategoryDefinition ensureCategory(CategoryDefinition parent, String listingType,
                                               String slug, String label, int order) {
-        return categoryRepo.findBySlugAndOrgIdIsNull(slug).orElseGet(() -> {
+        return categoryRepo.findBySlugAndTenantIdIsNull(slug).orElseGet(() -> {
             CategoryDefinition c = new CategoryDefinition();
             c.setParent(parent);
             c.setListingType(listingType);
@@ -812,7 +812,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         int seeded = 0;
         for (RelDefSpec s : specs) {
-            if (relDefRepo.findByNameAndOrgIdIsNull(s.name()).isEmpty()) {
+            if (relDefRepo.findByNameAndTenantIdIsNull(s.name()).isEmpty()) {
                 RelationshipDefinition def = new RelationshipDefinition();
                 def.setName(s.name());
                 def.setLabel(s.label());

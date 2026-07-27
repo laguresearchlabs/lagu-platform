@@ -25,7 +25,7 @@ public class FieldGroupService {
     private final FieldService fieldService;
 
     public List<FieldGroupResponse> listPlatformLevel() {
-        return fieldGroupRepo.findByOrgIdIsNullAndActiveTrue().stream()
+        return fieldGroupRepo.findByTenantIdIsNullAndActiveTrue().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -80,7 +80,7 @@ public class FieldGroupService {
                                                 List<FieldGroupRequest.FieldGroupEntryRequest> entryReqs) {
         List<FieldGroupEntry> entries = new ArrayList<>();
         for (FieldGroupRequest.FieldGroupEntryRequest er : entryReqs) {
-            FieldDefinition field = fieldRepo.findByNameAndOrgIdIsNull(er.fieldName())
+            FieldDefinition field = fieldRepo.findByNameAndTenantIdIsNull(er.fieldName())
                     .orElseThrow(() -> new ResourceNotFoundException("FieldDefinition", er.fieldName()));
             FieldGroupEntry entry = new FieldGroupEntry();
             entry.setFieldGroup(group);

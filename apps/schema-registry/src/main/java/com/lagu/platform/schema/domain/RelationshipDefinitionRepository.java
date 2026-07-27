@@ -9,13 +9,13 @@ import java.util.UUID;
 
 public interface RelationshipDefinitionRepository extends JpaRepository<RelationshipDefinition, UUID> {
 
-    Optional<RelationshipDefinition> findByNameAndOrgIdIsNull(String name);
+    Optional<RelationshipDefinition> findByNameAndTenantIdIsNull(String name);
 
-    Optional<RelationshipDefinition> findByNameAndOrgId(String name, UUID orgId);
+    Optional<RelationshipDefinition> findByNameAndTenantId(String name, UUID tenantId);
 
-    @Query("SELECT r FROM RelationshipDefinition r WHERE r.active = true AND (r.orgId IS NULL OR r.orgId = :orgId) ORDER BY r.name")
-    List<RelationshipDefinition> findAllForOrg(UUID orgId);
+    @Query("SELECT r FROM RelationshipDefinition r WHERE r.active = true AND (r.tenantId IS NULL OR r.tenantId = :tenantId) ORDER BY r.name")
+    List<RelationshipDefinition> findAllForOrg(UUID tenantId);
 
-    @Query("SELECT r FROM RelationshipDefinition r WHERE r.active = true AND r.orgId IS NULL ORDER BY r.name")
+    @Query("SELECT r FROM RelationshipDefinition r WHERE r.active = true AND r.tenantId IS NULL ORDER BY r.name")
     List<RelationshipDefinition> findAllPlatformLevel();
 }

@@ -7,8 +7,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface FieldDefinitionRepository extends JpaRepository<FieldDefinition, UUID> {
-    Optional<FieldDefinition> findByNameAndOrgIdIsNull(String name);
-    Optional<FieldDefinition> findByNameAndOrgId(String name, UUID orgId);
-    List<FieldDefinition> findByOrgIdIsNullAndActiveTrue();
-    List<FieldDefinition> findByOrgIdAndActiveTrue(UUID orgId);
+    Optional<FieldDefinition> findByNameAndTenantIdIsNull(String name);
+    Optional<FieldDefinition> findByNameAndTenantId(String name, UUID tenantId);
+    List<FieldDefinition> findByTenantIdIsNullAndActiveTrue();
+    List<FieldDefinition> findByTenantIdAndActiveTrue(UUID tenantId);
 }

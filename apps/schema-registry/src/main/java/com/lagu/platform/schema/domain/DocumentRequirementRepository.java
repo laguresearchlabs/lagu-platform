@@ -7,10 +7,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface DocumentRequirementRepository extends JpaRepository<DocumentRequirement, UUID> {
-    Optional<DocumentRequirement> findByCodeAndOrgIdIsNull(String code);
+    Optional<DocumentRequirement> findByCodeAndTenantIdIsNull(String code);
     List<DocumentRequirement> findByListingTypeAndActiveTrueOrderByDisplayOrder(String listingType);
     List<DocumentRequirement> findByListingTypeIsNullAndActiveTrueOrderByDisplayOrder();
 
     /** Full platform-level catalog regardless of listingType — used by document-service. */
-    List<DocumentRequirement> findByOrgIdIsNullAndActiveTrueOrderByDisplayOrder();
+    List<DocumentRequirement> findByTenantIdIsNullAndActiveTrueOrderByDisplayOrder();
 }

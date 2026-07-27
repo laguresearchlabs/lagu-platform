@@ -50,8 +50,8 @@ public class FieldGroupController {
 
     @DeleteMapping("/{id}")
     @RequirePermission(resource = "ATTRIBUTE", action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
+    public ResponseEntity<Void> deactivate(@PathVariable UUID id) {
         fieldGroupService.deactivate(id);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.noContent().build();
     }
 }

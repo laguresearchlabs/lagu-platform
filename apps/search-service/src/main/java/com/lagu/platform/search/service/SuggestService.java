@@ -23,8 +23,8 @@ public class SuggestService {
      * Returns distinct values for {@code field} that start with {@code prefix}.
      * Uses a prefix filter query + terms aggregation (cheap typeahead).
      */
-    public List<String> suggest(String objectType, String field, String prefix, String orgId) throws IOException {
-        String index = mappingBuilder.indexName(orgId, objectType);
+    public List<String> suggest(String objectType, String field, String prefix, String tenantId) throws IOException {
+        String index = mappingBuilder.indexName(tenantId, objectType);
 
         var response = osClient.search(r -> r
                         .index(index)

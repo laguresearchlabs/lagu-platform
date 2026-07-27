@@ -10,7 +10,7 @@ import java.util.UUID;
 @Data @Builder
 public class WorkflowDefinitionResponse {
     private UUID   id;
-    private UUID   orgId;
+    private UUID   tenantId;
     private String name;
     private String label;
     private String objectType;

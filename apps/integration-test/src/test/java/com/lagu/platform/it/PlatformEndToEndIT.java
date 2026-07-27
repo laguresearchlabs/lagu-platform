@@ -204,7 +204,7 @@ class PlatformEndToEndIT {
 
     @Test
     void createsPublishesIndexesAndSearchesRecordEndToEnd() throws Exception {
-        String orgId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
         String userId = UUID.randomUUID().toString();
         String listingType = "IT_TEST_VENUE";
 
@@ -212,7 +212,7 @@ class PlatformEndToEndIT {
         // FieldRequest is a Java record; this app stack runs Jackson 3, which — unlike Jackson 2 —
         // fails record deserialization if a primitive component is absent from the JSON entirely
         // rather than defaulting it to false, so every boolean field must be listed explicitly.
-        JsonNode field = postForData(schemaRegistryClient, orgId, userId, "/api/v1/fields", Map.ofEntries(
+        JsonNode field = postForData(schemaRegistryClient, tenantId, userId, "/api/v1/fields", Map.ofEntries(
                 Map.entry("name", "name"),
                 Map.entry("label", "Name"),
                 Map.entry("fieldType", "TEXT"),
@@ -228,14 +228,14 @@ class PlatformEndToEndIT {
         ));
         assertThat(field.get("name").asText()).isEqualTo("name");
 
-        JsonNode fieldGroup = postForData(schemaRegistryClient, orgId, userId, "/api/v1/field-groups", Map.of(
+        JsonNode fieldGroup = postForData(schemaRegistryClient, tenantId, userId, "/api/v1/field-groups", Map.of(
                 "name", "basic-info",
                 "label", "Basic Info",
                 "entries", List.of(Map.of("fieldName", "name", "displayOrder", 0, "required", true))
         ));
         assertThat(fieldGroup.get("name").asText()).isEqualTo("basic-info");
 
-        JsonNode listing = postForData(schemaRegistryClient, orgId, userId, "/api/v1/listing-types", Map.of(
+        JsonNode listing = postForData(schemaRegistryClient, tenantId, userId, "/api/v1/listing-types", Map.of(
                 "name", listingType,
                 "label", "Test Venue",
                 "publishable", true,
@@ -254,7 +254,7 @@ class PlatformEndToEndIT {
         try (KafkaConsumer<String, String> schemaEvents = kafkaConsumer("it-schema-events")) {
             schemaEvents.subscribe(List.of(PlatformTopics.SCHEMA_EVENTS));
 
-            JsonNode published = postForData(schemaRegistryClient, orgId, userId,
+            JsonNode published = postForData(schemaRegistryClient, tenantId, userId,
                     "/api/v1/listing-types/" + listingType + "/publish",
                     Map.of("changeSummary", "initial publish"));
             assertThat(published.get("version").asInt()).isEqualTo(1);
@@ -267,7 +267,7 @@ class PlatformEndToEndIT {
         }
 
         // ── 2. record-service: create a record validated against that published schema ────
-        JsonNode record = postForData(recordServiceClient, orgId, userId, "/api/v1/records", Map.of(
+        JsonNode record = postForData(recordServiceClient, tenantId, userId, "/api/v1/records", Map.of(
                 "objectType", listingType,
                 "data", Map.of("name", "Grand Hall"),
                 "status", "DRAFT"
@@ -279,11 +279,11 @@ class PlatformEndToEndIT {
         // OpenSearch asynchronously, so poll until it shows up. ─────────────────────────────
         await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
-                    JsonNode results = search(searchServiceClient, orgId, userId, listingType, "Grand Hall");
+                    JsonNode results = search(searchServiceClient, tenantId, userId, listingType, "Grand Hall");
                     assertThat(results.get("total").asLong()).isGreaterThan(0);
                 });
 
-        JsonNode results = search(searchServiceClient, orgId, userId, listingType, "Grand Hall");
+        JsonNode results = search(searchServiceClient, tenantId, userId, listingType, "Grand Hall");
         JsonNode hit = results.get("results").get(0);
         assertThat(hit.get("recordId").asText()).isEqualTo(recordId);
         assertThat(hit.get("data").get("name").asText()).isEqualTo("Grand Hall");
@@ -292,28 +292,28 @@ class PlatformEndToEndIT {
         // then drive the record through it. This exercises the real transition pipeline end to
         // end: record-service → Kafka → workflow-service (role check, case-insensitive trigger,
         // guard) → Kafka → record-service applies the status. ────────────────────────────────
-        String workflowId = createVenueWorkflow(orgId, userId, listingType);
+        String workflowId = createVenueWorkflow(tenantId, userId, listingType);
         assertThat(workflowId).isNotBlank();
 
         // Vendor submits. The role attached to the event (ORG_MANAGER via the header below) must
         // satisfy the transition's allowedRoles, and the lowercase "submit" trigger must match.
-        requestTransition(recordServiceClient, orgId, userId, "ORG_MANAGER", recordId, "submit");
+        requestTransition(recordServiceClient, tenantId, userId, "ORG_MANAGER", recordId, "submit");
         awaitWorkflowState(recordId, "SUBMITTED");
 
         // Allowed transitions must be role-filtered: an ORG_MANAGER sees "publish", an
         // unprivileged ORG_MEMBER sees nothing actionable from SUBMITTED.
-        JsonNode managerView = workflowStatus(orgId, userId, "ORG_MANAGER", recordId);
+        JsonNode managerView = workflowStatus(tenantId, userId, "ORG_MANAGER", recordId);
         assertThat(triggerNames(managerView)).contains("publish");
-        JsonNode memberView = workflowStatus(orgId, userId, "ORG_MEMBER", recordId);
+        JsonNode memberView = workflowStatus(tenantId, userId, "ORG_MEMBER", recordId);
         assertThat(triggerNames(memberView)).isEmpty();
 
         // Publish (mixed-case trigger proves case-insensitive matching), then confirm the record
         // status caught up via the TRANSITIONED event.
-        requestTransition(recordServiceClient, orgId, userId, "ORG_MANAGER", recordId, "PuBlIsH");
+        requestTransition(recordServiceClient, tenantId, userId, "ORG_MANAGER", recordId, "PuBlIsH");
         awaitWorkflowState(recordId, "PUBLISHED");
         await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
-                    JsonNode r = getRecord(recordServiceClient, orgId, userId, recordId);
+                    JsonNode r = getRecord(recordServiceClient, tenantId, userId, recordId);
                     assertThat(r.get("status").asText()).isEqualTo("PUBLISHED");
                 });
 
@@ -402,12 +402,12 @@ class PlatformEndToEndIT {
                 .build();
     }
 
-    private static JsonNode postForData(RestClient client, String orgId, String userId, String uri, Object body) {
+    private static JsonNode postForData(RestClient client, String tenantId, String userId, String uri, Object body) {
         String raw;
         try {
             raw = client.post().uri(uri)
                     .header("X-User-Id", userId)
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .header("X-User-Roles", "PLATFORM_ADMIN")
                     .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -426,12 +426,12 @@ class PlatformEndToEndIT {
         }
     }
 
-    private static JsonNode search(RestClient client, String orgId, String userId, String objectType, String query) {
+    private static JsonNode search(RestClient client, String tenantId, String userId, String objectType, String query) {
         String raw;
         try {
             raw = client.post().uri("/api/v1/search")
                     .header("X-User-Id", userId)
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .header("X-User-Roles", "PLATFORM_ADMIN")
                     .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -450,8 +450,8 @@ class PlatformEndToEndIT {
     }
 
     /** Creates a minimal DRAFT→SUBMITTED→PUBLISHED workflow for the object type; returns its id. */
-    private static String createVenueWorkflow(String orgId, String userId, String objectType) {
-        JsonNode wf = postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions",
+    private static String createVenueWorkflow(String tenantId, String userId, String objectType) {
+        JsonNode wf = postForData(workflowServiceClient, tenantId, userId, "/api/v1/workflow-definitions",
                 Map.of("name", "it_wf_" + objectType.toLowerCase(), "label", "IT Workflow",
                         "objectType", objectType, "initialStatus", "DRAFT"));
         String id = wf.get("id").asText();
@@ -460,25 +460,25 @@ class PlatformEndToEndIT {
                 Map.of("name", "DRAFT", "label", "Draft"),
                 Map.of("name", "SUBMITTED", "label", "Submitted"),
                 Map.of("name", "PUBLISHED", "label", "Published", "terminal", true))) {
-            postForData(workflowServiceClient, orgId, userId,
+            postForData(workflowServiceClient, tenantId, userId,
                     "/api/v1/workflow-definitions/" + id + "/states", s);
         }
         // Lowercase trigger names, as the production seeder stores them.
-        postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
+        postForData(workflowServiceClient, tenantId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
                 Map.of("fromState", "DRAFT", "toState", "SUBMITTED", "triggerName", "submit",
                         "triggerLabel", "Submit", "allowedRoles", List.of("ORG_MANAGER", "ORG_OWNER")));
-        postForData(workflowServiceClient, orgId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
+        postForData(workflowServiceClient, tenantId, userId, "/api/v1/workflow-definitions/" + id + "/transitions",
                 Map.of("fromState", "SUBMITTED", "toState", "PUBLISHED", "triggerName", "publish",
                         "triggerLabel", "Publish", "allowedRoles", List.of("ORG_MANAGER", "ORG_OWNER")));
         return id;
     }
 
     /** POSTs a transition request to record-service with an explicit role on the identity header. */
-    private static void requestTransition(RestClient client, String orgId, String userId, String role,
+    private static void requestTransition(RestClient client, String tenantId, String userId, String role,
                                           String recordId, String trigger) {
         try {
             client.post().uri("/api/v1/records/" + recordId + "/status")
-                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Id", userId).header("X-Tenant-Id", tenantId)
                     .header("X-User-Roles", role)
                     .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -490,10 +490,10 @@ class PlatformEndToEndIT {
         }
     }
 
-    private static JsonNode workflowStatus(String orgId, String userId, String role, String recordId) {
+    private static JsonNode workflowStatus(String tenantId, String userId, String role, String recordId) {
         try {
             String raw = workflowServiceClient.get().uri("/api/v1/records/" + recordId + "/workflow")
-                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Id", userId).header("X-Tenant-Id", tenantId)
                     .header("X-User-Roles", role)
                     .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
                     .retrieve().body(String.class);
@@ -505,7 +505,7 @@ class PlatformEndToEndIT {
 
     private static void awaitWorkflowState(String recordId, String expected) {
         // The workflow status endpoint is keyed purely by recordId (not org-scoped), but the
-        // gateway filter still parses X-Org-Id as a UUID, so pass a syntactically valid one.
+        // gateway filter still parses X-Tenant-Id as a UUID, so pass a syntactically valid one.
         String probeOrg  = UUID.randomUUID().toString();
         String probeUser = UUID.randomUUID().toString();
         await().atMost(Duration.ofSeconds(20)).pollInterval(Duration.ofMillis(500))
@@ -523,10 +523,10 @@ class PlatformEndToEndIT {
         return names;
     }
 
-    private static JsonNode getRecord(RestClient client, String orgId, String userId, String recordId) {
+    private static JsonNode getRecord(RestClient client, String tenantId, String userId, String recordId) {
         try {
             String raw = client.get().uri("/api/v1/records/" + recordId)
-                    .header("X-User-Id", userId).header("X-Org-Id", orgId)
+                    .header("X-User-Id", userId).header("X-Tenant-Id", tenantId)
                     .header("X-User-Roles", "ORG_MANAGER")
                     .header("X-Platform-Gateway-Secret", GATEWAY_SECRET)
                     .retrieve().body(String.class);

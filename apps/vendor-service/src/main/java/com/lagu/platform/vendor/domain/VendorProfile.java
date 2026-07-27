@@ -11,12 +11,15 @@ import java.util.UUID;
 @Data
 public class VendorProfile {
 
+    /**
+     * Assigned explicitly by VendorService.register() (not JPA-generated) — the same value is
+     * used as record-service's tenancy/org-partition key, so it must be known before the local
+     * row is saved. There used to be a separate `tenantId` column for that purpose; it was always
+     * unique per vendor and never diverged from this id, so it was pure redundancy — see
+     * getTenantId().
+     */
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-
-    @Column(name = "org_id", nullable = false, unique = true)
-    private UUID orgId;
 
     @Column(name = "record_id", nullable = false, unique = true)
     private UUID recordId;
@@ -46,4 +49,6 @@ public class VendorProfile {
 
     @PreUpdate
     void onUpdate() { updatedAt = Instant.now(); }
+
+    public UUID getTenantId() { return id; }
 }

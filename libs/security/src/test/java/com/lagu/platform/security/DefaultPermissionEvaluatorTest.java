@@ -30,7 +30,7 @@ class DefaultPermissionEvaluatorTest {
     private PlatformSecurityContext ctx(String... roles) {
         return PlatformSecurityContext.builder()
                 .userId(UUID.randomUUID())
-                .orgId(UUID.randomUUID())
+                .tenantId(UUID.randomUUID())
                 .roles(Set.of(roles))
                 .build();
     }

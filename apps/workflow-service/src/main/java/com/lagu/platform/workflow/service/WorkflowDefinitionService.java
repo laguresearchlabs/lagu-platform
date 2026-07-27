@@ -28,7 +28,7 @@ public class WorkflowDefinitionService {
         PlatformSecurityContext ctx = currentContext();
         var definitions = ctx.isPlatformAdmin()
                 ? wfRepo.findByActiveTrue()
-                : wfRepo.findByActiveTrueAndOrgIdOrPlatformLevel(requireOrgId(ctx));
+                : wfRepo.findByActiveTrueAndTenantIdOrPlatformLevel(requireTenantId(ctx));
         return definitions.stream().map(w -> toResponse(w, false)).toList();
     }
 
@@ -42,7 +42,7 @@ public class WorkflowDefinitionService {
     public WorkflowDefinitionResponse create(WorkflowDefinitionRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         WorkflowDefinition wf = new WorkflowDefinition();
-        wf.setOrgId(ctx != null && !ctx.isPlatformAdmin() ? ctx.getOrgId() : null);
+        wf.setTenantId(ctx != null && !ctx.isPlatformAdmin() ? ctx.getTenantId() : null);
         wf.setName(req.getName());
         wf.setLabel(req.getLabel());
         wf.setObjectType(req.getObjectType().toUpperCase());
@@ -105,11 +105,11 @@ public class WorkflowDefinitionService {
 
     /** Without this, a tenant's own CONFIG_ADMIN could pass a *different* tenant's workflow id
      *  to addState/addTransition and silently modify it — findById alone has no notion of "whose
-     *  workflow is this". canWriteOrgScoped still lets CONFIG_ADMIN modify the platform-level
-     *  (orgId null) workflow, same as before — that's its documented, intended role. */
+     *  workflow is this". canWriteTenantScoped still lets CONFIG_ADMIN modify the platform-level
+     *  (tenantId null) workflow, same as before — that's its documented, intended role. */
     private void requireWritable(WorkflowDefinition wf) {
         PlatformSecurityContext ctx = currentContext();
-        if (!ctx.isPlatformAdmin() && !ctx.canWriteOrgScoped(wf.getOrgId())) {
+        if (!ctx.isPlatformAdmin() && !ctx.canWriteTenantScoped(wf.getTenantId())) {
             throw new PlatformException("FORBIDDEN",
                     "Not permitted to modify this workflow definition", HttpStatus.FORBIDDEN);
         }
@@ -117,7 +117,7 @@ public class WorkflowDefinitionService {
 
     private void requireReadable(WorkflowDefinition wf) {
         PlatformSecurityContext ctx = currentContext();
-        if (!ctx.canReadOrgScoped(wf.getOrgId())) {
+        if (!ctx.canReadTenantScoped(wf.getTenantId())) {
             // 404, not 403 — a workflow definition's existence shouldn't be disclosed to a
             // caller who can't see it.
             throw new ResourceNotFoundException("WorkflowDefinition", wf.getId().toString());
@@ -132,12 +132,12 @@ public class WorkflowDefinitionService {
         return ctx;
     }
 
-    private UUID requireOrgId(PlatformSecurityContext ctx) {
-        if (ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+    private UUID requireTenantId(PlatformSecurityContext ctx) {
+        if (ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required", HttpStatus.FORBIDDEN);
         }
-        return ctx.getOrgId();
+        return ctx.getTenantId();
     }
 
     WorkflowDefinitionResponse toResponse(WorkflowDefinition w, boolean detail) {
@@ -146,7 +146,7 @@ public class WorkflowDefinitionService {
         List<WorkflowTransitionResponse> transitions = detail
                 ? w.getTransitions().stream().map(this::toTxResponse).toList() : List.of();
         return WorkflowDefinitionResponse.builder()
-                .id(w.getId()).orgId(w.getOrgId()).name(w.getName()).label(w.getLabel())
+                .id(w.getId()).tenantId(w.getTenantId()).name(w.getName()).label(w.getLabel())
                 .objectType(w.getObjectType()).initialStatus(w.getInitialStatus())
                 .active(w.isActive()).states(states).transitions(transitions)
                 .createdAt(w.getCreatedAt()).updatedAt(w.getUpdatedAt())

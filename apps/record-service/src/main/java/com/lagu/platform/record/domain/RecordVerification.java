@@ -20,8 +20,8 @@ public class RecordVerification {
     @Column(name = "record_id", nullable = false, unique = true)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(nullable = false, length = 30)
     private String tier = "NONE";

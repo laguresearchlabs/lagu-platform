@@ -19,8 +19,8 @@ import static org.mockito.Mockito.mock;
 
 /**
  * Regression coverage for the review's finding: search()/suggest() called
- * GatewayHeaderFilter.current().getOrgId().toString() unguarded — an internal SVC_* caller
- * (permitted READ with no X-Org-Id header) got a raw NullPointerException (500) instead of a
+ * GatewayHeaderFilter.current().getTenantId().toString() unguarded — an internal SVC_* caller
+ * (permitted READ with no X-Tenant-Id header) got a raw NullPointerException (500) instead of a
  * clean, identifiable error.
  */
 class SearchControllerTest {
@@ -44,7 +44,7 @@ class SearchControllerTest {
     @Test
     void searchWithNoOrgContextThrowsCleanErrorNotNpe() {
         asCaller(PlatformSecurityContext.builder()
-                .roles(Set.of("SVC_AUTOMATION_SERVICE")).orgId(null).build());
+                .roles(Set.of("SVC_AUTOMATION_SERVICE")).tenantId(null).build());
 
         SearchRequest req = new SearchRequest();
         req.setObjectType("VENUE");
@@ -65,7 +65,7 @@ class SearchControllerTest {
 
     @Test
     void suggestWithNoOrgContextThrowsCleanErrorNotNpe() {
-        asCaller(PlatformSecurityContext.builder().roles(Set.of("SVC_X")).orgId(null).build());
+        asCaller(PlatformSecurityContext.builder().roles(Set.of("SVC_X")).tenantId(null).build());
 
         assertThatThrownBy(() -> controller.suggest("VENUE", "name", "Grand"))
                 .isInstanceOf(PlatformException.class);
@@ -73,8 +73,8 @@ class SearchControllerTest {
 
     @Test
     void searchWithValidOrgContextDelegatesToService() throws Exception {
-        UUID orgId = UUID.randomUUID();
-        asCaller(PlatformSecurityContext.builder().userId(UUID.randomUUID()).orgId(orgId)
+        UUID tenantId = UUID.randomUUID();
+        asCaller(PlatformSecurityContext.builder().userId(UUID.randomUUID()).tenantId(tenantId)
                 .roles(Set.of("ORG_MANAGER")).build());
 
         SearchRequest req = new SearchRequest();
@@ -82,6 +82,6 @@ class SearchControllerTest {
 
         controller.search(req);
 
-        Mockito.verify(searchService).search(req, orgId.toString());
+        Mockito.verify(searchService).search(req, tenantId.toString());
     }
 }

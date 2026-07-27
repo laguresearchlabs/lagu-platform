@@ -14,7 +14,7 @@ public interface ListingSnapshotRepository extends JpaRepository<ListingSnapshot
 
     Optional<ListingSnapshot> findByRecordId(UUID recordId);
 
-    List<ListingSnapshot> findByOrgIdOrderByUpdatedAtDesc(UUID orgId);
+    List<ListingSnapshot> findByTenantIdOrderByUpdatedAtDesc(UUID tenantId);
 
     /** Consumer search — published only, boosted by searchBoost DESC. */
     @Query("SELECT s FROM ListingSnapshot s WHERE s.objectType = :objectType " +

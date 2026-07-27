@@ -45,19 +45,19 @@ public class RecordService {
     }
 
     public PageResult<RecordResponse> list(String objectType, String status, int page, int size) {
-        UUID orgId = requireOrgContext().getOrgId();
+        UUID tenantId = requireTenantContext().getTenantId();
         PageRequest pageReq = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
         var results = (status != null)
-                ? recordRepository.findByOrgIdAndObjectTypeAndStatus(orgId, objectType.toUpperCase(), status, pageReq)
-                : recordRepository.findByOrgIdAndObjectTypeAndStatusNot(orgId, objectType.toUpperCase(), "DELETED", pageReq);
+                ? recordRepository.findByTenantIdAndObjectTypeAndStatus(tenantId, objectType.toUpperCase(), status, pageReq)
+                : recordRepository.findByTenantIdAndObjectTypeAndStatusNot(tenantId, objectType.toUpperCase(), "DELETED", pageReq);
 
         return PageResult.from(results.map(this::toResponse));
     }
 
     @Transactional
     public RecordResponse create(CreateRecordRequest req) {
-        PlatformSecurityContext ctx = requireOrgContext();
+        PlatformSecurityContext ctx = requireTenantContext();
         validator.validate(req.getObjectType(), req.getData());
 
         // Initial status is owned by the workflow engine. Letting callers pick one would let a
@@ -70,7 +70,7 @@ public class RecordService {
         }
 
         Record record = new Record();
-        record.setOrgId(ctx.getOrgId());
+        record.setTenantId(ctx.getTenantId());
         record.setObjectType(req.getObjectType().toUpperCase());
         record.setStatus(req.getStatus() != null ? req.getStatus().toUpperCase() : "DRAFT");
         record.setData(req.getData());
@@ -175,22 +175,22 @@ public class RecordService {
             return recordRepository.findById(id)
                     .orElseThrow(() -> new ResourceNotFoundException("Record", id.toString()));
         }
-        if (ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+        if (ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required to access records", HttpStatus.FORBIDDEN);
         }
-        return recordRepository.findByIdAndOrgId(id, ctx.getOrgId())
+        return recordRepository.findByIdAndTenantId(id, ctx.getTenantId())
                 .orElseThrow(() -> new ResourceNotFoundException("Record", id.toString()));
     }
 
-    private PlatformSecurityContext requireOrgContext() {
+    private PlatformSecurityContext requireTenantContext() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         if (ctx == null) {
             throw new PlatformException("AUTH_REQUIRED", "Authentication required",
                     HttpStatus.UNAUTHORIZED);
         }
-        if (ctx.getOrgId() == null) {
-            throw new PlatformException("ORG_CONTEXT_REQUIRED",
+        if (ctx.getTenantId() == null) {
+            throw new PlatformException("TENANT_CONTEXT_REQUIRED",
                     "An organization context is required for this operation", HttpStatus.FORBIDDEN);
         }
         return ctx;
@@ -213,7 +213,7 @@ public class RecordService {
     public RecordResponse toResponse(Record r) {
         RecordResponse.RecordResponseBuilder builder = RecordResponse.builder()
                 .id(r.getId())
-                .orgId(r.getOrgId())
+                .tenantId(r.getTenantId())
                 .objectType(r.getObjectType())
                 .status(r.getStatus())
                 .data(r.getData())

@@ -23,7 +23,7 @@ public class WorkflowEvent implements PlatformEvent {
     private String eventType;
 
     private UUID   recordId;
-    private UUID   orgId;
+    private UUID   tenantId;
     private String objectType;
 
     private UUID   workflowId;

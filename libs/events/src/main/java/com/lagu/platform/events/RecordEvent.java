@@ -25,7 +25,7 @@ public class RecordEvent implements PlatformEvent {
     private String eventType;
 
     private UUID   recordId;
-    private UUID   orgId;
+    private UUID   tenantId;
     private String objectType;
 
     private String previousStatus;

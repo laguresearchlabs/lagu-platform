@@ -10,8 +10,8 @@ import java.util.UUID;
 
 public interface RecordRepository extends JpaRepository<Record, UUID> {
 
-    @Query("SELECT r FROM Record r WHERE r.orgId = :orgId AND r.id = :id AND r.status != 'DELETED'")
-    Optional<Record> findByIdAndOrgId(UUID id, UUID orgId);
+    @Query("SELECT r FROM Record r WHERE r.tenantId = :tenantId AND r.id = :id AND r.status != 'DELETED'")
+    Optional<Record> findByIdAndTenantId(UUID id, UUID tenantId);
 
     /**
      * Org-unscoped lookup for cross-org relationship targets (e.g. an event record in its own
@@ -22,11 +22,11 @@ public interface RecordRepository extends JpaRepository<Record, UUID> {
     @Query("SELECT r FROM Record r WHERE r.id = :id AND r.status != 'DELETED'")
     Optional<Record> findByIdExcludingDeleted(UUID id);
 
-    Page<Record> findByOrgIdAndObjectTypeAndStatusNot(UUID orgId, String objectType,
+    Page<Record> findByTenantIdAndObjectTypeAndStatusNot(UUID tenantId, String objectType,
                                                        String excludeStatus, Pageable pageable);
 
-    Page<Record> findByOrgIdAndObjectTypeAndStatus(UUID orgId, String objectType,
+    Page<Record> findByTenantIdAndObjectTypeAndStatus(UUID tenantId, String objectType,
                                                     String status, Pageable pageable);
 
-    Page<Record> findByOrgIdAndObjectType(UUID orgId, String objectType, Pageable pageable);
+    Page<Record> findByTenantIdAndObjectType(UUID tenantId, String objectType, Pageable pageable);
 }

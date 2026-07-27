@@ -54,7 +54,7 @@ class ApprovalEngineTest {
     void setUp() {
         rws = new RecordWorkflowState();
         rws.setRecordId(UUID.randomUUID());
-        rws.setOrgId(ORG);
+        rws.setTenantId(ORG);
         rws.setWorkflow(new WorkflowDefinition());
 
         when(instanceRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -75,7 +75,7 @@ class ApprovalEngineTest {
         ApprovalInstance ai = new ApprovalInstance();
         ai.setId(UUID.randomUUID());
         ai.setRecordId(rws.getRecordId());
-        ai.setOrgId(ORG);
+        ai.setTenantId(ORG);
         ai.setApprovalDefinition(def);
         ai.setTransition(new WorkflowTransition());
         ai.setStatus("PENDING");

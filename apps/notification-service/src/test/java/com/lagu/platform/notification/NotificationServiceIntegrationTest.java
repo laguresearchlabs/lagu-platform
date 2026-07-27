@@ -80,8 +80,8 @@ class NotificationServiceIntegrationTest {
     @LocalServerPort int port;
 
     static final UUID   RECIPIENT_ID = UUID.randomUUID();
-    static final UUID   ORG_ID       = UUID.randomUUID();
-    static final String ORG_STR      = ORG_ID.toString();
+    static final UUID   TENANT_ID       = UUID.randomUUID();
+    static final String ORG_STR      = TENANT_ID.toString();
 
     RestClient client;
 
@@ -90,7 +90,7 @@ class NotificationServiceIntegrationTest {
         client = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    RECIPIENT_ID.toString())
-                .defaultHeader("X-Org-Id",     ORG_STR)
+                .defaultHeader("X-Tenant-Id",     ORG_STR)
                 .defaultHeader("X-User-Roles", "ORG_STAFF")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -130,7 +130,7 @@ class NotificationServiceIntegrationTest {
         AutomationEvent event = AutomationEvent.builder()
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("SEND_NOTIFICATION")
-                .orgId(ORG_ID)
+                .tenantId(TENANT_ID)
                 .payload(Map.of(
                         "title",          "Email Notification",
                         "message",        "Please review your documents",
@@ -157,7 +157,7 @@ class NotificationServiceIntegrationTest {
         AutomationEvent event = AutomationEvent.builder()
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("SEND_NOTIFICATION")
-                .orgId(ORG_ID)
+                .tenantId(TENANT_ID)
                 .payload(Map.of(
                         "title",           "BOTH Notification",
                         "message",         "Check this out",
@@ -194,7 +194,7 @@ class NotificationServiceIntegrationTest {
                 .eventId(eventId)
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("SEND_NOTIFICATION")
-                .orgId(ORG_ID)
+                .tenantId(TENANT_ID)
                 .payload(Map.of(
                         "title",           "Redelivery Test",
                         "message",         "Should only ever be stored once",
@@ -232,7 +232,7 @@ class NotificationServiceIntegrationTest {
         AutomationEvent event = AutomationEvent.builder()
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("UPDATE_FIELD")   // not SEND_NOTIFICATION — should be ignored
-                .orgId(ORG_ID)
+                .tenantId(TENANT_ID)
                 .payload(Map.of("field", "status", "value", "ACTIVE"))
                 .occurredAt(Instant.now())
                 .build();
@@ -266,7 +266,7 @@ class NotificationServiceIntegrationTest {
 
                     @SuppressWarnings("unchecked")
                     Map<String, Object> page = (Map<String, Object>) resp.getBody().get("data");
-                    assertThat(((Number) page.get("totalElements")).intValue()).isGreaterThanOrEqualTo(1);
+                    assertThat(((Number) page.get("total")).intValue()).isGreaterThanOrEqualTo(1);
                 });
     }
 
@@ -352,7 +352,7 @@ class NotificationServiceIntegrationTest {
         return AutomationEvent.builder()
                 .eventType("ACTION_SUCCEEDED")
                 .actionType("SEND_NOTIFICATION")
-                .orgId(ORG_ID)
+                .tenantId(TENANT_ID)
                 .payload(payload)
                 .occurredAt(Instant.now())
                 .build();

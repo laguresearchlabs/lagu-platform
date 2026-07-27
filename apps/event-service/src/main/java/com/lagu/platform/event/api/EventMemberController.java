@@ -5,6 +5,7 @@ import com.lagu.platform.event.dto.EventMemberResponse;
 import com.lagu.platform.event.dto.InviteMemberRequest;
 import com.lagu.platform.event.dto.UpdateMemberRoleRequest;
 import com.lagu.platform.event.service.EventMemberService;
+import com.lagu.platform.security.RequirePermission;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,7 @@ public class EventMemberController {
         return ResponseEntity.ok(ApiResponse.ok(memberService.list(eventId, EventController.requireUserId())));
     }
 
+    @RequirePermission(resource = "EVENT_MEMBER", action = "CREATE")
     @PostMapping
     public ResponseEntity<ApiResponse<EventMemberResponse>> invite(@PathVariable UUID eventId,
                                                                      @Valid @RequestBody InviteMemberRequest req) {
@@ -33,6 +35,7 @@ public class EventMemberController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(member));
     }
 
+    @RequirePermission(resource = "EVENT_MEMBER", action = "UPDATE")
     @PatchMapping("/{targetUserId}/role")
     public ResponseEntity<ApiResponse<EventMemberResponse>> updateRole(@PathVariable UUID eventId,
                                                                         @PathVariable UUID targetUserId,
@@ -41,6 +44,7 @@ public class EventMemberController {
                 memberService.updateRole(eventId, EventController.requireUserId(), targetUserId, req)));
     }
 
+    @RequirePermission(resource = "EVENT_MEMBER", action = "DELETE")
     @DeleteMapping("/{targetUserId}")
     public ResponseEntity<Void> remove(@PathVariable UUID eventId, @PathVariable UUID targetUserId) {
         memberService.remove(eventId, EventController.requireUserId(), targetUserId);

@@ -224,7 +224,7 @@ the commented-out code but is **not** currently listed as a test dependency in
   vs. 404 distinction.
 - **Authentication is fully delegated to the shared gateway-header trust model**
   (`libs/security`'s `GatewayHeaderFilter`/`ServiceSecurityConfig`): this service trusts
-  `X-User-Id`/`X-Org-Id`/`X-User-Roles` only when the request also carries a matching
+  `X-User-Id`/`X-Tenant-Id`/`X-User-Roles` only when the request also carries a matching
   `X-Platform-Gateway-Secret` header, and refuses to start if that shared secret is left at its
   well-known insecure default unless `platform.gateway.allow-insecure-default=true` is explicitly
   set (as it is for `loc` and in docker-compose). There is no login/JWT handling inside this

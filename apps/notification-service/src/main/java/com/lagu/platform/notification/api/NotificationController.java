@@ -1,13 +1,13 @@
 package com.lagu.platform.notification.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.notification.dto.NotificationDto;
 import com.lagu.platform.notification.service.NotificationQueryService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,12 +23,13 @@ public class NotificationController {
 
     @GetMapping
     @RequirePermission(resource = "NOTIFICATION", action = "READ")
-    public ResponseEntity<ApiResponse<Page<NotificationDto>>> list(
+    public ResponseEntity<ApiResponse<PageResult<NotificationDto>>> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) Boolean unreadOnly) {
         UUID userId = currentUserId();
-        return ResponseEntity.ok(ApiResponse.ok(queryService.listForUser(userId, unreadOnly, page, size)));
+        var result = queryService.listForUser(userId, unreadOnly, page, size);
+        return ResponseEntity.ok(ApiResponse.ok(PageResult.from(result)));
     }
 
     @GetMapping("/unread-count")

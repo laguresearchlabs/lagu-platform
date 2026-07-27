@@ -36,7 +36,7 @@ public class SchemaVersionService {
     @Transactional
     @CacheEvict(value = ListingTypeService.CACHE_SCHEMA, key = "#listingType")
     public SchemaVersionResponse publish(String listingType, PublishSchemaRequest req, String publishedBy) {
-        ListingTypeDefinition def = listingTypeRepo.findByNameWithSectionsAndOrgIdIsNull(listingType)
+        ListingTypeDefinition def = listingTypeRepo.findByNameWithSectionsAndTenantIdIsNull(listingType)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", listingType));
 
         ListingTypeSchemaDto schemaDto = listingTypeService.toSchemaDto(def);

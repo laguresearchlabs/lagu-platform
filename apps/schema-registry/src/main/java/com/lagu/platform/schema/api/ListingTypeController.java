@@ -86,8 +86,8 @@ public class ListingTypeController {
 
     @DeleteMapping("/{id}")
     @RequirePermission(resource = "OBJECT_TYPE", action = "DELETE")
-    public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
+    public ResponseEntity<Void> deactivate(@PathVariable UUID id) {
         listingTypeService.deactivate(id);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.noContent().build();
     }
 }

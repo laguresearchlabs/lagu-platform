@@ -22,7 +22,7 @@ public class AutomationRun {
     private TriggerDefinition trigger;
 
     private UUID recordId;
-    private UUID orgId;
+    private UUID tenantId;
 
     @Column(length = 100)
     private String eventType;

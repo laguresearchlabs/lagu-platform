@@ -4,8 +4,9 @@ import com.lagu.platform.document.domain.Document;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
 
@@ -14,7 +15,7 @@ import java.util.UUID;
 public class DocumentDto {
 
     private UUID    id;
-    private UUID    orgId;
+    private UUID    tenantId;
     private UUID    userId;
     private String  documentType;
     private String  identitySubType;
@@ -25,16 +26,16 @@ public class DocumentDto {
     private String  status;
     private String  rejectionReason;
     private UUID    reviewedBy;
-    private Instant reviewedAt;
+    private OffsetDateTime reviewedAt;
     private LocalDate expiryDate;
     private Map<String, Object> metadata;
-    private Instant uploadedAt;
-    private Instant updatedAt;
+    private OffsetDateTime uploadedAt;
+    private OffsetDateTime updatedAt;
 
     public static DocumentDto from(Document d) {
         return DocumentDto.builder()
                 .id(d.getId())
-                .orgId(d.getOrgId())
+                .tenantId(d.getTenantId())
                 .userId(d.getUserId())
                 .documentType(d.getDocumentType())
                 .identitySubType(d.getIdentitySubType())
@@ -45,11 +46,11 @@ public class DocumentDto {
                 .status(d.getStatus())
                 .rejectionReason(d.getRejectionReason())
                 .reviewedBy(d.getReviewedBy())
-                .reviewedAt(d.getReviewedAt())
+                .reviewedAt(d.getReviewedAt() != null ? d.getReviewedAt().atOffset(ZoneOffset.UTC) : null)
                 .expiryDate(d.getExpiryDate())
                 .metadata(d.getMetadata())
-                .uploadedAt(d.getUploadedAt())
-                .updatedAt(d.getUpdatedAt())
+                .uploadedAt(d.getUploadedAt() != null ? d.getUploadedAt().atOffset(ZoneOffset.UTC) : null)
+                .updatedAt(d.getUpdatedAt() != null ? d.getUpdatedAt().atOffset(ZoneOffset.UTC) : null)
                 .build();
     }
 }

@@ -18,8 +18,8 @@ public class TransitionHistory {
     @Column(name = "record_id", nullable = false)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "workflow_id", nullable = false)
     private UUID workflowId;

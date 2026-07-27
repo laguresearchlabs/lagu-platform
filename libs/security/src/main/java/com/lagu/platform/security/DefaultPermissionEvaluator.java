@@ -22,7 +22,7 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
 
         // Internal service-to-service callers (SVC_* role from X-Internal-Service): allowed to
         // read anything and to drive record lifecycles, but never DELETE and never config writes.
-        // Tenancy is still enforced downstream via the X-Org-Id they forward per request.
+        // Tenancy is still enforced downstream via the X-Tenant-Id they forward per request.
         if (ctx.isInternalService()) {
             if ("READ".equals(action)) return true;
             if ("RECORD".equals(resource)) {

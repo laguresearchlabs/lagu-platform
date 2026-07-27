@@ -53,14 +53,14 @@ class DocumentServiceTest {
         if (gatewayMock != null) gatewayMock.close();
     }
 
-    private static PlatformSecurityContext ctx(UUID userId, UUID orgId, String... roles) {
-        return PlatformSecurityContext.builder().userId(userId).orgId(orgId).roles(Set.of(roles)).build();
+    private static PlatformSecurityContext ctx(UUID userId, UUID tenantId, String... roles) {
+        return PlatformSecurityContext.builder().userId(userId).tenantId(tenantId).roles(Set.of(roles)).build();
     }
 
-    private static Document doc(UUID id, UUID orgId, UUID ownerUserId) {
+    private static Document doc(UUID id, UUID tenantId, UUID ownerUserId) {
         Document d = new Document();
         d.setId(id);
-        d.setOrgId(orgId);
+        d.setTenantId(tenantId);
         d.setUserId(ownerUserId);
         d.setStatus("UPLOADED");
         return d;
@@ -70,11 +70,11 @@ class DocumentServiceTest {
 
     @Test
     void ownerCanReadTheirOwnDocument() {
-        UUID orgId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
         UUID userId = UUID.randomUUID();
         UUID docId = UUID.randomUUID();
-        when(repository.findByIdAndOrgId(docId, orgId)).thenReturn(Optional.of(doc(docId, orgId, userId)));
-        asCaller(ctx(userId, orgId));
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc(docId, tenantId, userId)));
+        asCaller(ctx(userId, tenantId));
 
         assertThat(service.getById(docId)).isNotNull(); // must not throw
     }
@@ -82,24 +82,24 @@ class DocumentServiceTest {
     @Test
     void colleagueInSameOrgCannotReadAnotherUsersDocument() {
         // The exact bug: same org, different user, no special role — previously allowed.
-        UUID orgId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
         UUID ownerUserId = UUID.randomUUID();
         UUID colleagueUserId = UUID.randomUUID();
         UUID docId = UUID.randomUUID();
-        when(repository.findByIdAndOrgId(docId, orgId)).thenReturn(Optional.of(doc(docId, orgId, ownerUserId)));
-        asCaller(ctx(colleagueUserId, orgId, "USER"));
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc(docId, tenantId, ownerUserId)));
+        asCaller(ctx(colleagueUserId, tenantId, "USER"));
 
         assertThatThrownBy(() -> service.getById(docId)).isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
     void reviewerInSameOrgCanReadAnotherUsersDocument() {
-        UUID orgId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
         UUID ownerUserId = UUID.randomUUID();
         UUID reviewerUserId = UUID.randomUUID();
         UUID docId = UUID.randomUUID();
-        when(repository.findByIdAndOrgId(docId, orgId)).thenReturn(Optional.of(doc(docId, orgId, ownerUserId)));
-        asCaller(ctx(reviewerUserId, orgId, "ORG_MANAGER"));
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc(docId, tenantId, ownerUserId)));
+        asCaller(ctx(reviewerUserId, tenantId, "ORG_MANAGER"));
 
         assertThat(service.getById(docId)).isNotNull(); // must not throw
     }

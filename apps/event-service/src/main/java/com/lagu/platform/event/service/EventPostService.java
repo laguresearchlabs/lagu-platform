@@ -52,16 +52,16 @@ public class EventPostService {
         data.put("post_pinned", false);
         data.put("post_locked", false);
 
-        Map<String, Object> recordResponse = recordClient.createRecord(event.getOrgId(), authorUserId, "EVENT_POST", data);
+        Map<String, Object> recordResponse = recordClient.createRecord(event.getTenantId(), authorUserId, "EVENT_POST", data);
         UUID postId = recordClient.extractRecordId(recordResponse);
         if (postId == null) {
             throw new ValidationException("Failed to create post");
         }
-        recordClient.createRelationship(event.getRecordId(), event.getOrgId(), authorUserId, "EVENT_POST", postId);
+        recordClient.createRelationship(event.getRecordId(), event.getTenantId(), authorUserId, "EVENT_POST", postId);
 
         boolean approvalRequired = approvalRequired(event);
         String trigger = approvalRequired ? "submit_for_approval" : "publish";
-        recordClient.requestTransition(postId, event.getOrgId(), authorUserId, trigger);
+        recordClient.requestTransition(postId, event.getTenantId(), authorUserId, trigger);
 
         return PostResponse.builder()
                 .id(postId).authorUserId(authorUserId).content(req.getContent())
@@ -75,7 +75,7 @@ public class EventPostService {
     public List<PostResponse> listPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
-        return recordClient.listRecords(event.getOrgId(), "EVENT_POST", "PUBLISHED", page, size).stream()
+        return recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PUBLISHED", page, size).stream()
                 .map(r -> toPostResponse(r, requesterId))
                 .toList();
     }
@@ -83,7 +83,7 @@ public class EventPostService {
     public List<PostResponse> listPendingPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        return recordClient.listRecords(event.getOrgId(), "EVENT_POST", "PENDING", page, size).stream()
+        return recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PENDING", page, size).stream()
                 .map(r -> toPostResponse(r, requesterId))
                 .toList();
     }
@@ -92,18 +92,18 @@ public class EventPostService {
     public void deletePost(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         EventMember member = requireMember(event, requesterId);
-        Map<String, Object> record = getRecordOrNotFound(postId, event.getOrgId());
+        Map<String, Object> record = getRecordOrNotFound(postId, event.getTenantId());
         requireAuthorOrManager(record, member, requesterId);
-        recordClient.deleteRecord(postId, event.getOrgId());
+        recordClient.deleteRecord(postId, event.getTenantId());
     }
 
     @Transactional
     public PostResponse togglePin(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        Map<String, Object> record = getRecordOrNotFound(postId, event.getOrgId());
+        Map<String, Object> record = getRecordOrNotFound(postId, event.getTenantId());
         boolean current = Boolean.TRUE.equals(dataOf(record).get("post_pinned"));
-        Map<String, Object> patched = recordClient.patchRecord(postId, event.getOrgId(), requesterId,
+        Map<String, Object> patched = recordClient.patchRecord(postId, event.getTenantId(), requesterId,
                 Map.of("post_pinned", !current));
         return toPostResponse(unwrap(patched), requesterId);
     }
@@ -112,9 +112,9 @@ public class EventPostService {
     public PostResponse toggleLock(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        Map<String, Object> record = getRecordOrNotFound(postId, event.getOrgId());
+        Map<String, Object> record = getRecordOrNotFound(postId, event.getTenantId());
         boolean current = Boolean.TRUE.equals(dataOf(record).get("post_locked"));
-        Map<String, Object> patched = recordClient.patchRecord(postId, event.getOrgId(), requesterId,
+        Map<String, Object> patched = recordClient.patchRecord(postId, event.getTenantId(), requesterId,
                 Map.of("post_locked", !current));
         return toPostResponse(unwrap(patched), requesterId);
     }
@@ -123,27 +123,27 @@ public class EventPostService {
     public void approvePost(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        recordClient.requestTransition(postId, event.getOrgId(), requesterId, "approve");
+        recordClient.requestTransition(postId, event.getTenantId(), requesterId, "approve");
     }
 
     @Transactional
     public void rejectPost(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        recordClient.requestTransition(postId, event.getOrgId(), requesterId, "reject");
+        recordClient.requestTransition(postId, event.getTenantId(), requesterId, "reject");
     }
 
     @Transactional
     public PostReportResponse reportPost(UUID eventId, UUID postId, UUID reporterId, CreateReportRequest req) {
         Event event = requireEvent(eventId);
         requireMember(event, reporterId);
-        getRecordOrNotFound(postId, event.getOrgId()); // 404 if the post doesn't exist/isn't in this event
+        getRecordOrNotFound(postId, event.getTenantId()); // 404 if the post doesn't exist/isn't in this event
 
         Map<String, Object> data = Map.of(
                 "reported_post_id", postId.toString(),
                 "report_reason", req.getReason().toUpperCase(),
                 "report_details", req.getDetails() != null ? req.getDetails() : "");
-        Map<String, Object> recordResponse = recordClient.createRecord(event.getOrgId(), reporterId, "EVENT_POST_REPORT", data);
+        Map<String, Object> recordResponse = recordClient.createRecord(event.getTenantId(), reporterId, "EVENT_POST_REPORT", data);
         UUID reportId = recordClient.extractRecordId(recordResponse);
         if (reportId == null) {
             throw new ValidationException("Failed to submit report");
@@ -158,7 +158,7 @@ public class EventPostService {
     public List<PostReportResponse> listReportedPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        return recordClient.listRecords(event.getOrgId(), "EVENT_POST_REPORT", null, page, size).stream()
+        return recordClient.listRecords(event.getTenantId(), "EVENT_POST_REPORT", null, page, size).stream()
                 .map(this::toReportResponse)
                 .toList();
     }
@@ -167,7 +167,7 @@ public class EventPostService {
     public PostResponse toggleLike(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
-        Map<String, Object> record = getRecordOrNotFound(postId, event.getOrgId());
+        Map<String, Object> record = getRecordOrNotFound(postId, event.getTenantId());
 
         if (likeRepo.existsByPostRecordIdAndUserId(postId, requesterId)) {
             likeRepo.deleteByPostRecordIdAndUserId(postId, requesterId);
@@ -186,18 +186,18 @@ public class EventPostService {
     public CommentResponse addComment(UUID eventId, UUID postId, UUID authorUserId, CreateCommentRequest req) {
         Event event = requireEvent(eventId);
         requireMember(event, authorUserId);
-        Map<String, Object> post = getRecordOrNotFound(postId, event.getOrgId());
+        Map<String, Object> post = getRecordOrNotFound(postId, event.getTenantId());
         if (Boolean.TRUE.equals(dataOf(post).get("post_locked"))) {
             throw new ValidationException("Comments are locked on this post");
         }
 
-        Map<String, Object> recordResponse = recordClient.createRecord(event.getOrgId(), authorUserId,
+        Map<String, Object> recordResponse = recordClient.createRecord(event.getTenantId(), authorUserId,
                 "EVENT_COMMENT", Map.of("comment_content", req.getContent()));
         UUID commentId = recordClient.extractRecordId(recordResponse);
         if (commentId == null) {
             throw new ValidationException("Failed to add comment");
         }
-        recordClient.createRelationship(postId, event.getOrgId(), authorUserId, "EVENT_COMMENT", commentId);
+        recordClient.createRelationship(postId, event.getTenantId(), authorUserId, "EVENT_COMMENT", commentId);
         // New record starts DRAFT; comments aren't moderated pre-publish, so move it straight
         // to the workflow's "no case" -- there is no EVENT_COMMENT workflow at all, so its
         // status just stays DRAFT internally. That's fine: comments aren't queried by status.
@@ -210,11 +210,11 @@ public class EventPostService {
     public List<CommentResponse> listComments(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
-        return recordClient.listRelationships(postId, event.getOrgId()).stream()
+        return recordClient.listRelationships(postId, event.getTenantId()).stream()
                 .filter(rel -> "EVENT_COMMENT".equals(rel.get("relationshipName")))
                 .map(rel -> {
                     UUID targetId = UUID.fromString(String.valueOf(rel.get("targetRecordId")));
-                    Map<String, Object> comment = recordClient.getRecord(targetId, event.getOrgId());
+                    Map<String, Object> comment = recordClient.getRecord(targetId, event.getTenantId());
                     return toCommentResponse(unwrap(comment));
                 })
                 .toList();
@@ -224,21 +224,21 @@ public class EventPostService {
     public void deleteComment(UUID eventId, UUID postId, UUID commentId, UUID requesterId) {
         Event event = requireEvent(eventId);
         EventMember member = requireMember(event, requesterId);
-        Map<String, Object> comment = getRecordOrNotFound(commentId, event.getOrgId());
+        Map<String, Object> comment = getRecordOrNotFound(commentId, event.getTenantId());
         requireAuthorOrManager(comment, member, requesterId);
-        recordClient.deleteRecord(commentId, event.getOrgId());
+        recordClient.deleteRecord(commentId, event.getTenantId());
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private boolean approvalRequired(Event event) {
-        Map<String, Object> eventRecord = recordClient.getRecord(event.getRecordId(), event.getOrgId());
+        Map<String, Object> eventRecord = recordClient.getRecord(event.getRecordId(), event.getTenantId());
         Object flag = dataOf(unwrap(eventRecord)).get("post_approval_required");
         return Boolean.TRUE.equals(flag);
     }
 
-    private Map<String, Object> getRecordOrNotFound(UUID recordId, UUID orgId) {
-        Map<String, Object> response = recordClient.getRecord(recordId, orgId);
+    private Map<String, Object> getRecordOrNotFound(UUID recordId, UUID tenantId) {
+        Map<String, Object> response = recordClient.getRecord(recordId, tenantId);
         Map<String, Object> record = unwrap(response);
         if (record.isEmpty()) {
             throw new ResourceNotFoundException("Post", recordId.toString());
@@ -273,7 +273,7 @@ public class EventPostService {
     }
 
     private EventMember requireMember(Event event, UUID userId) {
-        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+        EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
         if (!"ACCEPTED".equals(member.getStatus())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Membership not accepted");

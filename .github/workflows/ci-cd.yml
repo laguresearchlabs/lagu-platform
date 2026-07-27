@@ -1,9 +1,5 @@
 name: Lagu Platform — CI/CD
 
-# NOTE: apps/booking-service is intentionally excluded — it isn't registered in
-# settings.gradle.kts yet and has no Dockerfile. Add it to the `services` list
-# below (and to settings.gradle.kts) once it's ready to build.
-
 on:
   push:
     branches: [main]
@@ -65,6 +61,9 @@ jobs:
             event-service:
               - *shared
               - 'apps/event-service/**'
+            booking-service:
+              - *shared
+              - 'apps/booking-service/**'
             postgres:
               - 'infra/postgres/**'
 
@@ -81,6 +80,7 @@ jobs:
           VENDOR_SERVICE: ${{ steps.filter.outputs.vendor-service }}
           LISTING_SERVICE: ${{ steps.filter.outputs.listing-service }}
           EVENT_SERVICE: ${{ steps.filter.outputs.event-service }}
+          BOOKING_SERVICE: ${{ steps.filter.outputs.booking-service }}
         run: |
           services=()
           [[ "$SCHEMA_REGISTRY" == "true" ]] && services+=("schema-registry")
@@ -93,6 +93,7 @@ jobs:
           [[ "$VENDOR_SERVICE" == "true" ]] && services+=("vendor-service")
           [[ "$LISTING_SERVICE" == "true" ]] && services+=("listing-service")
           [[ "$EVENT_SERVICE" == "true" ]] && services+=("event-service")
+          [[ "$BOOKING_SERVICE" == "true" ]] && services+=("booking-service")
 
           if [ ${#services[@]} -eq 0 ]; then
             json="[]"

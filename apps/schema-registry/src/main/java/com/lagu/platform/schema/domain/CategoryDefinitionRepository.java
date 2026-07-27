@@ -7,7 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface CategoryDefinitionRepository extends JpaRepository<CategoryDefinition, UUID> {
-    Optional<CategoryDefinition> findBySlugAndOrgIdIsNull(String slug);
+    Optional<CategoryDefinition> findBySlugAndTenantIdIsNull(String slug);
     List<CategoryDefinition> findByParentIsNullAndActiveTrue();
     List<CategoryDefinition> findByParentIdAndActiveTrue(UUID parentId);
     List<CategoryDefinition> findByListingTypeAndActiveTrue(String listingType);

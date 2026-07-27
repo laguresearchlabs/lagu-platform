@@ -35,7 +35,7 @@ public class ListingSnapshotService {
      * (never accepted as caller input) so a caller cannot set an arbitrary search-ranking boost.
      */
     @Transactional
-    public ListingSnapshot publishSnapshot(UUID recordId, UUID orgId, String objectType,
+    public ListingSnapshot publishSnapshot(UUID recordId, UUID tenantId, String objectType,
                                            Map<String, Object> recordData,
                                            String verificationTier) {
         // Source of truth is schema-registry's own ListingTypeDefinition.publishable/
@@ -57,7 +57,7 @@ public class ListingSnapshotService {
                 .orElseGet(ListingSnapshot::new);
 
         snap.setRecordId(recordId);
-        snap.setOrgId(orgId);
+        snap.setTenantId(tenantId);
         snap.setObjectType(objectType.toUpperCase());
         snap.setData(recordData != null ? recordData : Map.of());
         snap.setStatus("PUBLISHED");
@@ -68,7 +68,7 @@ public class ListingSnapshotService {
 
         ListingSnapshot saved = snapshotRepo.save(snap);
         eventPublisher.publishPublished(saved);
-        log.info("Published snapshot for record {} org {} type {}", recordId, orgId, objectType);
+        log.info("Published snapshot for record {} org {} type {}", recordId, tenantId, objectType);
         return saved;
     }
 
@@ -118,8 +118,8 @@ public class ListingSnapshotService {
         });
     }
 
-    public List<ListingSnapshot> getByOrg(UUID orgId) {
-        return snapshotRepo.findByOrgIdOrderByUpdatedAtDesc(orgId);
+    public List<ListingSnapshot> getByOrg(UUID tenantId) {
+        return snapshotRepo.findByTenantIdOrderByUpdatedAtDesc(tenantId);
     }
 
     public Optional<ListingSnapshot> getByRecordId(UUID recordId) {
@@ -135,11 +135,11 @@ public class ListingSnapshotService {
     // ── Availability ──────────────────────────────────────────────────────────
 
     @Transactional
-    public List<ListingAvailability> setAvailability(UUID recordId, UUID orgId,
+    public List<ListingAvailability> setAvailability(UUID recordId, UUID tenantId,
                                                      LocalDate from, LocalDate to, String slotType) {
         ListingSnapshot snap = snapshotRepo.findByRecordId(recordId)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingSnapshot", recordId.toString()));
-        if (!snap.getOrgId().equals(orgId)) {
+        if (!snap.getTenantId().equals(tenantId)) {
             // Caller's org doesn't own this record — treat as not found rather than leaking existence.
             throw new ResourceNotFoundException("ListingSnapshot", recordId.toString());
         }
@@ -151,7 +151,7 @@ public class ListingSnapshotService {
                     .findByRecordIdAndSlotDate(recordId, date)
                     .orElseGet(ListingAvailability::new);
             slot.setRecordId(recordId);
-            slot.setOrgId(orgId);
+            slot.setTenantId(tenantId);
             slot.setSlotDate(date);
             slot.setSlotType(slotType.toUpperCase());
             saved.add(availabilityRepo.save(slot));
@@ -166,5 +166,11 @@ public class ListingSnapshotService {
     @Transactional
     public boolean bookSlot(UUID recordId, LocalDate date, UUID bookingRef) {
         return availabilityRepo.markBooked(recordId, date, bookingRef) > 0;
+    }
+
+    /** Inverse of {@link #bookSlot}: only releases a slot this exact bookingRef claimed. */
+    @Transactional
+    public boolean releaseSlot(UUID recordId, LocalDate date, UUID bookingRef) {
+        return availabilityRepo.releaseBooked(recordId, date, bookingRef) > 0;
     }
 }

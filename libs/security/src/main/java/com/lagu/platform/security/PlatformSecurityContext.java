@@ -12,7 +12,7 @@ import java.util.UUID;
 public class PlatformSecurityContext {
 
     private UUID        userId;
-    private UUID        orgId;
+    private UUID        tenantId;
     private Set<String> roles;
     private String      userEmail;
 
@@ -34,7 +34,7 @@ public class PlatformSecurityContext {
     }
 
     public boolean isOrgMember() {
-        return userId != null && orgId != null;
+        return userId != null && tenantId != null;
     }
 
     /**
@@ -49,18 +49,18 @@ public class PlatformSecurityContext {
     }
 
     /**
-     * Whether this caller may read a resource owned by {@code resourceOrgId}. A null
-     * {@code resourceOrgId} marks a platform-level/shared definition, readable by any org.
+     * Whether this caller may read a resource owned by {@code resourceTenantId}. A null
+     * {@code resourceTenantId} marks a platform-level/shared definition, readable by any org.
      */
-    public boolean canReadOrgScoped(UUID resourceOrgId) {
-        return resourceOrgId == null || resourceOrgId.equals(orgId);
+    public boolean canReadTenantScoped(UUID resourceTenantId) {
+        return resourceTenantId == null || resourceTenantId.equals(tenantId);
     }
 
     /**
-     * Whether this caller may mutate a resource owned by {@code resourceOrgId}. Platform-level
-     * definitions (null {@code resourceOrgId}) affect every org and require a config/platform admin.
+     * Whether this caller may mutate a resource owned by {@code resourceTenantId}. Platform-level
+     * definitions (null {@code resourceTenantId}) affect every org and require a config/platform admin.
      */
-    public boolean canWriteOrgScoped(UUID resourceOrgId) {
-        return resourceOrgId == null ? isConfigAdmin() : resourceOrgId.equals(orgId);
+    public boolean canWriteTenantScoped(UUID resourceTenantId) {
+        return resourceTenantId == null ? isConfigAdmin() : resourceTenantId.equals(tenantId);
     }
 }

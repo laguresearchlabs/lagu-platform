@@ -22,7 +22,7 @@ public class FieldService {
     private final FieldDefinitionRepository repository;
 
     public List<FieldResponse> listPlatformLevel() {
-        return repository.findByOrgIdIsNullAndActiveTrue().stream()
+        return repository.findByTenantIdIsNullAndActiveTrue().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -82,7 +82,7 @@ public class FieldService {
 
     public FieldResponse toResponse(FieldDefinition f) {
         return new FieldResponse(
-                f.getId(), f.getOrgId(), f.getName(), f.getLabel(), f.getDescription(),
+                f.getId(), f.getTenantId(), f.getName(), f.getLabel(), f.getDescription(),
                 f.getFieldType(), f.getEnumValues(), f.getItemSchema(), f.getReferenceType(),
                 f.isRequired(), f.isUnique(), f.getValidationRules(), f.getDefaultValue(),
                 f.isSearchable(), f.isFilterable(), f.isSortable(), f.isFacetable(),

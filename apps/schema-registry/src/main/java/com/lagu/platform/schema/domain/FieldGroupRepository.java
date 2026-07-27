@@ -8,10 +8,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface FieldGroupRepository extends JpaRepository<FieldGroup, UUID> {
-    Optional<FieldGroup> findByNameAndOrgIdIsNull(String name);
-    Optional<FieldGroup> findByNameAndOrgId(String name, UUID orgId);
-    List<FieldGroup> findByOrgIdIsNullAndActiveTrue();
+    Optional<FieldGroup> findByNameAndTenantIdIsNull(String name);
+    Optional<FieldGroup> findByNameAndTenantId(String name, UUID tenantId);
+    List<FieldGroup> findByTenantIdIsNullAndActiveTrue();
 
-    @Query("SELECT fg FROM FieldGroup fg LEFT JOIN FETCH fg.entries e LEFT JOIN FETCH e.field WHERE fg.name = :name AND fg.orgId IS NULL")
-    Optional<FieldGroup> findByNameWithFieldsAndOrgIdIsNull(String name);
+    @Query("SELECT fg FROM FieldGroup fg LEFT JOIN FETCH fg.entries e LEFT JOIN FETCH e.field WHERE fg.name = :name AND fg.tenantId IS NULL")
+    Optional<FieldGroup> findByNameWithFieldsAndTenantIdIsNull(String name);
 }

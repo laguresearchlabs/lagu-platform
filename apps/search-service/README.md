@@ -19,7 +19,7 @@ directly.
   (`config/OpenSearchConfig.java`), a plain low-level REST client pointed at
   `opensearch.host:opensearch.port` — no TLS/auth configuration is present.
 - **Index layout**: one index per org+objectType for tenant data
-  (`platform-<orgId>-<objectType>`, built in `IndexMappingBuilder.indexName`), plus one
+  (`platform-<tenantId>-<objectType>`, built in `IndexMappingBuilder.indexName`), plus one
   cross-org index per objectType for published marketplace listings
   (`platform-consumer-<objectType>`, `IndexMappingBuilder.consumerIndexName`). The
   `opensearch.index-prefix` property controls the `platform` prefix (default `platform`).
@@ -34,7 +34,7 @@ directly.
   `DATE`/`DATETIME` → date, `GEOLOCATION` → geo_point, everything else → keyword. Indexes are
   created lazily (`createIfAbsent`) the first time a record of that org/objectType is indexed, with
   1 shard / 0 replicas.
-- **Defense in depth on org scoping**: every tenant-scoped query filters by `orgId` at the
+- **Defense in depth on org scoping**: every tenant-scoped query filters by `tenantId` at the
   document level in addition to relying on per-org index isolation
   (`SearchService.buildQuery`).
 - **Consumer/marketplace search is deliberately public** (see `platform.security.public-paths:
@@ -53,7 +53,7 @@ directly.
   Eureka host (see the comment in `LoadBalancerConfig.java` referencing
   spring-cloud-netflix#4382).
 - **Auth**: inherits `libs:security`'s `GatewayHeaderFilter`/`ServiceSecurityConfig`. Identity
-  (`X-User-Id`/`X-Org-Id`/`X-User-Roles` or `X-Internal-Service`) is only trusted when the request
+  (`X-User-Id`/`X-Tenant-Id`/`X-User-Roles` or `X-Internal-Service`) is only trusted when the request
   carries a valid `X-Platform-Gateway-Secret`; `@RequirePermission` annotations on controller
   methods gate access by resource/action. Calls search-service itself makes to record-service and
   schema-registry set `X-Internal-Service: search-service` and the shared gateway secret.
@@ -65,10 +65,10 @@ this module.
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
-| `POST` | `/api/v1/search` | Full-text query + filters + sort + facets over the caller's org's index for a given `objectType` (`SearchRequest.objectType` is required). Requires `RECORD:READ` permission. Org is taken from the gateway-supplied `X-Org-Id`. | `@RequirePermission(resource="RECORD", action="READ")` |
+| `POST` | `/api/v1/search` | Full-text query + filters + sort + facets over the caller's org's index for a given `objectType` (`SearchRequest.objectType` is required). Requires `RECORD:READ` permission. Org is taken from the gateway-supplied `X-Tenant-Id`. | `@RequirePermission(resource="RECORD", action="READ")` |
 | `POST` | `/api/v1/search/consumer` | Public marketplace search across all vendors' `PUBLISHED` listings for an `objectType`, tier-boosted by `searchBoost`. | Public (listed in `platform.security.public-paths`) |
 | `GET` | `/api/v1/search/suggest?objectType=&field=&prefix=` | Typeahead: prefix-filter + terms aggregation on `field`, returns up to 10 distinct values, for the caller's org. Requires `RECORD:READ`. | `@RequirePermission(resource="RECORD", action="READ")` |
-| `POST` | `/admin/reindex/{objectType}` | Kicks off an async full reindex of every record of `objectType` for the caller's org by paginating `record-service`. Returns `202 Accepted` immediately with `{status, objectType, orgId}`. | `@RequirePermission(resource="*", action="UPDATE")` |
+| `POST` | `/admin/reindex/{objectType}` | Kicks off an async full reindex of every record of `objectType` for the caller's org by paginating `record-service`. Returns `202 Accepted` immediately with `{status, objectType, tenantId}`. | `@RequirePermission(resource="*", action="UPDATE")` |
 
 `SearchRequest` body shape: `objectType` (required), `query` (string, null = match-all), `filters`
 (map of field → exact value, or `{gte,lte,gt,lt}` for ranges), `sort` (list of `{field, order}`,
@@ -202,7 +202,7 @@ the command above will succeed trivially (no tests to run) rather than exercise 
   published.
 - **Schema fetch failures degrade silently**: `MetadataClient.getSchema` catches all exceptions
   and returns an empty field list on failure, which means a transient schema-registry outage
-  results in an index created with only the fixed base fields (`recordId`, `orgId`, `objectType`,
+  results in an index created with only the fixed base fields (`recordId`, `tenantId`, `objectType`,
   `status`, timestamps, and an empty `data` object) rather than a request failure — subsequent
   documents would still index (as an empty/dynamic `data` object) but without the intended typed
   mapping.

@@ -25,7 +25,7 @@ import static org.mockito.Mockito.*;
  * Regression coverage for the review's critical finding: addState/addTransition (and, less
  * severely, getById/listAll) resolved a WorkflowDefinition purely by id with no check that it
  * belonged to the caller's own org — a CONFIG_ADMIN (a role that is not necessarily
- * platform-wide) could pass the id of another org's, or the platform's own (orgId null),
+ * platform-wide) could pass the id of another org's, or the platform's own (tenantId null),
  * workflow and silently modify it, granting whatever bypass they configured to every tenant
  * sharing that workflow.
  */
@@ -51,15 +51,15 @@ class WorkflowDefinitionServiceTest {
         if (gatewayMock != null) gatewayMock.close();
     }
 
-    private static PlatformSecurityContext ctx(UUID orgId, String... roles) {
+    private static PlatformSecurityContext ctx(UUID tenantId, String... roles) {
         return PlatformSecurityContext.builder()
-                .userId(UUID.randomUUID()).orgId(orgId).roles(Set.of(roles)).build();
+                .userId(UUID.randomUUID()).tenantId(tenantId).roles(Set.of(roles)).build();
     }
 
-    private static WorkflowDefinition wf(UUID id, UUID orgId) {
+    private static WorkflowDefinition wf(UUID id, UUID tenantId) {
         WorkflowDefinition w = new WorkflowDefinition();
         w.setId(id);
-        w.setOrgId(orgId);
+        w.setTenantId(tenantId);
         w.setStates(new java.util.ArrayList<>());
         w.setTransitions(new java.util.ArrayList<>());
         return w;
@@ -84,7 +84,7 @@ class WorkflowDefinitionServiceTest {
 
     @Test
     void configAdminCanAddStateToThePlatformLevelWorkflow() {
-        // orgId=null is the platform-wide workflow — PlatformSecurityContext.canWriteOrgScoped's
+        // tenantId=null is the platform-wide workflow — PlatformSecurityContext.canWriteTenantScoped's
         // own contract treats CONFIG_ADMIN as sufficient for platform-level writes (it's meant
         // to be a platform-wide administrative role). The bug this fix actually closes is
         // narrower and is covered by configAdminCannotAddStateToAnotherOrgsWorkflow below: a
@@ -162,7 +162,7 @@ class WorkflowDefinitionServiceTest {
     @Test
     void nonAdminListAllOnlySeesOwnOrgAndPlatformLevel() {
         UUID myOrg = UUID.randomUUID();
-        when(wfRepo.findByActiveTrueAndOrgIdOrPlatformLevel(myOrg))
+        when(wfRepo.findByActiveTrueAndTenantIdOrPlatformLevel(myOrg))
                 .thenReturn(List.of(wf(UUID.randomUUID(), myOrg), wf(UUID.randomUUID(), null)));
         asCaller(ctx(myOrg, "CONFIG_ADMIN"));
 
@@ -181,6 +181,6 @@ class WorkflowDefinitionServiceTest {
         var result = service.listAll();
 
         assertThat(result).hasSize(2);
-        verify(wfRepo, never()).findByActiveTrueAndOrgIdOrPlatformLevel(any());
+        verify(wfRepo, never()).findByActiveTrueAndTenantIdOrPlatformLevel(any());
     }
 }

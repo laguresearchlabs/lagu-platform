@@ -14,7 +14,7 @@ for document *metadata*, ownership, and review status.
 
 ## Architecture / responsibilities
 
-- Owns a `document` table (schema `documents`) keyed by `org_id`/`user_id`, storing document
+- Owns a `document` table (schema `documents`) keyed by `tenant_id`/`user_id`, storing document
   type, a URL/reference to the stored file (`file_url`), MIME type, size, review status,
   rejection reason, reviewer, and an optional `expiry_date` plus a free-form `jsonb` metadata
   column.
@@ -37,7 +37,7 @@ for document *metadata*, ownership, and review status.
   from a client following the documented contract would be rejected as an invalid document
   type — this inconsistency is present in the code as read, not an assumption.
 - **Authorization**: uses the shared `libs/security` gateway-trust model — `GatewayHeaderFilter`
-  only trusts `X-User-Id`/`X-Org-Id`/`X-User-Roles` headers when a matching
+  only trusts `X-User-Id`/`X-Tenant-Id`/`X-User-Roles` headers when a matching
   `X-Platform-Gateway-Secret` is also present (set by `gateway-service`); otherwise requests are
   treated as unauthenticated. `@RequirePermission(resource = "DOCUMENT", action = ...)` on each
   endpoint is checked by `DefaultPermissionEvaluator`: any authenticated user can `CREATE`/`READ`
@@ -80,7 +80,7 @@ responses use the shared `PageResult<T>`. OpenAPI/Swagger UI is exposed via spri
   `DocumentEvent` Javadoc as a possible event type, but the `expireDocuments` scheduled job in
   `DocumentService` does **not** currently call `publisher.publish(...)` — no event is emitted
   when a document is auto-expired; this looks like a gap between the documented contract and
-  actual behavior). Events are keyed by `"<orgId>:<userId>"`.
+  actual behavior). Events are keyed by `"<tenantId>:<userId>"`.
 - **Consumes**: no Kafka `@KafkaListener` consumers were found in this module's source. It is
   producer-only.
 - `KafkaConfig` wires a `DefaultErrorHandler` with a `DeadLetterPublishingRecoverer` (routes
@@ -212,7 +212,7 @@ support re-enabling this test as-is.
 - `@EnableScheduling` is enabled at the application class level, backing both the daily
   document-expiry job and the hourly document-type-catalog refresh.
 - Multi-tenancy: nearly every query and mutation in `DocumentService` scopes by both `userId`
-  and `orgId` from `PlatformSecurityContext` (derived from gateway-forwarded headers); a
+  and `tenantId` from `PlatformSecurityContext` (derived from gateway-forwarded headers); a
   `PLATFORM_ADMIN` caller can bypass org scoping on `getById`/review actions via `findForContext`.
 - The `DocumentReviewRequest` body on `/reject` is optional (`required = false`); if omitted,
   `rejectionReason` is stored as `null`.

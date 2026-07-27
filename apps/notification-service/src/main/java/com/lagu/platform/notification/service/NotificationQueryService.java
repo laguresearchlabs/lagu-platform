@@ -54,7 +54,7 @@ public class NotificationQueryService {
     private NotificationDto toDto(Notification n) {
         return NotificationDto.builder()
                 .id(n.getId())
-                .orgId(n.getOrgId())
+                .tenantId(n.getTenantId())
                 .recipientUserId(n.getRecipientUserId())
                 .title(n.getTitle())
                 .message(n.getMessage())
@@ -63,8 +63,8 @@ public class NotificationQueryService {
                 .objectType(n.getObjectType())
                 .triggerName(n.getTriggerName())
                 .read(n.isRead())
-                .readAt(n.getReadAt())
-                .createdAt(n.getCreatedAt())
+                .readAt(n.getReadAt() != null ? n.getReadAt().atOffset(java.time.ZoneOffset.UTC) : null)
+                .createdAt(n.getCreatedAt() != null ? n.getCreatedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }
 }

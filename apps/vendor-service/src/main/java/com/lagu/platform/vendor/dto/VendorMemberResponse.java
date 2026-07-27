@@ -3,7 +3,7 @@ package com.lagu.platform.vendor.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Data
@@ -13,5 +13,5 @@ public class VendorMemberResponse {
     private UUID userId;
     private String role;
     private UUID invitedBy;
-    private Instant joinedAt;
+    private OffsetDateTime joinedAt;
 }

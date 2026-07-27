@@ -15,9 +15,9 @@ public class EventJoinRequest {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    /** = Event.orgId */
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    /** = Event.tenantId */
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;

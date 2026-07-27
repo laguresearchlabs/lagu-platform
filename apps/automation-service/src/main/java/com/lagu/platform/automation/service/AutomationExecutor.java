@@ -79,7 +79,7 @@ public class AutomationExecutor {
         boolean isEscalation = "APPROVAL_TIMEOUT".equals(ctx.getEventType());
         AutomationEvent event = AutomationEvent.builder()
                 .eventType(isEscalation ? "ESCALATION_FIRED" : "TRIGGER_FIRED")
-                .orgId(ctx.getOrgId())
+                .tenantId(ctx.getTenantId())
                 .triggerId(ctx.getTriggerId())
                 .triggerName(ctx.getTriggerName())
                 .recordId(ctx.getRecordId())
@@ -87,8 +87,8 @@ public class AutomationExecutor {
                 .success(true)
                 .occurredAt(Instant.now())
                 .build();
-        String key = ctx.getOrgId() != null
-                ? (ctx.getRecordId() != null ? ctx.getOrgId() + ":" + ctx.getRecordId() : ctx.getOrgId().toString())
+        String key = ctx.getTenantId() != null
+                ? (ctx.getRecordId() != null ? ctx.getTenantId() + ":" + ctx.getRecordId() : ctx.getTenantId().toString())
                 : "platform";
         kafkaTemplate.send(PlatformTopics.AUTOMATION_EVENTS, key, event);
     }

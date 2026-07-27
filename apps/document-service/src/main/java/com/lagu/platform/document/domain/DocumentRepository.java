@@ -13,13 +13,13 @@ import java.util.UUID;
 
 public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
-    List<Document> findByUserIdAndOrgIdOrderByUploadedAtDesc(UUID userId, UUID orgId);
+    List<Document> findByUserIdAndTenantIdOrderByUploadedAtDesc(UUID userId, UUID tenantId);
 
-    List<Document> findByUserIdAndOrgIdAndDocumentType(UUID userId, UUID orgId, String documentType);
+    List<Document> findByUserIdAndTenantIdAndDocumentType(UUID userId, UUID tenantId, String documentType);
 
-    Page<Document> findByOrgIdAndStatusOrderByUploadedAtAsc(UUID orgId, String status, Pageable pageable);
+    Page<Document> findByTenantIdAndStatusOrderByUploadedAtAsc(UUID tenantId, String status, Pageable pageable);
 
-    Optional<Document> findByIdAndOrgId(UUID id, UUID orgId);
+    Optional<Document> findByIdAndTenantId(UUID id, UUID tenantId);
 
     @Modifying
     @Query("UPDATE Document d SET d.status = 'EXPIRED' WHERE d.expiryDate < :today AND d.status NOT IN ('EXPIRED', 'REJECTED')")

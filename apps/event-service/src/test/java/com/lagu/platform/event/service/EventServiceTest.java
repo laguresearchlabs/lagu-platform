@@ -11,6 +11,7 @@ import com.lagu.platform.event.dto.TransitionRequest;
 import com.lagu.platform.event.dto.UpdateEventRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -26,6 +27,9 @@ import static org.mockito.Mockito.*;
  * EventService takes the acting userId as an explicit method parameter rather than reading
  * GatewayHeaderFilter's ThreadLocal internally (that only happens in EventController), so this
  * is a plain unit test — no Spring context, no request/filter chain needed.
+ *
+ * <p>Note: Event.id doubles as the org-partition key (Event.getTenantId() just returns id — see
+ * Event.java) — there's no separate tenantId to track in these tests, `eventId` is used everywhere.
  */
 class EventServiceTest {
 
@@ -35,7 +39,6 @@ class EventServiceTest {
     private final EventService service = new EventService(eventRepo, memberRepo, recordClient);
 
     private final UUID eventId = UUID.randomUUID();
-    private final UUID orgId = UUID.randomUUID();
     private final UUID recordId = UUID.randomUUID();
     private final UUID ownerId = UUID.randomUUID();
 
@@ -45,7 +48,6 @@ class EventServiceTest {
     void setUp() {
         event = new Event();
         event.setId(eventId);
-        event.setOrgId(orgId);
         event.setRecordId(recordId);
         event.setObjectType("BIRTHDAY_EVENT");
         event.setOwnerUserId(ownerId);
@@ -54,7 +56,7 @@ class EventServiceTest {
 
     private EventMember memberWithRole(UUID userId, String role, String status) {
         EventMember m = new EventMember();
-        m.setOrgId(orgId);
+        m.setTenantId(eventId);
         m.setUserId(userId);
         m.setRole(role);
         m.setStatus(status);
@@ -90,10 +92,21 @@ class EventServiceTest {
 
         service.create(req, ownerId);
 
-        verify(eventRepo).save(argThat(e -> e.getRecordId().equals(recordId)
-                && "BIRTHDAY_EVENT".equals(e.getObjectType()) && e.getOwnerUserId().equals(ownerId)));
+        ArgumentCaptor<Event> savedEvent = ArgumentCaptor.forClass(Event.class);
+        verify(eventRepo).save(savedEvent.capture());
+        Event e = savedEvent.getValue();
+        assertThat(e.getRecordId()).isEqualTo(recordId);
+        assertThat(e.getObjectType()).isEqualTo("BIRTHDAY_EVENT");
+        assertThat(e.getOwnerUserId()).isEqualTo(ownerId);
+        // the core invariant this refactor introduced: no separate tenantId, id doubles as it.
+        assertThat(e.getTenantId()).isEqualTo(e.getId());
+
         verify(memberRepo).save(argThat(m -> m.getUserId().equals(ownerId)
                 && "ADMIN".equals(m.getRole()) && "ACCEPTED".equals(m.getStatus())));
+
+        // the value handed to record-service as the tenancy/org key must be the same id the
+        // saved Event ends up with, not some other freshly-minted UUID.
+        verify(recordClient).createRecord(eq(e.getId()), eq(ownerId), eq("BIRTHDAY_EVENT"), any());
     }
 
     // ── listMine() ───────────────────────────────────────────────────────────
@@ -102,7 +115,6 @@ class EventServiceTest {
     void listMineIncludesInvitedNotYetAcceptedMemberships() {
         EventMember invited = memberWithRole(ownerId, "INVITEE", "INVITED");
         when(memberRepo.findByUserId(ownerId)).thenReturn(java.util.List.of(invited));
-        when(eventRepo.findByOrgId(orgId)).thenReturn(Optional.of(event));
 
         var results = service.listMine(ownerId);
 
@@ -132,7 +144,7 @@ class EventServiceTest {
     @Test
     void getThrowsForbiddenForNonMember() {
         UUID strangerId = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, strangerId)).thenReturn(Optional.empty());
+        when(memberRepo.findByTenantIdAndUserId(eventId, strangerId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.get(eventId, strangerId))
                 .isInstanceOf(ResponseStatusException.class)
@@ -143,8 +155,8 @@ class EventServiceTest {
     @Test
     void getSucceedsForNonMemberWhenEventIsPublic() {
         UUID strangerId = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, strangerId)).thenReturn(Optional.empty());
-        when(recordClient.getRecord(recordId, orgId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, strangerId)).thenReturn(Optional.empty());
+        when(recordClient.getRecord(recordId, eventId))
                 .thenReturn(Map.of("data", Map.of("data", Map.of("visibility", "PUBLIC"))));
 
         var response = service.get(eventId, strangerId);
@@ -159,9 +171,9 @@ class EventServiceTest {
         // decide whether to accept — there's no other endpoint that lets them discover what
         // they're being invited to first (see EventService.get()'s requireAnyMembership).
         UUID invitedId = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, invitedId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, invitedId))
                 .thenReturn(Optional.of(memberWithRole(invitedId, "INVITEE", "INVITED")));
-        when(recordClient.getRecord(recordId, orgId)).thenReturn(Map.of());
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of());
 
         var response = service.get(eventId, invitedId);
 
@@ -170,9 +182,9 @@ class EventServiceTest {
 
     @Test
     void getSucceedsForAcceptedInvitee() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
-        when(recordClient.getRecord(recordId, orgId)).thenReturn(Map.of("data", Map.of("data", Map.of("title", "x"))));
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of("title", "x"))));
 
         var response = service.get(eventId, ownerId);
 
@@ -184,7 +196,7 @@ class EventServiceTest {
 
     @Test
     void updateRejectsPlainInvitee() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
         UpdateEventRequest req = new UpdateEventRequest();
         req.setData(Map.of("title", "New"));
@@ -198,9 +210,9 @@ class EventServiceTest {
 
     @Test
     void updateSucceedsForMaintainer() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "MAINTAINER", "ACCEPTED")));
-        when(recordClient.updateRecord(eq(recordId), eq(orgId), eq(ownerId), any()))
+        when(recordClient.updateRecord(eq(recordId), eq(eventId), eq(ownerId), any()))
                 .thenReturn(Map.of("data", Map.of("data", Map.of("title", "New"))));
 
         UpdateEventRequest req = new UpdateEventRequest();
@@ -212,7 +224,7 @@ class EventServiceTest {
 
     @Test
     void transitionRejectsPlainInvitee() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
         TransitionRequest req = new TransitionRequest();
         req.setTrigger("confirm");
@@ -224,13 +236,13 @@ class EventServiceTest {
 
     @Test
     void transitionSucceedsForAdmin() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "ADMIN", "ACCEPTED")));
         TransitionRequest req = new TransitionRequest();
         req.setTrigger("confirm");
 
         service.requestTransition(eventId, ownerId, req);
 
-        verify(recordClient).requestTransition(recordId, orgId, ownerId, "confirm");
+        verify(recordClient).requestTransition(recordId, eventId, ownerId, "confirm");
     }
 }

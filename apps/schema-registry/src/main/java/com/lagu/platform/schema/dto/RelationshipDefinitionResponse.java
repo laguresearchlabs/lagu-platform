@@ -10,7 +10,7 @@ import java.util.UUID;
 @Builder
 public class RelationshipDefinitionResponse {
     private UUID id;
-    private UUID orgId;
+    private UUID tenantId;
     private String name;
     private String label;
     private String sourceListingType;

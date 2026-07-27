@@ -14,7 +14,7 @@ have timed out and fires escalation triggers for them.
 
 ## Architecture / responsibilities
 
-- **Triggers** (`TriggerDefinition`): org-scoped (or platform-wide when `org_id IS NULL`) rules
+- **Triggers** (`TriggerDefinition`): org-scoped (or platform-wide when `tenant_id IS NULL`) rules
   keyed by `eventType` (+ optional `objectType`), with a JSON list of `conditions` (field/operator/value
   rules such as `EQ`, `NEQ`, `CONTAINS`, `STARTS_WITH`, `IN`, `GT`/`LT`/`GTE`/`LTE`, `IS_NULL`,
   `IS_NOT_NULL`) that all must match (`ConditionEvaluator`).
@@ -24,7 +24,7 @@ have timed out and fires escalation triggers for them.
   (`ActionExecutor`): `SEND_NOTIFICATION`, `SEND_EMAIL`, `UPDATE_FIELD`, `UPDATE_STATUS`,
   `PUBLISH_RECORD`, `ARCHIVE_RECORD`, `CALL_WEBHOOK`, `CREATE_RECORD`, `LOG_ACTIVITY`,
   `EXPIRE_VERIFICATION`, `REVOKE_VERIFICATION`. Config values may use `{{token}}` templating
-  (`TemplateRenderer`) resolved against the event context (`recordId`, `orgId`, `objectType`,
+  (`TemplateRenderer`) resolved against the event context (`recordId`, `tenantId`, `objectType`,
   `currentStatus`, `previousStatus`, `now`, `changedBy`, or `data.<field>`).
 - **Runs**: every trigger firing is recorded as an `AutomationRun` (status `RUNNING` → `SUCCESS`/
   `FAILED`), with one `ActionRun` per executed action, for audit/debugging via the REST API.
@@ -56,8 +56,8 @@ have timed out and fires escalation triggers for them.
 ## REST API
 
 All endpoints require the `TRIGGER` resource permission (via `@RequirePermission`, enforced by
-`libs:security`'s aspect) and are scoped to the caller's org (`X-Org-Id`, taken from
-`GatewayHeaderFilter.current()`); platform-level triggers (`org_id IS NULL`) are visible/matched
+`libs:security`'s aspect) and are scoped to the caller's org (`X-Tenant-Id`, taken from
+`GatewayHeaderFilter.current()`); platform-level triggers (`tenant_id IS NULL`) are visible/matched
 alongside org-specific ones but org-scoping on lookups is enforced by the repository queries.
 
 **Triggers** — `TriggerController`, base path `/api/v1/triggers`:
@@ -113,8 +113,8 @@ consumer's configured deserializer is `StringDeserializer` — actual object map
 **Produces:**
 - `platform.automation.events` (`PlatformTopics.AUTOMATION_EVENTS`) — `AutomationEvent` objects
   with `eventType` one of `TRIGGER_FIRED`, `ESCALATION_FIRED`, `ACTION_SUCCEEDED`,
-  `ACTION_FAILED`. Producer key is `"{orgId}:{recordId}"`, or just `orgId`, or `"platform"` if
-  `orgId` is null. Producer uses `JsonSerializer`, `acks=all`, `retries=3`,
+  `ACTION_FAILED`. Producer key is `"{tenantId}:{recordId}"`, or just `tenantId`, or `"platform"` if
+  `tenantId` is null. Producer uses `JsonSerializer`, `acks=all`, `retries=3`,
   `enable.idempotence=true`.
 - `<topic>.DLT` — dead-letter topic per consumed topic, published by
   `KafkaConfig`'s `DefaultErrorHandler` (`DeadLetterPublishingRecoverer`, 3 retries with a 1s
@@ -223,10 +223,10 @@ that nothing else in this module appears to depend on directly).
 - **`webhook-retry-attempts` config is dead**: `platform.automation.webhook-retry-attempts` is
   defined in `application.yml` but `WebhookExecutor`'s `RetryConfig.maxAttempts(3)` is hardcoded
   in the constructor and never reads that property.
-- **Platform-level vs org-level triggers**: a `TriggerDefinition` with `org_id IS NULL` applies
+- **Platform-level vs org-level triggers**: a `TriggerDefinition` with `tenant_id IS NULL` applies
   across all orgs (seeded examples ship this way); org-specific triggers layer on top. Both are
   matched together in `PlatformEventConsumer.dispatch` and `TriggerDefinitionRepository`'s
-  queries (`t.orgId = :orgId OR t.orgId IS NULL`).
+  queries (`t.tenantId = :tenantId OR t.tenantId IS NULL`).
 - **`objectType` matching is optional per event**: `PlatformEventConsumer.dispatch` only filters
   by `objectType` when the parsed context has one; `findActiveByEvent` (no type) is used
   otherwise, e.g. for approval/escalation events which don't carry an `objectType` filter the same way.

@@ -24,10 +24,10 @@ public class ListingEventPublisher {
     private final TransactionalOutbox outbox;
 
     public void publishPublished(ListingSnapshot snap) {
-        enqueue(snap.getRecordId(), snap.getOrgId(), ListingEvent.builder()
+        enqueue(snap.getRecordId(), snap.getTenantId(), ListingEvent.builder()
                 .eventType("PUBLISHED")
                 .recordId(snap.getRecordId())
-                .orgId(snap.getOrgId())
+                .tenantId(snap.getTenantId())
                 .objectType(snap.getObjectType())
                 .data(snap.getData())
                 .verificationTier(snap.getVerificationTier())
@@ -38,16 +38,16 @@ public class ListingEventPublisher {
     }
 
     public void publishUnpublished(ListingSnapshot snap) {
-        enqueue(snap.getRecordId(), snap.getOrgId(), ListingEvent.builder()
+        enqueue(snap.getRecordId(), snap.getTenantId(), ListingEvent.builder()
                 .eventType("UNPUBLISHED")
                 .recordId(snap.getRecordId())
-                .orgId(snap.getOrgId())
+                .tenantId(snap.getTenantId())
                 .objectType(snap.getObjectType())
                 .occurredAt(Instant.now())
                 .build());
     }
 
-    private void enqueue(UUID recordId, UUID orgId, ListingEvent event) {
-        outbox.stage(PlatformTopics.LISTING_EVENTS, orgId + ":" + recordId, event);
+    private void enqueue(UUID recordId, UUID tenantId, ListingEvent event) {
+        outbox.stage(PlatformTopics.LISTING_EVENTS, tenantId + ":" + recordId, event);
     }
 }

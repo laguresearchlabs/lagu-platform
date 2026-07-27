@@ -5,8 +5,8 @@
 `vendor-service` owns vendor-org onboarding and KYC readiness for the lagu-platform. A vendor
 "registers" (self-service, one organisation per business), which creates a canonical `VENDOR`
 record in `record-service`, a local `vendor_profile` row, an `OWNER` membership row, and an empty
-KYC checklist; it then asks `user-service` (IAM) to associate the new orgId with the registering
-user so future JWTs carry that orgId. From there the service tracks the vendor's review-status
+KYC checklist; it then asks `user-service` (IAM) to associate the new tenantId with the registering
+user so future JWTs carry that tenantId. From there the service tracks the vendor's review-status
 lifecycle (`DRAFT → SUBMITTED → UNDER_REVIEW → ACTIVE/REJECTED → SUSPENDED`) and computes/caches a
 KYC checklist by asking `record-service` (which proxies `document-service`) whether the vendor has
 verified GST, PAN, bank, and identity documents on file. It is a small orchestration/aggregation
@@ -15,7 +15,7 @@ service, not a document store or a listing catalog — those responsibilities li
 
 ## Architecture / domain ownership
 
-The service owns three tables, one per JPA entity, all keyed by `org_id` (the platform `orgId`
+The service owns three tables, one per JPA entity, all keyed by `tenant_id` (the platform `tenantId`
 **is** the vendor's id — one vendor = one org, per the comment in `V1__vendor_schema.sql`):
 
 - `vendor_profile` — business name, country, review `status`, link to the `record_id` in
@@ -41,7 +41,7 @@ Two outbound HTTP clients (via a Eureka-discovered, load-balanced `RestClient`, 
   status (`GET /api/v1/documents/submission-status`) used to compute the KYC checklist. Calls
   carry `X-Internal-Service: vendor-service` and `X-Platform-Gateway-Secret`.
 - `IamServiceClient` → `user-service` (`http://user-service`, Eureka app name `user-service`,
-  described in-code as "iam-service"): `PUT /api/v1/users/{userId}/platform-org/{orgId}` to
+  described in-code as "iam-service"): `PUT /api/v1/users/{userId}/platform-org/{tenantId}` to
   associate the new org with the registering user, forwarding the caller's bearer token.
 
 Both client calls are best-effort: failures are logged and swallowed (`RecordServiceClient`
@@ -53,7 +53,7 @@ having landed — there's no saga/outbox/retry compensating for that.
 ## REST API (`VendorController`, base path `/api/v1/vendors`)
 
 All endpoints require an authenticated `PlatformSecurityContext` (populated by
-`GatewayHeaderFilter` from trusted `X-User-Id`/`X-Org-Id`/`X-User-Roles` headers, see below) —
+`GatewayHeaderFilter` from trusted `X-User-Id`/`X-Tenant-Id`/`X-User-Roles` headers, see below) —
 anonymous calls get a `ValidationException` ("Authentication required").
 
 | Method | Path | Purpose |
@@ -62,9 +62,9 @@ anonymous calls get a `ValidationException` ("Authentication required").
 | GET | `/api/v1/vendors/me` | Authenticated vendor's own profile (with KYC checklist if computed). |
 | POST | `/api/v1/vendors/me/submit` | Moves the caller's org from `DRAFT` to `SUBMITTED` for admin review. |
 | GET | `/api/v1/vendors/me/kyc` | Recomputes and returns the KYC checklist for the caller's org. |
-| GET | `/api/v1/vendors/{orgId}` | Admin: fetch any vendor profile by org id. |
+| GET | `/api/v1/vendors/{tenantId}` | Admin: fetch any vendor profile by org id. |
 | GET | `/api/v1/vendors?status=SUBMITTED` | Admin: list vendor profiles by status (defaults to `SUBMITTED`). |
-| PATCH | `/api/v1/vendors/{orgId}/status` | Admin: change a vendor's status (approve/suspend/reject/etc.), subject to the transition table below. |
+| PATCH | `/api/v1/vendors/{tenantId}/status` | Admin: change a vendor's status (approve/suspend/reject/etc.), subject to the transition table below. |
 
 Admin endpoints require `ctx.isConfigAdmin()` (role `CONFIG_ADMIN` or `PLATFORM_ADMIN`); otherwise
 a 403 `ResponseStatusException` is thrown.

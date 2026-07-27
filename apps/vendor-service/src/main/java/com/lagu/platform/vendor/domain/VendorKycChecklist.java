@@ -12,7 +12,7 @@ import java.util.UUID;
 public class VendorKycChecklist {
 
     @Id
-    private UUID orgId;
+    private UUID tenantId;
 
     @Column(name = "has_gst_doc")
     private boolean hasGstDoc;

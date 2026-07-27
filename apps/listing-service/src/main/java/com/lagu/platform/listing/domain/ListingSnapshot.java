@@ -22,8 +22,8 @@ public class ListingSnapshot {
     @Column(name = "record_id", nullable = false, unique = true)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "object_type", nullable = false, length = 100)
     private String objectType;

@@ -13,6 +13,7 @@ import com.lagu.platform.event.dto.EventMemberResponse;
 import com.lagu.platform.event.dto.InviteMemberRequest;
 import com.lagu.platform.event.dto.JoinRequestResponse;
 import com.lagu.platform.event.dto.UpdateMemberRoleRequest;
+import com.lagu.platform.membership.MembershipPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -22,6 +23,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -31,6 +34,10 @@ import java.util.UUID;
 public class EventMemberService {
 
     private static final List<String> VALID_ROLES = List.of("ADMIN", "MAINTAINER", "INVITEE");
+    /** Narrower than canManage()'s {ADMIN, MAINTAINER} authorization gate — see
+     *  EventMembershipPermissionEvaluator.gateRoles() for that set. A MAINTAINER doesn't count
+     *  toward "is there still someone who can manage this event" for this guard. */
+    private static final Set<String> LAST_MANAGER_ROLES = Set.of("ADMIN");
 
     private final EventRepository            eventRepo;
     private final EventMemberRepository      memberRepo;
@@ -39,7 +46,9 @@ public class EventMemberService {
     public List<EventMemberResponse> list(UUID eventId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
-        return memberRepo.findByOrgId(event.getOrgId()).stream().map(this::toResponse).toList();
+        return memberRepo.findByTenantId(event.getTenantId()).stream()
+                .filter(m -> !"REMOVED".equals(m.getStatus()))
+                .map(this::toResponse).toList();
     }
 
     @Transactional
@@ -48,17 +57,25 @@ public class EventMemberService {
         requireManager(event, requesterId);
         validateRole(req.getRole());
 
-        if (memberRepo.existsByOrgIdAndUserId(event.getOrgId(), req.getUserId())) {
+        EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), req.getUserId())
+                .orElseGet(() -> {
+                    EventMember m = new EventMember();
+                    m.setTenantId(event.getTenantId());
+                    m.setUserId(req.getUserId());
+                    return m;
+                });
+
+        if (member.getId() != null && !"DECLINED".equals(member.getStatus())
+                && !"REMOVED".equals(member.getStatus())) {
             throw new ValidationException("User is already a member of this event");
         }
 
-        EventMember member = new EventMember();
-        member.setOrgId(event.getOrgId());
-        member.setUserId(req.getUserId());
         member.setRole(req.getRole() != null ? req.getRole().toUpperCase() : "INVITEE");
         member.setStatus("INVITED");
         member.setGuestNote(req.getGuestNote());
         member.setInvitedBy(requesterId);
+        member.setRemovedBy(null);
+        member.setRemovedAt(null);
         memberRepo.save(member);
 
         log.info("User {} invited {} to event {} as {}", requesterId, req.getUserId(), eventId, member.getRole());
@@ -70,10 +87,18 @@ public class EventMemberService {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
         validateRole(req.getRole());
+        MembershipPolicy.requireNotSelf(requesterId, targetUserId);
 
-        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), targetUserId)
+        EventMember member = memberRepo.findByTenantIdAndUserIdAndStatusNot(event.getTenantId(), targetUserId, "REMOVED")
                 .orElseThrow(() -> new ResourceNotFoundException("EventMember", targetUserId.toString()));
-        member.setRole(req.getRole().toUpperCase());
+
+        String newRole = req.getRole().toUpperCase();
+        List<EventMember> allMembers = memberRepo.findByTenantId(event.getTenantId());
+        MembershipPolicy.requireManagerRemainsAfterMutation(allMembers, targetUserId, newRole, LAST_MANAGER_ROLES);
+
+        member.setRole(newRole);
+        member.setUpdatedBy(requesterId);
+        member.setUpdatedAt(Instant.now());
         return toResponse(memberRepo.save(member));
     }
 
@@ -81,13 +106,21 @@ public class EventMemberService {
     public void remove(UUID eventId, UUID requesterId, UUID targetUserId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
+        MembershipPolicy.requireNotSelf(requesterId, targetUserId);
 
         if (targetUserId.equals(event.getOwnerUserId())) {
             throw new ValidationException("Cannot remove the event owner");
         }
-        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), targetUserId)
+        EventMember member = memberRepo.findByTenantIdAndUserIdAndStatusNot(event.getTenantId(), targetUserId, "REMOVED")
                 .orElseThrow(() -> new ResourceNotFoundException("EventMember", targetUserId.toString()));
-        memberRepo.delete(member);
+
+        List<EventMember> allMembers = memberRepo.findByTenantId(event.getTenantId());
+        MembershipPolicy.requireManagerRemainsAfterMutation(allMembers, targetUserId, null, LAST_MANAGER_ROLES);
+
+        member.setStatus("REMOVED");
+        member.setRemovedBy(requesterId);
+        member.setRemovedAt(Instant.now());
+        memberRepo.save(member);
     }
 
     @Transactional
@@ -102,7 +135,7 @@ public class EventMemberService {
     @Transactional
     public EventMemberResponse respondToInvite(UUID eventId, UUID userId, boolean accept) {
         Event event = requireEvent(eventId);
-        EventMember member = memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+        EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not invited to this event"));
         if (!"INVITED".equals(member.getStatus())) {
             throw new ValidationException("No pending invitation to respond to");
@@ -116,15 +149,15 @@ public class EventMemberService {
     @Transactional
     public JoinRequestResponse requestToJoin(UUID eventId, UUID userId, CreateJoinRequestRequest req) {
         Event event = requireEvent(eventId);
-        if (memberRepo.existsByOrgIdAndUserId(event.getOrgId(), userId)) {
-            throw new ValidationException("Already a member of this event");
-        }
-        joinRequestRepo.findByOrgIdAndUserId(event.getOrgId(), userId).ifPresent(r -> {
+        memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
+                .filter(m -> !"DECLINED".equals(m.getStatus()) && !"REMOVED".equals(m.getStatus()))
+                .ifPresent(m -> { throw new ValidationException("Already a member of this event"); });
+        joinRequestRepo.findByTenantIdAndUserId(event.getTenantId(), userId).ifPresent(r -> {
             throw new ValidationException("A join request is already pending for this event");
         });
 
         EventJoinRequest jr = new EventJoinRequest();
-        jr.setOrgId(event.getOrgId());
+        jr.setTenantId(event.getTenantId());
         jr.setUserId(userId);
         jr.setRequestedRole(req.getRequestedRole() != null ? req.getRequestedRole().toUpperCase() : "INVITEE");
         jr.setMessage(req.getMessage());
@@ -135,7 +168,7 @@ public class EventMemberService {
     public List<JoinRequestResponse> listPending(UUID eventId, UUID requesterId) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        return joinRequestRepo.findByOrgIdAndStatus(event.getOrgId(), "PENDING").stream()
+        return joinRequestRepo.findByTenantIdAndStatus(event.getTenantId(), "PENDING").stream()
                 .map(this::toResponse).toList();
     }
 
@@ -146,20 +179,37 @@ public class EventMemberService {
 
         EventJoinRequest jr = joinRequestRepo.findById(joinRequestId)
                 .orElseThrow(() -> new ResourceNotFoundException("JoinRequest", joinRequestId.toString()));
-        if (!jr.getOrgId().equals(event.getOrgId())) {
+        if (!jr.getTenantId().equals(event.getTenantId())) {
             throw new ResourceNotFoundException("JoinRequest", joinRequestId.toString());
         }
+
+        Optional<EventMember> existing = memberRepo.findByTenantIdAndUserId(event.getTenantId(), jr.getUserId());
+        if (existing.isPresent() && !"DECLINED".equals(existing.get().getStatus())
+                && !"REMOVED".equals(existing.get().getStatus())) {
+            jr.setStatus("REJECTED");
+            jr.setReviewedByUserId(requesterId);
+            jr.setReviewedAt(Instant.now());
+            joinRequestRepo.save(jr);
+            throw new ValidationException(
+                    "User is already a member of this event; join request rejected due to conflict");
+        }
+
         jr.setStatus("APPROVED");
         jr.setReviewedByUserId(requesterId);
         jr.setReviewedAt(Instant.now());
         joinRequestRepo.save(jr);
 
-        EventMember member = new EventMember();
-        member.setOrgId(event.getOrgId());
-        member.setUserId(jr.getUserId());
+        EventMember member = existing.orElseGet(() -> {
+            EventMember m = new EventMember();
+            m.setTenantId(event.getTenantId());
+            m.setUserId(jr.getUserId());
+            return m;
+        });
         member.setRole(jr.getRequestedRole());
         member.setStatus("ACCEPTED");
         member.setInvitedBy(requesterId);
+        member.setRemovedBy(null);
+        member.setRemovedAt(null);
         return toResponse(memberRepo.save(member));
     }
 
@@ -170,7 +220,7 @@ public class EventMemberService {
 
         EventJoinRequest jr = joinRequestRepo.findById(joinRequestId)
                 .orElseThrow(() -> new ResourceNotFoundException("JoinRequest", joinRequestId.toString()));
-        if (!jr.getOrgId().equals(event.getOrgId())) {
+        if (!jr.getTenantId().equals(event.getTenantId())) {
             throw new ResourceNotFoundException("JoinRequest", joinRequestId.toString());
         }
         jr.setStatus("REJECTED");
@@ -193,7 +243,7 @@ public class EventMemberService {
     }
 
     private EventMember requireMember(Event event, UUID userId) {
-        return memberRepo.findByOrgIdAndUserId(event.getOrgId(), userId)
+        return memberRepo.findByTenantIdAndUserIdAndStatusNot(event.getTenantId(), userId, "REMOVED")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
     }
 
@@ -209,7 +259,7 @@ public class EventMemberService {
         return EventMemberResponse.builder()
                 .id(m.getId()).userId(m.getUserId()).role(m.getRole()).status(m.getStatus())
                 .guestNote(m.getGuestNote()).muted(m.isMuted()).invitedBy(m.getInvitedBy())
-                .joinedAt(m.getJoinedAt())
+                .joinedAt(m.getJoinedAt() != null ? m.getJoinedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }
 
@@ -217,8 +267,9 @@ public class EventMemberService {
         return JoinRequestResponse.builder()
                 .id(jr.getId()).userId(jr.getUserId()).requestedRole(jr.getRequestedRole())
                 .status(jr.getStatus()).message(jr.getMessage())
-                .reviewedByUserId(jr.getReviewedByUserId()).reviewedAt(jr.getReviewedAt())
-                .createdAt(jr.getCreatedAt())
+                .reviewedByUserId(jr.getReviewedByUserId())
+                .reviewedAt(jr.getReviewedAt() != null ? jr.getReviewedAt().atOffset(java.time.ZoneOffset.UTC) : null)
+                .createdAt(jr.getCreatedAt() != null ? jr.getCreatedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }
 }

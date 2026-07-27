@@ -14,15 +14,23 @@ public interface ApprovalInstanceRepository extends JpaRepository<ApprovalInstan
             SELECT ai FROM ApprovalInstance ai
             JOIN FETCH ai.approvalDefinition ad
             JOIN ad.steps s
-            WHERE ai.orgId = :orgId AND ai.status = 'PENDING' AND s.approverRole IN :roles
+            WHERE ai.tenantId = :tenantId AND ai.status = 'PENDING' AND s.approverRole IN :roles
             """)
-    List<ApprovalInstance> findPendingForRoles(UUID orgId, List<String> roles);
+    List<ApprovalInstance> findPendingForRoles(UUID tenantId, List<String> roles);
 
     @Query("""
             SELECT ai FROM ApprovalInstance ai
             JOIN FETCH ai.approvalDefinition ad
             JOIN ad.steps s
-            WHERE ai.orgId = :orgId AND ai.status = 'PENDING' AND s.approverRole IN :roles AND ai.createdAt < :cutoff
+            WHERE ai.tenantId = :tenantId AND ai.status = 'PENDING' AND s.approverRole IN :roles AND ai.createdAt < :cutoff
             """)
-    List<ApprovalInstance> findPendingForRolesOlderThan(UUID orgId, List<String> roles, java.time.OffsetDateTime cutoff);
+    List<ApprovalInstance> findPendingForRolesOlderThan(UUID tenantId, List<String> roles, java.time.OffsetDateTime cutoff);
+
+    /** Platform-wide (cross-org), for automation-service's approval-timeout escalation scheduler. */
+    @Query("""
+            SELECT ai FROM ApprovalInstance ai
+            JOIN FETCH ai.approvalDefinition
+            WHERE ai.status = 'PENDING' AND ai.createdAt < :cutoff
+            """)
+    List<ApprovalInstance> findPendingOlderThan(java.time.OffsetDateTime cutoff);
 }

@@ -7,8 +7,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface VendorMemberRepository extends JpaRepository<VendorMember, UUID> {
-    List<VendorMember> findByOrgId(UUID orgId);
-    Optional<VendorMember> findByOrgIdAndUserId(UUID orgId, UUID userId);
-    boolean existsByOrgIdAndUserId(UUID orgId, UUID userId);
+    List<VendorMember> findByTenantId(UUID tenantId);
+    Optional<VendorMember> findByTenantIdAndUserId(UUID tenantId, UUID userId);
+    Optional<VendorMember> findByTenantIdAndUserIdAndStatus(UUID tenantId, UUID userId, String status);
+    boolean existsByTenantIdAndUserId(UUID tenantId, UUID userId);
     List<VendorMember> findByUserId(UUID userId);
 }

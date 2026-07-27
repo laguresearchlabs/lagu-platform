@@ -19,7 +19,7 @@ All entities live in the `schema_registry` Postgres schema (`apps/schema-registr
 
 - **FieldDefinition** (`field_definition`) — a single field (name, `FieldType` enum, validation
   rules, search/facet/sort/filter flags, enum values, nested `item_schema` for
-  `ARRAY_OF_OBJECTS`). Unique on `(name, org_id)`; `org_id = NULL` means platform-level.
+  `ARRAY_OF_OBJECTS`). Unique on `(name, tenant_id)`; `tenant_id = NULL` means platform-level.
 - **FieldGroup** (`field_group`) + **FieldGroupEntry** (`field_group_entry`) — a named, reusable
   ordered collection of fields (e.g. `pricing`, `address`, `venue_details`). The join table can
   override a field's `is_required` per group.
@@ -134,7 +134,7 @@ entities, repositories, and seed data — they are populated but not yet exposed
 
 - **Produces** `platform.schema.events` (`PlatformTopics.SCHEMA_EVENTS`, from `libs/events`) — a
   `SchemaPublishedEvent` (`eventType=SCHEMA_PUBLISHED`, `listingType`, `version`,
-  `changeClassification`, `publishedBy`, `orgId`, `occurredAt`) each time
+  `changeClassification`, `publishedBy`, `tenantId`, `occurredAt`) each time
   `POST /api/v1/listing-types/{name}/publish` succeeds. Keyed by `listingType`.
 - **Consumes** nothing — no `@KafkaListener` exists in this module.
 
@@ -272,7 +272,7 @@ test is present but not enabled.
   `@RequirePermission` / org-scoping. Every other controller (listing types, fields, field groups,
   search definitions, tier configs/rules, document requirements) has no method-level permission
   annotations and no org-scoping logic in its service — they operate purely at the platform level
-  (`org_id IS NULL`) regardless of caller identity. This is consistent with most entities being
+  (`tenant_id IS NULL`) regardless of caller identity. This is consistent with most entities being
   platform-wide reference data, but it means any org-scoped multi-tenant story for those entities
   doesn't exist yet.
 - **Two entities are seeded but not exposed.** `CategoryDefinition` and `CountryValidationConfig`

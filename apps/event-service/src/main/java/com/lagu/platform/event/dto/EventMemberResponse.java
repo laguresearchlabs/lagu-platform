@@ -3,7 +3,7 @@ package com.lagu.platform.event.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Data
@@ -16,5 +16,5 @@ public class EventMemberResponse {
     private String guestNote;
     private boolean muted;
     private UUID invitedBy;
-    private Instant joinedAt;
+    private OffsetDateTime joinedAt;
 }

@@ -26,11 +26,11 @@ public class RecordServiceClient {
                 .build();
     }
 
-    public Map<String, Object> updateRecord(String recordId, String orgId, Map<String, Object> data) {
+    public Map<String, Object> updateRecord(String recordId, String tenantId, Map<String, Object> data) {
         try {
             return restClient.patch()
                     .uri("/api/v1/records/{id}", recordId)
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .body(Map.of("data", data))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
@@ -40,11 +40,11 @@ public class RecordServiceClient {
         }
     }
 
-    public Map<String, Object> createRecord(String orgId, String objectType, Map<String, Object> data) {
+    public Map<String, Object> createRecord(String tenantId, String objectType, Map<String, Object> data) {
         try {
             return restClient.post()
                     .uri("/api/v1/records")
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .body(Map.of("objectType", objectType, "data", data))
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
@@ -77,11 +77,11 @@ public class RecordServiceClient {
         }
     }
 
-    public void requestStatusTransition(String recordId, String orgId, String triggerName, String comment) {
+    public void requestStatusTransition(String recordId, String tenantId, String triggerName, String comment) {
         try {
             restClient.post()
                     .uri("/api/v1/records/{id}/transition", recordId)
-                    .header("X-Org-Id", orgId)
+                    .header("X-Tenant-Id", tenantId)
                     .body(Map.of("triggerName", triggerName, "comment", comment != null ? comment : "Automated transition"))
                     .retrieve()
                     .toBodilessEntity();

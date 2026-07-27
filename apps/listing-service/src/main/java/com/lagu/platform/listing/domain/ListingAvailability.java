@@ -20,8 +20,8 @@ public class ListingAvailability {
     @Column(name = "record_id", nullable = false)
     private UUID recordId;
 
-    @Column(name = "org_id", nullable = false)
-    private UUID orgId;
+    @Column(name = "tenant_id", nullable = false)
+    private UUID tenantId;
 
     @Column(name = "slot_date", nullable = false)
     private LocalDate slotDate;

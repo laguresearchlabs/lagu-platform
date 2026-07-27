@@ -22,7 +22,7 @@ public class VerificationEvent implements PlatformEvent {
     private String eventType;
 
     private UUID   recordId;
-    private UUID   orgId;
+    private UUID   tenantId;
     private String objectType;
     private String previousTier;
     private String newTier;

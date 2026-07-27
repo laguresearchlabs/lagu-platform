@@ -83,7 +83,7 @@ class DocumentServiceIntegrationTest {
     @LocalServerPort int port;
 
     static final String USER_ID    = UUID.randomUUID().toString();
-    static final String ORG_ID     = UUID.randomUUID().toString();
+    static final String TENANT_ID     = UUID.randomUUID().toString();
     static final String HR_USER_ID = UUID.randomUUID().toString();
 
     RestClient userClient;
@@ -94,7 +94,7 @@ class DocumentServiceIntegrationTest {
         userClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    USER_ID)
-                .defaultHeader("X-Org-Id",     ORG_ID)
+                .defaultHeader("X-Tenant-Id",     TENANT_ID)
                 .defaultHeader("X-User-Roles", "ORG_STAFF")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -102,7 +102,7 @@ class DocumentServiceIntegrationTest {
         hrClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    HR_USER_ID)
-                .defaultHeader("X-Org-Id",     ORG_ID)
+                .defaultHeader("X-Tenant-Id",     TENANT_ID)
                 .defaultHeader("X-User-Roles", "ORG_MANAGER")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
@@ -197,7 +197,7 @@ class DocumentServiceIntegrationTest {
         RestClient colleagueClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultHeader("X-User-Id",    UUID.randomUUID().toString())
-                .defaultHeader("X-Org-Id",     ORG_ID)
+                .defaultHeader("X-Tenant-Id",     TENANT_ID)
                 .defaultHeader("X-User-Roles", "ORG_STAFF")
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();

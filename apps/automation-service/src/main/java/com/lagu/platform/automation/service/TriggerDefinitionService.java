@@ -1,6 +1,8 @@
 package com.lagu.platform.automation.service;
 
 import com.lagu.platform.automation.domain.*;
+import com.lagu.platform.automation.dto.CreateActionRequest;
+import com.lagu.platform.automation.dto.CreateTriggerRequest;
 import com.lagu.platform.automation.model.AutomationEventContext;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.security.GatewayHeaderFilter;
@@ -28,23 +30,29 @@ public class TriggerDefinitionService {
     private final AutomationExecutor          executor;
 
     public Page<TriggerDefinition> listForOrg(Pageable pageable) {
-        UUID orgId = GatewayHeaderFilter.current().getOrgId();
-        return triggerRepo.findAllForOrg(orgId, pageable).map(this::withActionsInitialized);
+        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
+        return triggerRepo.findAllForOrg(tenantId, pageable).map(this::withActionsInitialized);
     }
 
     public TriggerDefinition getById(UUID id) {
-        UUID orgId = GatewayHeaderFilter.current().getOrgId();
-        TriggerDefinition trigger = triggerRepo.findByIdAndOrg(id, orgId)
+        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
+        TriggerDefinition trigger = triggerRepo.findByIdAndOrg(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("TriggerDefinition", id.toString()));
         return withActionsInitialized(trigger);
     }
 
-    public TriggerDefinition create(Map<String, Object> req) {
-        UUID orgId = GatewayHeaderFilter.current().getOrgId();
+    public TriggerDefinition create(CreateTriggerRequest req) {
+        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
 
         TriggerDefinition trigger = new TriggerDefinition();
-        trigger.setOrgId(orgId);
-        applyFields(trigger, req);
+        trigger.setTenantId(tenantId);
+        trigger.setName(req.getName());
+        trigger.setLabel(req.getLabel());
+        trigger.setDescription(req.getDescription());
+        trigger.setEventType(req.getEventType());
+        trigger.setObjectType(req.getObjectType());
+        trigger.setConditions(req.getConditions());
+        if (req.getIsActive() != null) trigger.setActive(req.getIsActive());
         return withActionsInitialized(triggerRepo.save(trigger));
     }
 
@@ -71,12 +79,16 @@ public class TriggerDefinitionService {
 
     // ── action management ─────────────────────────────────────────────────────
 
-    public ActionDefinition addAction(UUID triggerId, Map<String, Object> req) {
+    public ActionDefinition addAction(UUID triggerId, CreateActionRequest req) {
         TriggerDefinition trigger = getById(triggerId);
 
         ActionDefinition action = new ActionDefinition();
         action.setTrigger(trigger);
-        applyActionFields(action, req);
+        action.setActionType(req.getActionType());
+        action.setExecutionOrder(req.getExecutionOrder() != null ? req.getExecutionOrder() : 0);
+        action.setConfig(req.getConfig());
+        if (req.getContinueOnFailure() != null) action.setContinueOnFailure(req.getContinueOnFailure());
+        if (req.getIsActive() != null) action.setActive(req.getIsActive());
         return actionRepo.save(action);
     }
 
@@ -97,11 +109,11 @@ public class TriggerDefinitionService {
 
     public void dryRun(UUID triggerId, Map<String, Object> sampleData) {
         TriggerDefinition trigger = getById(triggerId);
-        UUID orgId = GatewayHeaderFilter.current().getOrgId();
+        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
 
         AutomationEventContext ctx = AutomationEventContext.builder()
                 .eventType(trigger.getEventType())
-                .orgId(orgId)
+                .tenantId(tenantId)
                 .objectType(trigger.getObjectType())
                 .data(sampleData)
                 .dryRun(true)

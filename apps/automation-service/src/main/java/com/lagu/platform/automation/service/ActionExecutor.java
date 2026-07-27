@@ -76,7 +76,7 @@ public class ActionExecutor {
         String dataField = field.startsWith("data.") ? field.substring(5) : field;
         recordClient.updateRecord(
                 ctx.getRecordId().toString(),
-                ctx.getOrgId().toString(),
+                ctx.getTenantId().toString(),
                 Map.of(dataField, resolvedValue));
     }
 
@@ -87,7 +87,7 @@ public class ActionExecutor {
 
         recordClient.requestStatusTransition(
                 ctx.getRecordId().toString(),
-                ctx.getOrgId().toString(),
+                ctx.getTenantId().toString(),
                 triggerName, comment);
     }
 
@@ -95,7 +95,7 @@ public class ActionExecutor {
         if (ctx.getRecordId() == null) return;
         recordClient.requestStatusTransition(
                 ctx.getRecordId().toString(),
-                ctx.getOrgId().toString(),
+                ctx.getTenantId().toString(),
                 "to_" + targetTrigger.toLowerCase(), "Automated: " + targetTrigger);
     }
 
@@ -125,13 +125,13 @@ public class ActionExecutor {
         @SuppressWarnings("unchecked")
         Map<String, Object> data = renderer.renderMap((Map<String, Object>) config.get("data"), ctx);
 
-        recordClient.createRecord(ctx.getOrgId().toString(), objectType, data);
+        recordClient.createRecord(ctx.getTenantId().toString(), objectType, data);
     }
 
     private void logActivity(Map<String, Object> config, AutomationEventContext ctx) {
         String message = renderer.render((String) config.getOrDefault("message", "Automation executed"), ctx);
         log.info("[ACTIVITY] org={} record={} event={}: {}",
-                ctx.getOrgId(), ctx.getRecordId(), ctx.getEventType(), message);
+                ctx.getTenantId(), ctx.getRecordId(), ctx.getEventType(), message);
         publishActionEvent("LOG_ACTIVITY", Map.of("message", message), null, ctx);
     }
 
@@ -155,7 +155,7 @@ public class ActionExecutor {
         boolean success = errorMessage == null;
         AutomationEvent event = AutomationEvent.builder()
                 .eventType(success ? "ACTION_SUCCEEDED" : "ACTION_FAILED")
-                .orgId(ctx.getOrgId())
+                .tenantId(ctx.getTenantId())
                 .triggerId(ctx.getTriggerId())
                 .triggerName(ctx.getTriggerName())
                 .recordId(ctx.getRecordId())
@@ -166,8 +166,8 @@ public class ActionExecutor {
                 .payload(payload)
                 .occurredAt(Instant.now())
                 .build();
-        String key = ctx.getOrgId() != null
-                ? (ctx.getRecordId() != null ? ctx.getOrgId() + ":" + ctx.getRecordId() : ctx.getOrgId().toString())
+        String key = ctx.getTenantId() != null
+                ? (ctx.getRecordId() != null ? ctx.getTenantId() + ":" + ctx.getRecordId() : ctx.getTenantId().toString())
                 : "platform";
         kafkaTemplate.send(PlatformTopics.AUTOMATION_EVENTS, key, event);
     }

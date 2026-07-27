@@ -23,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
- * VendorService no longer trusts a caller's JWT orgId for its own tenancy — every member-facing
- * endpoint (getByOrgId/submit/computeKyc) resolves access from VendorMember instead, so a user
+ * VendorService no longer trusts a caller's JWT tenantId for its own tenancy — every member-facing
+ * endpoint (getByTenantId/submit/computeKyc) resolves access from VendorMember instead, so a user
  * who belongs to several vendor orgs can act on each independently of what their JWT happens to
  * carry. These tests pin that boundary, plus that registration never touches IAM anymore.
  */
@@ -36,22 +36,22 @@ class VendorServiceTest {
     private final RecordServiceClient recordClient = mock(RecordServiceClient.class);
     private final VendorService service = new VendorService(profileRepo, memberRepo, kycRepo, recordClient);
 
-    private final UUID orgId = UUID.randomUUID();
+    private final UUID tenantId = UUID.randomUUID();
     private final UUID ownerId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         VendorProfile profile = new VendorProfile();
-        profile.setOrgId(orgId);
+        profile.setId(tenantId);
         profile.setOwnerUserId(ownerId);
         profile.setBusinessName("Test Biz");
         profile.setStatus("DRAFT");
-        when(profileRepo.findByOrgId(orgId)).thenReturn(Optional.of(profile));
+        when(profileRepo.findById(tenantId)).thenReturn(Optional.of(profile));
     }
 
     private VendorMember memberWithRole(UUID userId, String role) {
         VendorMember m = new VendorMember();
-        m.setOrgId(orgId);
+        m.setTenantId(tenantId);
         m.setUserId(userId);
         m.setRole(role);
         return m;
@@ -77,65 +77,65 @@ class VendorServiceTest {
     }
 
     @Test
-    void getByOrgIdRejectsNonMember() {
+    void getByTenantIdRejectsNonMember() {
         UUID stranger = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, stranger)).thenReturn(Optional.empty());
+        when(memberRepo.findByTenantIdAndUserId(tenantId, stranger)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getByOrgId(orgId, stranger))
+        assertThatThrownBy(() -> service.getByTenantId(tenantId, stranger))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                         .isEqualTo(HttpStatus.FORBIDDEN));
     }
 
     @Test
-    void getByOrgIdSucceedsForAnyAcceptedRole() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+    void getByTenantIdSucceedsForAnyAcceptedRole() {
+        when(memberRepo.findByTenantIdAndUserIdAndStatus(tenantId, ownerId, "ACTIVE"))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "MEMBER")));
 
-        var response = service.getByOrgId(orgId, ownerId);
+        var response = service.getByTenantId(tenantId, ownerId);
         assertThat(response.getBusinessName()).isEqualTo("Test Biz");
     }
 
     @Test
     void submitRejectsPlainMember() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserIdAndStatus(tenantId, ownerId, "ACTIVE"))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "MEMBER")));
 
-        assertThatThrownBy(() -> service.submit(orgId, ownerId))
+        assertThatThrownBy(() -> service.submit(tenantId, ownerId))
                 .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
     void submitSucceedsForOwner() {
-        when(memberRepo.findByOrgIdAndUserId(orgId, ownerId))
+        when(memberRepo.findByTenantIdAndUserIdAndStatus(tenantId, ownerId, "ACTIVE"))
                 .thenReturn(Optional.of(memberWithRole(ownerId, "OWNER")));
 
-        var response = service.submit(orgId, ownerId);
+        var response = service.submit(tenantId, ownerId);
         assertThat(response.getStatus()).isEqualTo("SUBMITTED");
     }
 
     @Test
     void computeKycRejectsNonMember() {
         UUID stranger = UUID.randomUUID();
-        when(memberRepo.findByOrgIdAndUserId(orgId, stranger)).thenReturn(Optional.empty());
+        when(memberRepo.findByTenantIdAndUserId(tenantId, stranger)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.computeKyc(orgId, stranger))
+        assertThatThrownBy(() -> service.computeKyc(tenantId, stranger))
                 .isInstanceOf(ResponseStatusException.class);
         verify(recordClient, never()).getDocumentStatus(any(), any());
     }
 
     @Test
     void listMineReturnsProfilesAcrossMultipleOrgs() {
-        UUID otherOrgId = UUID.randomUUID();
+        UUID otherTenantId = UUID.randomUUID();
         VendorProfile otherProfile = new VendorProfile();
-        otherProfile.setOrgId(otherOrgId);
+        otherProfile.setId(otherTenantId);
         otherProfile.setOwnerUserId(UUID.randomUUID());
         otherProfile.setBusinessName("Other Biz");
-        when(profileRepo.findByOrgId(otherOrgId)).thenReturn(Optional.of(otherProfile));
+        when(profileRepo.findById(otherTenantId)).thenReturn(Optional.of(otherProfile));
 
         VendorMember ownMembership = memberWithRole(ownerId, "OWNER");
         VendorMember otherMembership = new VendorMember();
-        otherMembership.setOrgId(otherOrgId);
+        otherMembership.setTenantId(otherTenantId);
         otherMembership.setUserId(ownerId);
         otherMembership.setRole("MEMBER");
         when(memberRepo.findByUserId(ownerId)).thenReturn(List.of(ownMembership, otherMembership));

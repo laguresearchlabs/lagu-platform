@@ -2,6 +2,7 @@ package com.lagu.platform.vendor.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.membership.MembershipPolicy;
 import com.lagu.platform.vendor.domain.VendorMember;
 import com.lagu.platform.vendor.domain.VendorMemberRepository;
 import com.lagu.platform.vendor.domain.VendorProfile;
@@ -16,14 +17,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
  * Team membership for a vendor org — a user can be a VendorMember of many vendor orgs at once
- * (UNIQUE(org_id, user_id), not UNIQUE(user_id)), unlike IAM's User.platformOrgId (a single
- * scalar). Authorization here is therefore local, never derived from the caller's JWT orgId
- * claim — see VendorController/VendorService for the matching change on the vendor-facing side.
+ * (UNIQUE(tenant_id, user_id), not UNIQUE(user_id)). Authorization here is therefore local, never
+ * derived from the caller's JWT tenantId claim, which only ever reflects the single org a request
+ * targets — see VendorController/VendorService for the matching behavior on the vendor-facing side.
  */
 @Service
 @RequiredArgsConstructor
@@ -32,6 +35,7 @@ import java.util.UUID;
 public class VendorMemberService {
 
     private static final List<String> VALID_ROLES = List.of("OWNER", "ADMIN", "MEMBER");
+    private static final Set<String> MANAGER_ROLES = Set.of("OWNER", "ADMIN");
 
     private final VendorProfileRepository profileRepo;
     private final VendorMemberRepository  memberRepo;
@@ -39,7 +43,9 @@ public class VendorMemberService {
     public List<VendorMemberResponse> list(UUID vendorId, UUID requesterId) {
         VendorProfile profile = requireProfile(vendorId);
         requireMember(profile, requesterId);
-        return memberRepo.findByOrgId(profile.getOrgId()).stream().map(this::toResponse).toList();
+        return memberRepo.findByTenantId(profile.getTenantId()).stream()
+                .filter(VendorMember::isActive)
+                .map(this::toResponse).toList();
     }
 
     @Transactional
@@ -48,15 +54,23 @@ public class VendorMemberService {
         requireManager(profile, requesterId);
         validateRole(req.getRole());
 
-        if (memberRepo.existsByOrgIdAndUserId(profile.getOrgId(), req.getUserId())) {
+        VendorMember member = memberRepo.findByTenantIdAndUserId(profile.getTenantId(), req.getUserId())
+                .orElseGet(() -> {
+                    VendorMember m = new VendorMember();
+                    m.setTenantId(profile.getTenantId());
+                    m.setUserId(req.getUserId());
+                    return m;
+                });
+
+        if (member.getId() != null && member.isActive()) {
             throw new ValidationException("User is already a member of this vendor org");
         }
 
-        VendorMember member = new VendorMember();
-        member.setOrgId(profile.getOrgId());
-        member.setUserId(req.getUserId());
         member.setRole(req.getRole() != null ? req.getRole().toUpperCase() : "MEMBER");
+        member.setStatus("ACTIVE");
         member.setInvitedBy(requesterId);
+        member.setRemovedBy(null);
+        member.setRemovedAt(null);
         memberRepo.save(member);
 
         log.info("User {} invited {} to vendor {} as {}", requesterId, req.getUserId(), vendorId, member.getRole());
@@ -69,10 +83,18 @@ public class VendorMemberService {
         VendorProfile profile = requireProfile(vendorId);
         requireManager(profile, requesterId);
         validateRole(req.getRole());
+        MembershipPolicy.requireNotSelf(requesterId, targetUserId);
 
-        VendorMember member = memberRepo.findByOrgIdAndUserId(profile.getOrgId(), targetUserId)
+        VendorMember member = memberRepo.findByTenantIdAndUserIdAndStatus(profile.getTenantId(), targetUserId, "ACTIVE")
                 .orElseThrow(() -> new ResourceNotFoundException("VendorMember", targetUserId.toString()));
-        member.setRole(req.getRole().toUpperCase());
+
+        String newRole = req.getRole().toUpperCase();
+        List<VendorMember> allMembers = memberRepo.findByTenantId(profile.getTenantId());
+        MembershipPolicy.requireManagerRemainsAfterMutation(allMembers, targetUserId, newRole, MANAGER_ROLES);
+
+        member.setRole(newRole);
+        member.setUpdatedBy(requesterId);
+        member.setUpdatedAt(Instant.now());
         return toResponse(memberRepo.save(member));
     }
 
@@ -80,13 +102,21 @@ public class VendorMemberService {
     public void remove(UUID vendorId, UUID requesterId, UUID targetUserId) {
         VendorProfile profile = requireProfile(vendorId);
         requireManager(profile, requesterId);
+        MembershipPolicy.requireNotSelf(requesterId, targetUserId);
 
         if (targetUserId.equals(profile.getOwnerUserId())) {
             throw new ValidationException("Cannot remove the vendor's registering owner");
         }
-        VendorMember member = memberRepo.findByOrgIdAndUserId(profile.getOrgId(), targetUserId)
+        VendorMember member = memberRepo.findByTenantIdAndUserIdAndStatus(profile.getTenantId(), targetUserId, "ACTIVE")
                 .orElseThrow(() -> new ResourceNotFoundException("VendorMember", targetUserId.toString()));
-        memberRepo.delete(member);
+
+        List<VendorMember> allMembers = memberRepo.findByTenantId(profile.getTenantId());
+        MembershipPolicy.requireManagerRemainsAfterMutation(allMembers, targetUserId, null, MANAGER_ROLES);
+
+        member.setStatus("REMOVED");
+        member.setRemovedBy(requesterId);
+        member.setRemovedAt(Instant.now());
+        memberRepo.save(member);
     }
 
     // ── helpers (also used by VendorService for its own membership-gated endpoints) ───────────
@@ -97,14 +127,14 @@ public class VendorMemberService {
         }
     }
 
-    /** vendorId here is VendorProfile.orgId — the platform orgId doubles as the public vendorId. */
+    /** vendorId here is VendorProfile.id — the vendor's own PK doubles as its platform tenantId. */
     private VendorProfile requireProfile(UUID vendorId) {
-        return profileRepo.findByOrgId(vendorId)
+        return profileRepo.findById(vendorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Vendor", vendorId.toString()));
     }
 
     private VendorMember requireMember(VendorProfile profile, UUID userId) {
-        return memberRepo.findByOrgIdAndUserId(profile.getOrgId(), userId)
+        return memberRepo.findByTenantIdAndUserIdAndStatus(profile.getTenantId(), userId, "ACTIVE")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this vendor org"));
     }
 
@@ -119,7 +149,8 @@ public class VendorMemberService {
     private VendorMemberResponse toResponse(VendorMember m) {
         return VendorMemberResponse.builder()
                 .id(m.getId()).userId(m.getUserId()).role(m.getRole())
-                .invitedBy(m.getInvitedBy()).joinedAt(m.getJoinedAt())
+                .invitedBy(m.getInvitedBy())
+                .joinedAt(m.getJoinedAt() != null ? m.getJoinedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }
 }

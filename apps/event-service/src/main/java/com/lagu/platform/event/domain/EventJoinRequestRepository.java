@@ -7,6 +7,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface EventJoinRequestRepository extends JpaRepository<EventJoinRequest, UUID> {
-    List<EventJoinRequest> findByOrgIdAndStatus(UUID orgId, String status);
-    Optional<EventJoinRequest> findByOrgIdAndUserId(UUID orgId, UUID userId);
+    List<EventJoinRequest> findByTenantIdAndStatus(UUID tenantId, String status);
+    Optional<EventJoinRequest> findByTenantIdAndUserId(UUID tenantId, UUID userId);
 }

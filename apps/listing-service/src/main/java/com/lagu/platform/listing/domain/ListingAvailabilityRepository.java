@@ -26,4 +26,11 @@ public interface ListingAvailabilityRepository extends JpaRepository<ListingAvai
            "WHERE a.recordId = :recordId AND a.slotDate = :date AND a.slotType = 'AVAILABLE'")
     int markBooked(@Param("recordId") UUID recordId, @Param("date") LocalDate date,
                    @Param("bookingRef") UUID bookingRef);
+
+    @Modifying
+    @Query("UPDATE ListingAvailability a SET a.slotType = 'AVAILABLE', a.bookingRef = null " +
+           "WHERE a.recordId = :recordId AND a.slotDate = :date " +
+           "AND a.slotType = 'BOOKED' AND a.bookingRef = :bookingRef")
+    int releaseBooked(@Param("recordId") UUID recordId, @Param("date") LocalDate date,
+                      @Param("bookingRef") UUID bookingRef);
 }
