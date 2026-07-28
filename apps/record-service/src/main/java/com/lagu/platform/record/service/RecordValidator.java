@@ -45,7 +45,7 @@ public class RecordValidator {
                 errors.add(field.name() + ": field is required");
                 continue;
             }
-            if (value == null) continue;
+            if (value == null || (!field.required() && isBlank(value))) continue;
 
             validateByType(field, value, errors);
         }
