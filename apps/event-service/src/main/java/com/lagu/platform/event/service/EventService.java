@@ -1,5 +1,6 @@
 package com.lagu.platform.event.service;
 
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.event.client.RecordServiceClient;
@@ -9,11 +10,16 @@ import com.lagu.platform.event.domain.EventMemberRepository;
 import com.lagu.platform.event.domain.EventRepository;
 import com.lagu.platform.event.dto.CreateEventRequest;
 import com.lagu.platform.event.dto.EventResponse;
+import com.lagu.platform.event.dto.EventSummaryResponse;
 import com.lagu.platform.event.dto.LinkVendorRequest;
 import com.lagu.platform.event.dto.TransitionRequest;
 import com.lagu.platform.event.dto.UpdateEventRequest;
+import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -82,13 +88,26 @@ public class EventService {
         Optional<EventMember> member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId);
         if (member.isEmpty()) {
             // Non-members may view a PUBLIC event read-only, well enough to send a join
-            // request (mirrors event-nest's old share-link preview) — anything else is 403.
-            if (!"PUBLIC".equals(data.get("visibility"))) {
+            // request (mirrors event-nest's old share-link preview). A PLATFORM_ADMIN may view
+            // any event regardless of visibility, mirroring record-service's findForContext —
+            // everyone else who isn't a member and the event isn't PUBLIC gets 403.
+            PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+            boolean isPlatformAdmin = ctx != null && ctx.isPlatformAdmin();
+            if (!isPlatformAdmin && !"PUBLIC".equals(data.get("visibility"))) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event");
             }
             return toResponse(event, null, data);
         }
         return toResponse(event, member.get(), data);
+    }
+
+    /** Platform-admin listing across every event, regardless of membership. Caller must be
+     *  authorized by EventController.requirePlatformAdmin() before this is invoked. */
+    public PageResult<EventSummaryResponse> listForAdmin(String objectType, String status, int page, int size) {
+        String ot = (objectType != null && !objectType.isBlank()) ? objectType.toUpperCase() : null;
+        String st = (status != null && !status.isBlank()) ? status.toUpperCase() : null;
+        PageRequest pageReq = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return PageResult.from(eventRepo.search(ot, st, pageReq).map(EventSummaryResponse::from));
     }
 
     /** Events the caller is a member of, accepted or still-pending — pending ones are how an

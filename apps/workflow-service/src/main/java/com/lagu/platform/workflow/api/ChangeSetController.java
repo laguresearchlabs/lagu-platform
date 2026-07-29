@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -37,9 +38,9 @@ public class ChangeSetController {
     @PostMapping("/{id}/review")
     public ResponseEntity<ApiResponse<ChangeSet>> review(
             @PathVariable UUID id, @RequestBody ReviewRequest req) {
-        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        PlatformSecurityContext ctx = requirePlatformAdmin();
         ChangeSet cs = changeSetService.review(id, req.decision(), req.adminComment(),
-                req.correctedData(), ctx != null ? ctx.getUserId() : req.reviewedBy());
+                req.correctedData(), ctx.getUserId());
         return ResponseEntity.ok(ApiResponse.ok(cs));
     }
 
@@ -59,6 +60,7 @@ public class ChangeSetController {
     /** Admin: all pending change sets (cross-org). */
     @GetMapping("/pending")
     public ResponseEntity<ApiResponse<List<ChangeSet>>> pending() {
+        requirePlatformAdmin();
         return ResponseEntity.ok(ApiResponse.ok(changeSetService.listPending()));
     }
 
@@ -75,6 +77,19 @@ public class ChangeSetController {
                     HttpStatus.FORBIDDEN);
         }
         return ResponseEntity.ok(ApiResponse.ok(changeSetService.listByOrgAndStatus(tenantId, status)));
+    }
+
+    /** Manual admin approve/reject and the cross-org pending list bypass normal org scoping —
+     *  admin only. */
+    private PlatformSecurityContext requirePlatformAdmin() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        if (!ctx.isPlatformAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform admin role required");
+        }
+        return ctx;
     }
 
     record SubmitRequest(UUID recordId, UUID tenantId, String objectType, UUID workflowId,

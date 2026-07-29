@@ -192,10 +192,10 @@ public class ApprovalEngine {
         return instances.stream().map(this::toResponse).toList();
     }
 
-    public ApprovalInstanceResponse getById(UUID id, UUID tenantId) {
+    public ApprovalInstanceResponse getById(UUID id, UUID tenantId, boolean isPlatformAdmin) {
         ApprovalInstance instance = instanceRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("ApprovalInstance", id.toString()));
-        if (!instance.getTenantId().equals(tenantId)) {
+        if (!isPlatformAdmin && !instance.getTenantId().equals(tenantId)) {
             throw new ResourceNotFoundException("ApprovalInstance", id.toString());
         }
         return toResponse(instance);

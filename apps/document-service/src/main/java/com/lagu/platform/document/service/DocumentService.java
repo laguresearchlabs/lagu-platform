@@ -123,10 +123,20 @@ public class DocumentService {
 
     public PageResult<DocumentDto> getPendingReview(int page, int size) {
         PlatformSecurityContext ctx = requireContext();
-        var paged = repository.findByTenantIdAndStatusOrderByUploadedAtAsc(
-                ctx.getTenantId(), "UPLOADED",
-                PageRequest.of(page, size, Sort.by("uploadedAt").ascending()));
+        PageRequest pageReq = PageRequest.of(page, size, Sort.by("uploadedAt").ascending());
+        // A platform admin has no org of their own — findByTenantIdAndStatus(null, ...) would
+        // silently match nothing, not "everything", so admin gets the genuinely unscoped query.
+        var paged = ctx.isPlatformAdmin()
+                ? repository.findByStatusOrderByUploadedAtAsc("UPLOADED", pageReq)
+                : repository.findByTenantIdAndStatusOrderByUploadedAtAsc(ctx.getTenantId(), "UPLOADED", pageReq);
         return PageResult.from(paged.map(DocumentDto::from));
+    }
+
+    /** Platform-admin: every document for one org, regardless of uploader — the KYC review panel
+     *  on a vendor's admin detail page. Caller must be authorized by the controller first. */
+    public List<DocumentDto> listForTenantAdmin(UUID tenantId) {
+        return repository.findByTenantIdOrderByUploadedAtDesc(tenantId)
+                .stream().map(DocumentDto::from).toList();
     }
 
     @Transactional

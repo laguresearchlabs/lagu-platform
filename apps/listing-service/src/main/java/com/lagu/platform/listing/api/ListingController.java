@@ -1,6 +1,7 @@
 package com.lagu.platform.listing.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.listing.domain.ListingAvailability;
 import com.lagu.platform.listing.domain.ListingSnapshot;
 import com.lagu.platform.listing.service.ListingSnapshotService;
@@ -86,6 +87,21 @@ public class ListingController {
         return ResponseEntity.ok(ApiResponse.ok(
                 snapshotService.setAvailability(recordId, ctx.getTenantId(),
                         req.from(), req.to(), req.slotType())));
+    }
+
+    // ── Admin: cross-org listing console ──────────────────────────────────────
+
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<PageResult<ListingSnapshot>>> listForAdmin(
+            @RequestParam(required = false) String objectType,
+            @RequestParam(required = false) UUID tenantId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String verificationTier,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        requireAdmin();
+        return ResponseEntity.ok(ApiResponse.ok(
+                snapshotService.listForAdmin(objectType, tenantId, status, verificationTier, page, size)));
     }
 
     // ── Admin: manually (re)publish a snapshot ────────────────────────────────

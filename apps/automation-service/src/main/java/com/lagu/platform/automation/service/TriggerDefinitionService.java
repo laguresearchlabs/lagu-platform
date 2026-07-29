@@ -30,14 +30,23 @@ public class TriggerDefinitionService {
     private final AutomationExecutor          executor;
 
     public Page<TriggerDefinition> listForOrg(Pageable pageable) {
-        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
-        return triggerRepo.findAllForOrg(tenantId, pageable).map(this::withActionsInitialized);
+        var ctx = GatewayHeaderFilter.current();
+        // findAllForOrg(null, ...) degrades to "platform-level triggers only" (tenantId = NULL
+        // matches nothing in SQL), not "every org" — a platform admin needs the genuinely
+        // unscoped query instead.
+        Page<TriggerDefinition> page = (ctx != null && ctx.isPlatformAdmin())
+                ? triggerRepo.findAll(pageable)
+                : triggerRepo.findAllForOrg(ctx.getTenantId(), pageable);
+        return page.map(this::withActionsInitialized);
     }
 
     public TriggerDefinition getById(UUID id) {
-        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
-        TriggerDefinition trigger = triggerRepo.findByIdAndOrg(id, tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("TriggerDefinition", id.toString()));
+        var ctx = GatewayHeaderFilter.current();
+        TriggerDefinition trigger = (ctx != null && ctx.isPlatformAdmin())
+                ? triggerRepo.findById(id)
+                        .orElseThrow(() -> new ResourceNotFoundException("TriggerDefinition", id.toString()))
+                : triggerRepo.findByIdAndOrg(id, ctx.getTenantId())
+                        .orElseThrow(() -> new ResourceNotFoundException("TriggerDefinition", id.toString()));
         return withActionsInitialized(trigger);
     }
 

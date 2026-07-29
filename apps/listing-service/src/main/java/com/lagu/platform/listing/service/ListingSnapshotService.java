@@ -1,5 +1,6 @@
 package com.lagu.platform.listing.service;
 
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.listing.client.SchemaRegistryClient;
 import com.lagu.platform.listing.event.ListingEventPublisher;
@@ -124,6 +125,16 @@ public class ListingSnapshotService {
 
     public Optional<ListingSnapshot> getByRecordId(UUID recordId) {
         return snapshotRepo.findByRecordId(recordId);
+    }
+
+    /** Platform-admin listing across every org. Caller must be authorized by
+     *  ListingController.requireAdmin() before this is invoked. */
+    public PageResult<ListingSnapshot> listForAdmin(String objectType, UUID tenantId, String status,
+                                                     String verificationTier, int page, int size) {
+        String ot = (objectType != null && !objectType.isBlank()) ? objectType.toUpperCase() : null;
+        String st = (status != null && !status.isBlank()) ? status.toUpperCase() : null;
+        String tier = (verificationTier != null && !verificationTier.isBlank()) ? verificationTier.toUpperCase() : null;
+        return PageResult.from(snapshotRepo.search(ot, tenantId, st, tier, PageRequest.of(page, size)));
     }
 
     /** Consumer-facing paginated listing search (DB fallback; OpenSearch is the primary path). */

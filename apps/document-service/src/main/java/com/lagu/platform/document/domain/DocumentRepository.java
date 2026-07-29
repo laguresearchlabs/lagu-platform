@@ -19,6 +19,13 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
     Page<Document> findByTenantIdAndStatusOrderByUploadedAtAsc(UUID tenantId, String status, Pageable pageable);
 
+    /** Platform-admin cross-org pending queue — see DocumentService.getPendingReview(). */
+    Page<Document> findByStatusOrderByUploadedAtAsc(String status, Pageable pageable);
+
+    /** Every document (any user, any status) for one org — powers the admin KYC panel on a
+     *  vendor's detail page. See DocumentService.listForTenantAdmin(). */
+    List<Document> findByTenantIdOrderByUploadedAtDesc(UUID tenantId);
+
     Optional<Document> findByIdAndTenantId(UUID id, UUID tenantId);
 
     @Modifying

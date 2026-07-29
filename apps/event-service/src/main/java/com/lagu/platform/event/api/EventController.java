@@ -1,8 +1,10 @@
 package com.lagu.platform.event.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.event.dto.CreateEventRequest;
 import com.lagu.platform.event.dto.EventResponse;
+import com.lagu.platform.event.dto.EventSummaryResponse;
 import com.lagu.platform.event.dto.LinkVendorRequest;
 import com.lagu.platform.event.dto.TransitionRequest;
 import com.lagu.platform.event.dto.UpdateEventRequest;
@@ -37,6 +39,17 @@ public class EventController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<EventResponse>>> listMine() {
         return ResponseEntity.ok(ApiResponse.ok(eventService.listMine(requireUserId())));
+    }
+
+    /** Platform-admin listing across every event on the platform, regardless of membership. */
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<PageResult<EventSummaryResponse>>> listForAdmin(
+            @RequestParam(required = false) String objectType,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        requirePlatformAdmin();
+        return ResponseEntity.ok(ApiResponse.ok(eventService.listForAdmin(objectType, status, page, size)));
     }
 
     @GetMapping("/{eventId}")
@@ -83,5 +96,15 @@ public class EventController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
         }
         return ctx.getUserId();
+    }
+
+    static void requirePlatformAdmin() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        if (!ctx.isPlatformAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform admin role required");
+        }
     }
 }

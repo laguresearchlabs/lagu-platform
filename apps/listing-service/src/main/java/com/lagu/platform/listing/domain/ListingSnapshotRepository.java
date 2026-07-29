@@ -28,4 +28,18 @@ public interface ListingSnapshotRepository extends JpaRepository<ListingSnapshot
     List<ListingSnapshot> findPublishedAfterCursor(@Param("objectType") String objectType,
                                                     @Param("cursorId") UUID cursorId,
                                                     Pageable pageable);
+
+    /** Platform-admin listing across every org — see ListingSnapshotService.listForAdmin().
+     *  Filters are optional (null = no constraint). */
+    @Query("SELECT s FROM ListingSnapshot s " +
+           "WHERE (:objectType IS NULL OR s.objectType = :objectType) " +
+           "AND (:tenantId IS NULL OR s.tenantId = :tenantId) " +
+           "AND (:status IS NULL OR s.status = :status) " +
+           "AND (:verificationTier IS NULL OR s.verificationTier = :verificationTier) " +
+           "ORDER BY s.updatedAt DESC")
+    Page<ListingSnapshot> search(@Param("objectType") String objectType,
+                                  @Param("tenantId") UUID tenantId,
+                                  @Param("status") String status,
+                                  @Param("verificationTier") String verificationTier,
+                                  Pageable pageable);
 }

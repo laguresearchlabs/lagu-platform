@@ -6,6 +6,8 @@ import com.lagu.platform.document.dto.DocumentDto;
 import com.lagu.platform.document.dto.DocumentReviewRequest;
 import com.lagu.platform.document.dto.DocumentSubmissionStatusResponse;
 import com.lagu.platform.document.service.DocumentService;
+import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -14,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -73,6 +76,24 @@ public class DocumentController {
     @RequirePermission(resource = "DOCUMENT", action = "READ")
     public ResponseEntity<ApiResponse<DocumentSubmissionStatusResponse>> submissionStatus() {
         return ResponseEntity.ok(ApiResponse.ok(service.getSubmissionStatus()));
+    }
+
+    /** Platform-admin: every document for one org (any uploader, any status) — powers the KYC
+     *  panel on a vendor's admin detail page. */
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<List<DocumentDto>>> listForTenantAdmin(@RequestParam UUID tenantId) {
+        requirePlatformAdmin();
+        return ResponseEntity.ok(ApiResponse.ok(service.listForTenantAdmin(tenantId)));
+    }
+
+    private void requirePlatformAdmin() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        if (!ctx.isPlatformAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform admin role required");
+        }
     }
 
     // ── HR review endpoints (ORG_MANAGER / ORG_OWNER) ─────────────────────────

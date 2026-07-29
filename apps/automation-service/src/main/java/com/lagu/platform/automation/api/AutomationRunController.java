@@ -27,18 +27,21 @@ public class AutomationRunController {
     @GetMapping
     @RequirePermission(resource = "TRIGGER", action = "READ")
     public ResponseEntity<ApiResponse<PageResult<AutomationRunResponse>>> list(Pageable pageable) {
-        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
-        var page = runRepository.findByTenantId(tenantId, pageable).map(AutomationRunResponse::summary);
+        var ctx = GatewayHeaderFilter.current();
+        var page = (ctx != null && ctx.isPlatformAdmin())
+                ? runRepository.findAll(pageable).map(AutomationRunResponse::summary)
+                : runRepository.findByTenantId(ctx.getTenantId(), pageable).map(AutomationRunResponse::summary);
         return ResponseEntity.ok(ApiResponse.ok(PageResult.from(page)));
     }
 
     @GetMapping("/{id}")
     @RequirePermission(resource = "TRIGGER", action = "READ")
     public ResponseEntity<ApiResponse<AutomationRunResponse>> get(@PathVariable UUID id) {
-        UUID tenantId = GatewayHeaderFilter.current().getTenantId();
+        var ctx = GatewayHeaderFilter.current();
         AutomationRun run = runRepository.findByIdWithActionRuns(id)
                 .orElseThrow(() -> new ResourceNotFoundException("AutomationRun", id.toString()));
-        if (!tenantId.equals(run.getTenantId())) {
+        boolean isPlatformAdmin = ctx != null && ctx.isPlatformAdmin();
+        if (!isPlatformAdmin && !run.getTenantId().equals(ctx.getTenantId())) {
             throw new ResourceNotFoundException("AutomationRun", id.toString());
         }
         return ResponseEntity.ok(ApiResponse.ok(AutomationRunResponse.from(run)));
