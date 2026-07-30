@@ -8,8 +8,10 @@ import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.security.RequirePermission;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 import java.util.UUID;
@@ -29,6 +31,19 @@ public class NotificationController {
             @RequestParam(required = false) Boolean unreadOnly) {
         UUID userId = currentUserId();
         var result = queryService.listForUser(userId, unreadOnly, page, size);
+        return ResponseEntity.ok(ApiResponse.ok(PageResult.from(result)));
+    }
+
+    /** Platform-admin listing across every tenant, regardless of recipient. */
+    @GetMapping("/admin")
+    public ResponseEntity<ApiResponse<PageResult<NotificationDto>>> listForAdmin(
+            @RequestParam(required = false) UUID tenantId,
+            @RequestParam(required = false) String channel,
+            @RequestParam(required = false) Boolean read,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        requirePlatformAdmin();
+        var result = queryService.listForAdmin(tenantId, channel, read, page, size);
         return ResponseEntity.ok(ApiResponse.ok(PageResult.from(result)));
     }
 
@@ -57,5 +72,15 @@ public class NotificationController {
     private UUID currentUserId() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         return ctx != null ? ctx.getUserId() : null;
+    }
+
+    private static void requirePlatformAdmin() {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || ctx.getUserId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        if (!ctx.isPlatformAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Platform admin role required");
+        }
     }
 }

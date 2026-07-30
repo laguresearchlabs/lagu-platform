@@ -20,6 +20,7 @@ import java.util.UUID;
 public class FieldService {
 
     private final FieldDefinitionRepository repository;
+    private final ListingTypeService listingTypeService;
 
     public List<FieldResponse> listPlatformLevel() {
         return repository.findByTenantIdIsNullAndActiveTrue().stream()
@@ -44,7 +45,9 @@ public class FieldService {
     public FieldResponse update(UUID id, FieldRequest req) {
         FieldDefinition def = findById(id);
         applyRequest(def, req);
-        return toResponse(repository.save(def));
+        FieldResponse response = toResponse(repository.save(def));
+        listingTypeService.evictSchemaCacheForField(id);
+        return response;
     }
 
     @Transactional
@@ -52,6 +55,7 @@ public class FieldService {
         FieldDefinition def = findById(id);
         def.setActive(false);
         repository.save(def);
+        listingTypeService.evictSchemaCacheForField(id);
     }
 
     private FieldDefinition findById(UUID id) {

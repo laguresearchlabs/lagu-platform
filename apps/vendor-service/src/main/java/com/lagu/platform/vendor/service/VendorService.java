@@ -1,10 +1,12 @@
 package com.lagu.platform.vendor.service;
 
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.vendor.client.RecordServiceClient;
 import com.lagu.platform.vendor.domain.*;
 import com.lagu.platform.vendor.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,9 +30,11 @@ public class VendorService {
     public VendorProfileResponse register(RegisterVendorRequest req, UUID userId) {
         UUID tenantId = UUID.randomUUID();
 
-        // Create the canonical VENDOR record in record-service
+        // Create the canonical VENDOR record in record-service. Field key is "name" per the
+        // VENDOR schema (schema-registry's basic_details.name) — not "businessName"; the two
+        // just happen to share a value at registration time.
         Map<String, Object> recordResponse = recordClient.createRecord(tenantId, userId, "VENDOR", Map.of(
-            "businessName", req.getBusinessName(),
+            "name", req.getBusinessName(),
             "country", req.getCountry()
         ));
         UUID recordId = recordClient.extractRecordId(recordResponse);
@@ -90,10 +94,13 @@ public class VendorService {
         return toResponse(profile, kyc);
     }
 
-    public List<VendorProfileResponse> listByStatus(String status) {
-        return profileRepo.findByStatus(status.toUpperCase()).stream()
-                .map(p -> toResponse(p, null))
-                .toList();
+    /** Admin listing — cross-org, paginated, optionally filtered by status and/or a business-name
+     *  search term. */
+    public PageResult<VendorProfileResponse> listForAdmin(String status, String search, int page, int size) {
+        String st = (status != null && !status.isBlank()) ? status.toUpperCase() : null;
+        String q = (search != null && !search.isBlank()) ? search.trim() : null;
+        var results = profileRepo.search(st, q, PageRequest.of(page, size));
+        return PageResult.from(results.map(p -> toResponse(p, null)));
     }
 
     @Transactional

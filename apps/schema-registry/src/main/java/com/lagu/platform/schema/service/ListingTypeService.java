@@ -5,7 +5,8 @@ import com.lagu.platform.schema.domain.*;
 import com.lagu.platform.schema.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ public class ListingTypeService {
 
     private final ListingTypeDefinitionRepository listingTypeRepo;
     private final FieldGroupRepository fieldGroupRepo;
+    private final CacheManager cacheManager;
 
     public List<ListingTypeResponse> list() {
         return listingTypeRepo.findByTenantIdIsNullAndActiveTrue().stream()
@@ -78,7 +80,6 @@ public class ListingTypeService {
     }
 
     @Transactional
-    @CacheEvict(value = CACHE_SCHEMA, key = "#name")
     public ListingTypeResponse addSection(String name, ListingTypeRequest.SectionRequest secReq) {
         ListingTypeDefinition def = listingTypeRepo.findByNameAndTenantIdIsNull(name)
                 .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", name));
@@ -96,6 +97,7 @@ public class ListingTypeService {
         def.getSections().add(sec);
 
         ListingTypeDefinition saved = listingTypeRepo.save(def);
+        evictSchemaCache(saved.getName());
         return toResponse(saved);
     }
 
@@ -114,9 +116,26 @@ public class ListingTypeService {
         return toResponse(saved);
     }
 
-    @CacheEvict(value = CACHE_SCHEMA, key = "#listingTypeName")
+    /**
+     * Explicit (non-annotation) eviction so it also works via self-invocation from other methods
+     * in this class — {@code @CacheEvict} only fires on calls that go through the Spring proxy,
+     * which self-invocation (a method calling another method on {@code this}) bypasses.
+     */
     public void evictSchemaCache(String listingTypeName) {
-        // Spring AOP handles the cache eviction
+        Cache cache = cacheManager.getCache(CACHE_SCHEMA);
+        if (cache != null) {
+            cache.evict(listingTypeName);
+        }
+    }
+
+    /** Evicts every listing type whose schema embeds the given field group, e.g. after a FieldGroup edit. */
+    public void evictSchemaCacheForFieldGroup(UUID fieldGroupId) {
+        listingTypeRepo.findNamesByFieldGroupId(fieldGroupId).forEach(this::evictSchemaCache);
+    }
+
+    /** Evicts every listing type whose schema embeds the given field, e.g. after a Field edit. */
+    public void evictSchemaCacheForField(UUID fieldId) {
+        listingTypeRepo.findNamesByFieldId(fieldId).forEach(this::evictSchemaCache);
     }
 
     @Transactional

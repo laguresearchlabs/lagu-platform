@@ -31,12 +31,12 @@ public class DocumentTypeRegistry {
     }
 
     private static final List<DocumentConfig> FALLBACK = List.of(
-        new DocumentConfig("RESUME",               "Resume / CV",                            true,  false),
-        new DocumentConfig("HR_IDENTITY_PROOF",    "Government-issued Identity Proof",       true,  false),
-        new DocumentConfig("PHOTOGRAPH",           "Passport-size Photograph",               true,  false),
-        new DocumentConfig("ACADEMIC_CERTIFICATE", "Academic Certificates / Mark Sheets",    false, false),
-        new DocumentConfig("ADDRESS_PROOF",        "Address Proof",                          false, false),
-        new DocumentConfig("OTHER",                "Additional Documents",                   false, false)
+        new DocumentConfig("RESUME",               "Resume / CV",                            true,  false, null),
+        new DocumentConfig("HR_IDENTITY_PROOF",    "Government-issued Identity Proof",       true,  false, null),
+        new DocumentConfig("PHOTOGRAPH",           "Passport-size Photograph",               true,  false, null),
+        new DocumentConfig("ACADEMIC_CERTIFICATE", "Academic Certificates / Mark Sheets",    false, false, null),
+        new DocumentConfig("ADDRESS_PROOF",        "Address Proof",                          false, false, null),
+        new DocumentConfig("OTHER",                "Additional Documents",                   false, false, null)
     );
 
     @PostConstruct
@@ -63,7 +63,8 @@ public class DocumentTypeRegistry {
                             str(m, "code"),
                             str(m, "label"),
                             Boolean.TRUE.equals(m.get("required")),
-                            Boolean.TRUE.equals(m.get("expiryTracked"))))
+                            Boolean.TRUE.equals(m.get("expiryTracked")),
+                            str(m, "listingType")))
                     .toList();
 
             configs.clear();
@@ -75,13 +76,30 @@ public class DocumentTypeRegistry {
         }
     }
 
+    /** Types with no listingType (null) are generic/HR-oriented and available regardless of
+     *  context; document-service's own /submission-status checklist has always used this. */
     public List<DocumentConfig> all() {
-        return Collections.unmodifiableList(configs);
+        return forListingType(null);
+    }
+
+    /** Types visible for a given listing-type context: the generic (listingType == null) set
+     *  plus any specific to this listingType (e.g. "VENDOR" also unlocks PAN_CARD,
+     *  GST_CERTIFICATE, BANK_CANCELLED_CHEQUE, ...). A null/blank listingType returns only the
+     *  generic set — same as the historical (pre-listingType-aware) behavior. */
+    public List<DocumentConfig> forListingType(String listingType) {
+        return configs.stream()
+                .filter(c -> c.listingType() == null
+                        || (listingType != null && c.listingType().equalsIgnoreCase(listingType)))
+                .toList();
     }
 
     public Set<String> validCodes() {
+        return validCodes(null);
+    }
+
+    public Set<String> validCodes(String listingType) {
         Set<String> codes = new HashSet<>();
-        configs.forEach(c -> codes.add(c.code()));
+        forListingType(listingType).forEach(c -> codes.add(c.code()));
         return codes;
     }
 
@@ -94,5 +112,6 @@ public class DocumentTypeRegistry {
         return v == null ? null : v.toString();
     }
 
-    public record DocumentConfig(String code, String label, boolean required, boolean expiryTracked) {}
+    public record DocumentConfig(String code, String label, boolean required, boolean expiryTracked,
+                                  String listingType) {}
 }

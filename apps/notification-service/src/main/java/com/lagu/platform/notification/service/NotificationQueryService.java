@@ -31,6 +31,11 @@ public class NotificationQueryService {
         return repo.countByRecipientUserIdAndRead(userId, false);
     }
 
+    public Page<NotificationDto> listForAdmin(UUID tenantId, String channel, Boolean read, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size);
+        return repo.searchAdmin(tenantId, channel, read, pageable).map(this::toDto);
+    }
+
     @Transactional
     public NotificationDto markRead(UUID id, UUID userId) {
         Notification n = repo.findById(id)
@@ -61,9 +66,12 @@ public class NotificationQueryService {
                 .channel(n.getChannel())
                 .recordId(n.getRecordId())
                 .objectType(n.getObjectType())
+                .triggerId(n.getTriggerId())
                 .triggerName(n.getTriggerName())
                 .read(n.isRead())
                 .readAt(n.getReadAt() != null ? n.getReadAt().atOffset(java.time.ZoneOffset.UTC) : null)
+                .emailSent(n.isEmailSent())
+                .emailSentAt(n.getEmailSentAt() != null ? n.getEmailSentAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .createdAt(n.getCreatedAt() != null ? n.getCreatedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
     }

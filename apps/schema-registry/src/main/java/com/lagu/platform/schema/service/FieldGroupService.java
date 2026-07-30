@@ -12,7 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +26,7 @@ public class FieldGroupService {
     private final FieldGroupRepository fieldGroupRepo;
     private final FieldDefinitionRepository fieldRepo;
     private final FieldService fieldService;
+    private final ListingTypeService listingTypeService;
 
     public List<FieldGroupResponse> listPlatformLevel() {
         return fieldGroupRepo.findByTenantIdIsNullAndActiveTrue().stream()
@@ -57,11 +61,50 @@ public class FieldGroupService {
         group.setName(req.name());
         group.setLabel(req.label());
         group.setDescription(req.description());
-        group.getEntries().clear();
         if (req.entries() != null) {
-            group.getEntries().addAll(buildEntries(group, req.entries()));
+            reconcileEntries(group, req.entries());
+        } else {
+            group.getEntries().clear();
         }
-        return toResponse(fieldGroupRepo.save(group));
+        FieldGroupResponse response = toResponse(fieldGroupRepo.save(group));
+        listingTypeService.evictSchemaCacheForFieldGroup(id);
+        return response;
+    }
+
+    /**
+     * Updates the entries collection in place instead of clear()+addAll(): entries is a
+     * @OneToMany(orphanRemoval=true) keyed by the composite (fieldGroupId, fieldId). Clearing and
+     * re-adding a new FieldGroupEntry instance with the same composite key in the same flush
+     * makes Hibernate schedule both a delete (orphan removal) and a merge (cascade save) for the
+     * same identity, which throws ObjectDeletedException("deleted object would be re-saved by
+     * cascade"). Reconciling by field name — update existing rows in place, remove only what's
+     * genuinely dropped, add only what's genuinely new — avoids that collision entirely.
+     */
+    private void reconcileEntries(FieldGroup group, List<FieldGroupRequest.FieldGroupEntryRequest> entryReqs) {
+        Map<String, FieldGroupEntry> existingByFieldName = group.getEntries().stream()
+                .collect(Collectors.toMap(e -> e.getField().getName(), e -> e));
+        Set<String> requestedFieldNames = entryReqs.stream()
+                .map(FieldGroupRequest.FieldGroupEntryRequest::fieldName)
+                .collect(Collectors.toSet());
+
+        group.getEntries().removeIf(e -> !requestedFieldNames.contains(e.getField().getName()));
+
+        for (FieldGroupRequest.FieldGroupEntryRequest er : entryReqs) {
+            FieldGroupEntry existing = existingByFieldName.get(er.fieldName());
+            if (existing != null) {
+                existing.setDisplayOrder(er.displayOrder());
+                existing.setRequired(er.required());
+            } else {
+                FieldDefinition field = fieldRepo.findByNameAndTenantIdIsNull(er.fieldName())
+                        .orElseThrow(() -> new ResourceNotFoundException("FieldDefinition", er.fieldName()));
+                FieldGroupEntry entry = new FieldGroupEntry();
+                entry.setFieldGroup(group);
+                entry.setField(field);
+                entry.setDisplayOrder(er.displayOrder());
+                entry.setRequired(er.required());
+                group.getEntries().add(entry);
+            }
+        }
     }
 
     @Transactional
@@ -69,6 +112,7 @@ public class FieldGroupService {
         FieldGroup group = findById(id);
         group.setActive(false);
         fieldGroupRepo.save(group);
+        listingTypeService.evictSchemaCacheForFieldGroup(id);
     }
 
     private FieldGroup findById(UUID id) {

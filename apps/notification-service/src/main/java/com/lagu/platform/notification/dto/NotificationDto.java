@@ -17,8 +17,11 @@ public class NotificationDto {
     private String  channel;
     private UUID    recordId;
     private String  objectType;
+    private UUID    triggerId;
     private String  triggerName;
     private boolean read;
     private OffsetDateTime readAt;
+    private boolean emailSent;
+    private OffsetDateTime emailSentAt;
     private OffsetDateTime createdAt;
 }

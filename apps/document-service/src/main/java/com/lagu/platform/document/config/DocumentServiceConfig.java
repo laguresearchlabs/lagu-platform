@@ -6,6 +6,7 @@ import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 
@@ -33,11 +34,24 @@ public class DocumentServiceConfig {
     }
 
     // DocumentTypeRegistry uses RestTemplate (not RestClient) — @LoadBalanced attaches
-    // the load-balancer interceptor directly to this bean.
+    // the load-balancer interceptor directly to this bean. Also needs the same
+    // X-Internal-Service/X-Platform-Gateway-Secret trust headers as imageRestClient below —
+    // without them, schema-registry's GatewayHeaderFilter treats the call as unauthenticated
+    // and DocumentTypeRegistry.refresh() gets a 401, silently falling back to the hardcoded
+    // generic/HR document-type list forever (this is what happened here).
     @Bean
     @LoadBalanced
-    public RestTemplate loadBalancedRestTemplate() {
-        return new RestTemplate();
+    public RestTemplate loadBalancedRestTemplate(
+            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
+            String gatewaySharedSecret) {
+        RestTemplate template = new RestTemplate();
+        ClientHttpRequestInterceptor internalAuth = (request, body, execution) -> {
+            request.getHeaders().set("X-Internal-Service", "document-service");
+            request.getHeaders().set("X-Platform-Gateway-Secret", gatewaySharedSecret);
+            return execution.execute(request, body);
+        };
+        template.getInterceptors().add(internalAuth);
+        return template;
     }
 
     @Bean

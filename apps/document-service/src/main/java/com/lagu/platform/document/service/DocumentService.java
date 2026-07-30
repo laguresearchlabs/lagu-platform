@@ -38,10 +38,11 @@ public class DocumentService {
     public DocumentDto upload(MultipartFile file,
                               String documentType,
                               String identitySubType,
-                              LocalDate expiryDate) {
+                              LocalDate expiryDate,
+                              String listingType) {
         PlatformSecurityContext ctx = requireContext();
 
-        validateDocumentType(documentType, identitySubType);
+        validateDocumentType(documentType, identitySubType, listingType);
         validateFile(file);
 
         String fileUrl = storageService.upload(file, ctx.getUserId(), documentType);
@@ -302,8 +303,8 @@ public class DocumentService {
         return base.length() > 255 ? base.substring(base.length() - 255) : base;
     }
 
-    private void validateDocumentType(String documentType, String identitySubType) {
-        Set<String> validTypes = docTypeRegistry.validCodes();
+    private void validateDocumentType(String documentType, String identitySubType, String listingType) {
+        Set<String> validTypes = docTypeRegistry.validCodes(listingType);
 
         if (!validTypes.contains(documentType.toUpperCase())) {
             throw new com.lagu.platform.common.exception.ValidationException(

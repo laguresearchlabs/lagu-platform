@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -29,4 +30,12 @@ public interface RecordRepository extends JpaRepository<Record, UUID> {
                                                     String status, Pageable pageable);
 
     Page<Record> findByTenantIdAndObjectType(UUID tenantId, String objectType, Pageable pageable);
+
+    /** Platform-admin cross-tenant listing — see RecordService.list(). Null status excludes
+     *  DELETED (matching findByTenantIdAndObjectTypeAndStatusNot's default-view semantics); an
+     *  explicit status matches exactly, DELETED included if that's what was asked for. */
+    @Query("SELECT r FROM Record r WHERE r.objectType = :objectType " +
+           "AND ((:status IS NULL AND r.status != 'DELETED') OR r.status = :status) " +
+           "ORDER BY r.createdAt DESC")
+    Page<Record> searchAdmin(@Param("objectType") String objectType, @Param("status") String status, Pageable pageable);
 }

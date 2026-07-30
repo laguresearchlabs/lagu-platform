@@ -1,6 +1,7 @@
 package com.lagu.platform.vendor.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
+import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.vendor.dto.*;
@@ -66,10 +67,13 @@ public class VendorController {
     // ── Admin endpoints ──────────────────────────────────────────────────────
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<VendorProfileResponse>>> list(
-            @RequestParam(defaultValue = "SUBMITTED") String status) {
+    public ResponseEntity<ApiResponse<PageResult<VendorProfileResponse>>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
         requireAdmin();
-        return ResponseEntity.ok(ApiResponse.ok(vendorService.listByStatus(status)));
+        return ResponseEntity.ok(ApiResponse.ok(vendorService.listForAdmin(status, search, page, size)));
     }
 
     /** Admin changes vendor status (approve/suspend/reject). */

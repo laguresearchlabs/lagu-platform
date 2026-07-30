@@ -34,10 +34,13 @@ public class DocumentController {
      *
      * Required params: file, documentType
      * Optional params: identitySubType (required when documentType=IDENTITY_PROOF),
-     *                  expiryDate (ISO date, e.g. 2030-01-15)
+     *                  expiryDate (ISO date, e.g. 2030-01-15),
+     *                  listingType (e.g. "VENDOR" — unlocks that listing type's own document
+     *                  types, such as PAN_CARD/GST_CERTIFICATE/BANK_CANCELLED_CHEQUE, in addition
+     *                  to the generic/HR set; omit for the historical generic-only behavior)
      *
-     * Document types: RESUME | IDENTITY_PROOF | PHOTOGRAPH |
-     *                 ACADEMIC_CERTIFICATE | ADDRESS_PROOF | OTHER
+     * Valid documentType values depend on listingType — see GET /submission-status or
+     * schema-registry's GET /api/v1/document-requirements/catalog for the full set.
      *
      * Identity sub-types: AADHAAR | PASSPORT | DRIVING_LICENSE | VOTER_ID | PAN_CARD
      */
@@ -48,9 +51,10 @@ public class DocumentController {
             @RequestParam("documentType")                                 String documentType,
             @RequestParam(value = "identitySubType", required = false)    String identitySubType,
             @RequestParam(value = "expiryDate",      required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)                LocalDate expiryDate) {
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)                LocalDate expiryDate,
+            @RequestParam(value = "listingType",     required = false)    String listingType) {
 
-        DocumentDto dto = service.upload(file, documentType, identitySubType, expiryDate);
+        DocumentDto dto = service.upload(file, documentType, identitySubType, expiryDate, listingType);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(dto));
     }
 

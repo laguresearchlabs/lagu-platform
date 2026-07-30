@@ -45,12 +45,17 @@ public class RecordService {
     }
 
     public PageResult<RecordResponse> list(String objectType, String status, int page, int size) {
-        UUID tenantId = requireTenantContext().getTenantId();
         PageRequest pageReq = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        String type = objectType.toUpperCase();
 
-        var results = (status != null)
-                ? recordRepository.findByTenantIdAndObjectTypeAndStatus(tenantId, objectType.toUpperCase(), status, pageReq)
-                : recordRepository.findByTenantIdAndObjectTypeAndStatusNot(tenantId, objectType.toUpperCase(), "DELETED", pageReq);
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        // findByTenantId...(null, ...) would silently match nothing, not "every tenant" — a
+        // platform admin (who has no tenant of their own) needs the genuinely unscoped query.
+        var results = (ctx != null && ctx.isPlatformAdmin())
+                ? recordRepository.searchAdmin(type, status, pageReq)
+                : (status != null)
+                    ? recordRepository.findByTenantIdAndObjectTypeAndStatus(requireTenantContext().getTenantId(), type, status, pageReq)
+                    : recordRepository.findByTenantIdAndObjectTypeAndStatusNot(requireTenantContext().getTenantId(), type, "DELETED", pageReq);
 
         return PageResult.from(results.map(this::toResponse));
     }
