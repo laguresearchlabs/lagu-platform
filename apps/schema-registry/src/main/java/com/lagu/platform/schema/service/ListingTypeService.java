@@ -239,11 +239,22 @@ public class ListingTypeService {
     }
 
     private FieldGroupResponse toFieldGroupResponse(FieldGroup fg) {
-        List<FieldResponse> fields = fg.getEntries().stream()
+        List<FieldGroupEntry> ordered = fg.getEntries().stream()
                 .sorted(java.util.Comparator.comparingInt(FieldGroupEntry::getDisplayOrder))
+                .toList();
+        List<FieldResponse> fields = ordered.stream()
                 .map(entry -> toFieldResponse(entry.getField()))
                 .toList();
-        return new FieldGroupResponse(fg.getId(), fg.getName(), fg.getLabel(), fg.getDescription(), fields);
+        return new FieldGroupResponse(fg.getId(), fg.getName(), fg.getLabel(), fg.getDescription(),
+                fields, toEntryResponses(ordered));
+    }
+
+    /** Per-placement data the global FieldResponse cannot carry — see FieldGroupResponse.entries. */
+    static List<FieldGroupResponse.EntryResponse> toEntryResponses(List<FieldGroupEntry> ordered) {
+        return ordered.stream()
+                .map(e -> new FieldGroupResponse.EntryResponse(
+                        e.getField().getName(), e.getDisplayOrder(), e.isRequired(), e.getVisibleWhen()))
+                .toList();
     }
 
     private FieldResponse toFieldResponse(FieldDefinition f) {

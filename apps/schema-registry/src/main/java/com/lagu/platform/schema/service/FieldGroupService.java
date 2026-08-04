@@ -140,10 +140,13 @@ public class FieldGroupService {
     }
 
     public FieldGroupResponse toResponse(FieldGroup fg) {
-        List<FieldResponse> fields = fg.getEntries().stream()
+        List<FieldGroupEntry> ordered = fg.getEntries().stream()
                 .sorted(java.util.Comparator.comparingInt(FieldGroupEntry::getDisplayOrder))
+                .toList();
+        List<FieldResponse> fields = ordered.stream()
                 .map(e -> fieldService.toResponse(e.getField()))
                 .toList();
-        return new FieldGroupResponse(fg.getId(), fg.getName(), fg.getLabel(), fg.getDescription(), fields);
+        return new FieldGroupResponse(fg.getId(), fg.getName(), fg.getLabel(), fg.getDescription(),
+                fields, ListingTypeService.toEntryResponses(ordered));
     }
 }
