@@ -346,9 +346,13 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         ensureFieldGroup("event_schedule",      "Schedule",
             List.of(fge("start_datetime",0,true), fge("end_datetime",1,true), fge("timezone",2,false)));
 
+        // The two virtual_meeting_* fields are meaningless for an in-person event, so they only
+        // appear once is_virtual is set. This group is shared by WEDDING_EVENT and BIRTHDAY_EVENT
+        // and the rule applies in both, which is the intent — see ADR-19 on rule placement.
         ensureFieldGroup("event_visibility",    "Visibility",
             List.of(fge("visibility",0,false), fge("is_virtual",1,false),
-                    fge("virtual_meeting_provider",2,false), fge("virtual_meeting_url",3,false),
+                    fge("virtual_meeting_provider",2,false, visibleWhenTruthy("is_virtual")),
+                    fge("virtual_meeting_url",3,false, visibleWhenTruthy("is_virtual")),
                     fge("post_approval_required",4,false)));
 
         ensureFieldGroup("event_style_preferences","Style & Preferences",
@@ -452,7 +456,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("contact_details",         "Contact",          7),
                 sec("address",                 "Address",          8),
                 sec("media",                   "Media",            9)
-            ), false, false);
+            ), false, false, ListingTypeKind.EVENT, "💍", "rose");
 
         ensureListingType("CORPORATE_EVENT","Corporate Event","Corporate and business event management",
             List.of(
@@ -460,7 +464,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("corporate_details", "Corporate Details", 1),
                 sec("contact_details",   "Contact",           2),
                 sec("media",             "Media",             3)
-            ), false, false);
+            ), false, false, ListingTypeKind.EVENT, "🏢", "sky");
 
         ensureListingType("BIRTHDAY_EVENT", "Birthday Event", "Birthday party planning and management",
             List.of(
@@ -473,16 +477,19 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("event_planning_tools",    "Planning Tools",   6),
                 sec("address",                 "Address",          7),
                 sec("media",                   "Media",            8)
-            ), false, false);
+            ), false, false, ListingTypeKind.EVENT, "🎂", "amber");
 
         ensureListingType("EVENT_POST", "Event Post", "A post in an event's social feed",
-            List.of(sec("event_post_details", "Post", 0)), false, false);
+            List.of(sec("event_post_details", "Post", 0)), false, false,
+            ListingTypeKind.SOCIAL, null, null);
 
         ensureListingType("EVENT_COMMENT", "Event Comment", "A comment on an event post",
-            List.of(sec("event_comment_details", "Comment", 0)), false, false);
+            List.of(sec("event_comment_details", "Comment", 0)), false, false,
+            ListingTypeKind.SOCIAL, null, null);
 
         ensureListingType("EVENT_POST_REPORT", "Event Post Report", "A user report against an event post",
-            List.of(sec("event_post_report_details", "Report", 0)), false, false);
+            List.of(sec("event_post_report_details", "Report", 0)), false, false,
+            ListingTypeKind.SOCIAL, null, null);
 
         ensureListingType("VENDOR",         "Vendor",         "Vendor business profile and KYC information",
             List.of(
@@ -718,6 +725,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 entry.setField(fd);
                 entry.setDisplayOrder(spec.displayOrder());
                 entry.setRequired(spec.required());
+                entry.setVisibleWhen(spec.visibleWhen());
                 entries.add(entry);
             });
         }
@@ -729,12 +737,29 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     private void ensureListingType(String name, String label, String description,
                                    List<SecSpec> sections, boolean publishable,
                                    boolean consumerSearchable) {
+        ensureListingType(name, label, description, sections, publishable, consumerSearchable,
+                ListingTypeKind.LISTING, null, null);
+    }
+
+    /**
+     * Presentation-aware overload. {@code icon} and {@code color} are what clients render a type
+     * with — events-ui reads them instead of keeping its own per-event-type lookup, so a new
+     * admin-authored event type gets an icon and a colour with no frontend change. {@code color}
+     * is a palette token ("rose", "amber"), not a CSS value; the client owns the actual shades.
+     */
+    private void ensureListingType(String name, String label, String description,
+                                   List<SecSpec> sections, boolean publishable,
+                                   boolean consumerSearchable, ListingTypeKind kind,
+                                   String icon, String color) {
         if (listingTypeRepo.findByNameAndTenantIdIsNull(name).isPresent()) return;
 
         ListingTypeDefinition def = new ListingTypeDefinition();
         def.setName(name);
         def.setLabel(label);
         def.setDescription(description);
+        def.setKind(kind);
+        def.setIcon(icon);
+        def.setColor(color);
         def.setPublishable(publishable);
         def.setConsumerSearchable(consumerSearchable);
 
@@ -776,7 +801,19 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     }
 
     private FgeSpec fge(String fieldName, int displayOrder, boolean required) {
-        return new FgeSpec(fieldName, displayOrder, required);
+        return new FgeSpec(fieldName, displayOrder, required, null);
+    }
+
+    /** Field group entry carrying a conditional-visibility rule — see {@link #visibleWhenTruthy}. */
+    private FgeSpec fge(String fieldName, int displayOrder, boolean required,
+                        Map<String, Object> visibleWhen) {
+        return new FgeSpec(fieldName, displayOrder, required, visibleWhen);
+    }
+
+    /** {@code {"all":[{"field":<field>,"op":"truthy"}]}} — the rule shape from ADR-18. Note the
+     *  rule travels with the field group, so it applies in every listing type composing it. */
+    private static Map<String, Object> visibleWhenTruthy(String field) {
+        return Map.of("all", List.of(Map.of("field", field, "op", "truthy")));
     }
 
     private SecSpec sec(String groupName, String label, int order) {
@@ -786,7 +823,8 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     private record FieldSpec(String name, String label, FieldType fieldType,
                               boolean required, boolean searchable, List<String> enumValues) {}
 
-    private record FgeSpec(String fieldName, int displayOrder, boolean required) {}
+    private record FgeSpec(String fieldName, int displayOrder, boolean required,
+                           Map<String, Object> visibleWhen) {}
 
     private record SecSpec(String groupName, String label, int order) {}
 

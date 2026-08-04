@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.record.client.MetadataClient;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordAudit;
 import com.lagu.platform.record.domain.RecordAuditRepository;
@@ -36,6 +37,9 @@ public class RecordService {
     private final RecordAuditRepository auditRepository;
     private final RecordVerificationRepository verificationRepository;
     private final RecordValidator validator;
+    /** Only for stamping schemaVersion at create; the lookup is @Cacheable, so validation having
+     *  already resolved the same schema means this does not cost another call. */
+    private final MetadataClient metadataClient;
     private final RecordEventPublisher eventPublisher;
 
     public RecordResponse getById(UUID id) {
@@ -77,8 +81,11 @@ public class RecordService {
         Record record = new Record();
         record.setTenantId(ctx.getTenantId());
         record.setObjectType(req.getObjectType().toUpperCase());
+        // Stamped once, at create. Validation above has already resolved this schema, so this
+        // reads from the same cached copy rather than fetching again.
+        record.setSchemaVersion(currentSchemaVersion(req.getObjectType().toUpperCase()));
         record.setStatus(req.getStatus() != null ? req.getStatus().toUpperCase() : "DRAFT");
-        record.setData(req.getData());
+        record.setData(validator.stripHiddenFields(req.getObjectType(), req.getData()));
         record.setCreatedBy(ctx.getUserId());
         record.setUpdatedBy(ctx.getUserId());
 
@@ -88,6 +95,13 @@ public class RecordService {
         return toResponse(saved);
     }
 
+    /** The version a record is stamped with on create and re-stamped with on every successful
+     *  write. The lookup is @Cacheable, so validation having just resolved the same schema means
+     *  this costs nothing. */
+    private int currentSchemaVersion(String objectType) {
+        return metadataClient.getSchema(objectType).version();
+    }
+
     @Transactional
     public RecordResponse update(UUID id, UpdateRecordRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
@@ -95,7 +109,12 @@ public class RecordService {
         validator.validate(record.getObjectType(), req.getData());
 
         Map<String, Object> oldData = new HashMap<>(record.getData());
-        record.setData(req.getData());
+        record.setData(validator.stripHiddenFields(record.getObjectType(), req.getData()));
+        // Validation above ran against the live schema, so a successful save means the data now
+        // satisfies it — move the record forward rather than leaving it pinned to the version it
+        // was created under. Records that cannot satisfy a new requirement fail validation above
+        // and are never re-stamped.
+        record.setSchemaVersion(currentSchemaVersion(record.getObjectType()));
         record.setUpdatedBy(ctx != null ? ctx.getUserId() : null);
 
         Record saved = recordRepository.save(record);
@@ -114,7 +133,8 @@ public class RecordService {
         validator.validate(record.getObjectType(), merged);
 
         Map<String, Object> oldData = new HashMap<>(record.getData());
-        record.setData(merged);
+        record.setData(validator.stripHiddenFields(record.getObjectType(), merged));
+        record.setSchemaVersion(currentSchemaVersion(record.getObjectType()));
         record.setUpdatedBy(ctx != null ? ctx.getUserId() : null);
 
         Record saved = recordRepository.save(record);
@@ -220,6 +240,7 @@ public class RecordService {
                 .id(r.getId())
                 .tenantId(r.getTenantId())
                 .objectType(r.getObjectType())
+                .schemaVersion(r.getSchemaVersion())
                 .status(r.getStatus())
                 .data(r.getData())
                 .createdBy(r.getCreatedBy())

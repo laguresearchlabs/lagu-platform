@@ -36,11 +36,24 @@ public class ListingTypeController {
         return ResponseEntity.ok(ApiResponse.ok(listingTypeService.getByName(name)));
     }
 
+    /**
+     * The resolved field schema. Without {@code version} this is the live schema; with it, the
+     * immutable snapshot published as that version — which is what lets an existing record be
+     * edited against the schema it was actually authored under (ADR-11) rather than whatever has
+     * been published since.
+     */
     @GetMapping("/{name}/schema")
-    public ResponseEntity<ApiResponse<ListingTypeSchemaDto>> getSchema(@PathVariable String name) {
-        return ResponseEntity.ok(ApiResponse.ok(listingTypeService.getSchema(name)));
+    public ResponseEntity<ApiResponse<ListingTypeSchemaDto>> getSchema(
+            @PathVariable String name,
+            @RequestParam(required = false) Integer version) {
+        ListingTypeSchemaDto schema = version == null
+                ? listingTypeService.getSchema(name)
+                : schemaVersionService.getSchemaAtVersion(name, version);
+        return ResponseEntity.ok(ApiResponse.ok(schema));
     }
 
+    /** Publish metadata for a version (classification, summary, who published it) — not the
+     *  schema itself; use {@code GET /{name}/schema?version=N} for that. */
     @GetMapping("/{name}/schema/version/{version}")
     public ResponseEntity<ApiResponse<SchemaVersionResponse>> getSchemaVersion(
             @PathVariable String name,

@@ -94,6 +94,7 @@ public class FieldGroupService {
             if (existing != null) {
                 existing.setDisplayOrder(er.displayOrder());
                 existing.setRequired(er.required());
+                existing.setVisibleWhen(ListingTypeService.validatedRule(er.visibleWhen(), "field " + er.fieldName()));
             } else {
                 FieldDefinition field = fieldRepo.findByNameAndTenantIdIsNull(er.fieldName())
                         .orElseThrow(() -> new ResourceNotFoundException("FieldDefinition", er.fieldName()));
@@ -102,6 +103,7 @@ public class FieldGroupService {
                 entry.setField(field);
                 entry.setDisplayOrder(er.displayOrder());
                 entry.setRequired(er.required());
+                entry.setVisibleWhen(ListingTypeService.validatedRule(er.visibleWhen(), "field " + er.fieldName()));
                 group.getEntries().add(entry);
             }
         }
@@ -131,6 +133,7 @@ public class FieldGroupService {
             entry.setField(field);
             entry.setDisplayOrder(er.displayOrder());
             entry.setRequired(er.required());
+            entry.setVisibleWhen(ListingTypeService.validatedRule(er.visibleWhen(), "field " + er.fieldName()));
             entries.add(entry);
         }
         return entries;

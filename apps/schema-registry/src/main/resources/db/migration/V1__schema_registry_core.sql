@@ -80,6 +80,11 @@ CREATE TABLE field_group_entry (
     field_id        UUID    NOT NULL REFERENCES field_definition(id),
     display_order   INT     NOT NULL DEFAULT 0,
     is_required     BOOLEAN NOT NULL DEFAULT false,   -- can override field_definition.is_required
+    -- Conditional visibility rule; NULL = always visible. Lives here rather than on
+    -- field_definition because that row is tenant-global and shared across groups, so a
+    -- type-specific rule there would leak into every listing type reusing the field. See ADR-19
+    -- in todo/17-conditional-field-visibility.md.
+    visible_when    JSONB,
     PRIMARY KEY (field_group_id, field_id)
 );
 
@@ -95,6 +100,12 @@ CREATE TABLE listing_type_definition (
     description             TEXT,
     icon                    VARCHAR(100),
     color                   VARCHAR(20),
+
+    -- What this type *is*, so consumers can select types without parsing the name.
+    -- LISTING = marketplace listing (VENUE, PHOTOGRAPHER, ...), EVENT = a planned event
+    -- (WEDDING_EVENT, ...), SOCIAL = a sub-object of an event (EVENT_POST, EVENT_COMMENT).
+    -- Distinct from category_definition, which classifies listings *within* a type.
+    kind                    VARCHAR(20)  NOT NULL DEFAULT 'LISTING',
 
     -- Lifecycle flags
     is_publishable          BOOLEAN      NOT NULL DEFAULT false, -- has consumer-facing snapshots
@@ -124,6 +135,7 @@ CREATE TABLE listing_type_section (
     section_key     VARCHAR(100) NOT NULL,                  -- URL-safe key used in PATCH /sections/{key}
     display_order   INT          NOT NULL DEFAULT 0,
     is_collapsible  BOOLEAN      NOT NULL DEFAULT false,
+    visible_when    JSONB,                                  -- NULL = always visible; hides all its fields
 
     CONSTRAINT uq_section_key_type UNIQUE (listing_type_id, section_key)
 );

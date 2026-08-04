@@ -4,6 +4,10 @@ CREATE TABLE record (
     object_type VARCHAR(100) NOT NULL,
     status      VARCHAR(50)  NOT NULL DEFAULT 'DRAFT',
     data        JSONB        NOT NULL DEFAULT '{}',
+    -- Schema version this record was created against (ADR-11). Lets an edit be validated and
+    -- rendered against the schema the record was actually authored under, rather than whatever
+    -- has been published since. 0 = created before versions were stamped.
+    schema_version INTEGER   NOT NULL DEFAULT 0,
     created_by  UUID,
     updated_by  UUID,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),

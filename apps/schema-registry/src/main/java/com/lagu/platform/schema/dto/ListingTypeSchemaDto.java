@@ -14,7 +14,9 @@ public record ListingTypeSchemaDto(
             String sectionKey,
             String label,
             int displayOrder,
-            List<FieldSchemaDto> fields
+            List<FieldSchemaDto> fields,
+            /** Conditional visibility rule; null = always visible. See ADR-18. */
+            Map<String, Object> visibleWhen
     ) {}
 
     public record FieldSchemaDto(
@@ -30,6 +32,8 @@ public record ListingTypeSchemaDto(
             boolean arrayManageable,
             List<String> enumValues,
             List<Map<String, Object>> itemSchema,
-            Map<String, Object> validationRules
+            Map<String, Object> validationRules,
+            /** Conditional visibility rule; null = always visible. Independent of its section's. */
+            Map<String, Object> visibleWhen
     ) {}
 }

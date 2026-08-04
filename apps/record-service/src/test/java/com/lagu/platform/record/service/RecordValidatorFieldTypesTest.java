@@ -108,8 +108,19 @@ class RecordValidatorFieldTypesTest {
     // ---- FILE / IMAGE ----
 
     @Test
-    void imageRejectsBlankValue() {
-        assertRejects(field("cover_image", "IMAGE", false, null, null), "   ", "non-empty file/image URL");
+    void imageRejectsNonStringValue() {
+        assertRejects(field("cover_image", "IMAGE", false, null, null), 12345, "non-empty file/image URL");
+    }
+
+    @Test
+    void blankValueOnAnOptionalFieldIsAcceptedRatherThanTypeChecked() {
+        // validate() skips type validation for a blank value on a non-required field, so
+        // validateFileOrImage's own blank branch is unreachable from here: a *required* blank is
+        // caught earlier by the required check, and an *optional* blank means "not provided".
+        // This previously read as imageRejectsBlankValue and asserted an outcome no input can
+        // produce. If blank-but-present should ever become an error, validate()'s early continue
+        // is what has to change, not this validator.
+        validate(field("cover_image", "IMAGE", false, null, null), "   ");
     }
 
     @Test

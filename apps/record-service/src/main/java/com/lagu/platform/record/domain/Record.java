@@ -32,6 +32,14 @@ public class Record {
     @Column(name = "object_type", nullable = false, length = 100)
     private String objectType;
 
+    /**
+     * The schema version this record was authored against (ADR-11). Stamped at create and never
+     * changed, so an edit can be validated and rendered against the schema the user actually saw
+     * rather than whatever has been published since. 0 = created before versions were stamped.
+     */
+    @Column(name = "schema_version", nullable = false)
+    private int schemaVersion;
+
     @Column(nullable = false, length = 50)
     private String status = "DRAFT";
 

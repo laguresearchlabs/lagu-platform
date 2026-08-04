@@ -16,6 +16,8 @@ public class RecordResponse {
     private UUID   id;
     private UUID   tenantId;
     private String objectType;
+    /** Schema version this record was authored against (ADR-11). */
+    private int    schemaVersion;
     private String status;
     private Map<String, Object> data;
     private UUID   createdBy;

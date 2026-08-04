@@ -41,6 +41,12 @@ public class ListingTypeDefinition {
     @Column(length = 20)
     private String color;
 
+    /** What this type is — see {@link ListingTypeKind}. Defaults to LISTING so an unclassified
+     *  admin-authored type behaves as an ordinary marketplace listing rather than an event. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ListingTypeKind kind = ListingTypeKind.LISTING;
+
     @Column(name = "is_publishable")
     private boolean publishable = false;
 

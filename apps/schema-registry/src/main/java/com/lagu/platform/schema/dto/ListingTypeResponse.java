@@ -1,5 +1,7 @@
 package com.lagu.platform.schema.dto;
 
+import com.lagu.platform.schema.domain.ListingTypeKind;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -10,6 +12,7 @@ public record ListingTypeResponse(
         String description,
         String icon,
         String color,
+        ListingTypeKind kind,
         boolean publishable,
         boolean consumerSearchable,
         boolean active,

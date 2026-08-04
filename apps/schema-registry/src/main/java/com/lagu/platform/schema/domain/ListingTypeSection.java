@@ -3,7 +3,10 @@ package com.lagu.platform.schema.domain;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -36,4 +39,10 @@ public class ListingTypeSection {
 
     @Column(name = "is_collapsible")
     private boolean collapsible = false;
+
+    /** Conditional visibility rule for this section; null = always visible. A hidden section
+     *  takes all of its fields with it. Scoped per listing type, unlike a field group entry's. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "visible_when", columnDefinition = "jsonb")
+    private Map<String, Object> visibleWhen;
 }

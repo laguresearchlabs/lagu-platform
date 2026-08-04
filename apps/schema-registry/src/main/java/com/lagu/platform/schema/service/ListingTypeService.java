@@ -1,6 +1,8 @@
 package com.lagu.platform.schema.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
+import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.common.visibility.VisibilityRules;
 import com.lagu.platform.schema.domain.*;
 import com.lagu.platform.schema.dto.*;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -54,6 +57,7 @@ public class ListingTypeService {
         def.setDescription(req.description());
         def.setIcon(req.icon());
         def.setColor(req.color());
+        def.setKind(req.kind() != null ? req.kind() : ListingTypeKind.LISTING);
         def.setPublishable(req.publishable());
         def.setConsumerSearchable(req.consumerSearchable());
 
@@ -69,6 +73,7 @@ public class ListingTypeService {
                 sec.setSectionKey(secReq.sectionKey());
                 sec.setDisplayOrder(secReq.displayOrder());
                 sec.setCollapsible(secReq.collapsible());
+                sec.setVisibleWhen(validatedRule(secReq.visibleWhen(), "section " + secReq.sectionKey()));
                 sections.add(sec);
             }
             def.setSections(sections);
@@ -94,6 +99,7 @@ public class ListingTypeService {
         sec.setSectionKey(secReq.sectionKey());
         sec.setDisplayOrder(secReq.displayOrder());
         sec.setCollapsible(secReq.collapsible());
+        sec.setVisibleWhen(validatedRule(secReq.visibleWhen(), "section " + secReq.sectionKey()));
         def.getSections().add(sec);
 
         ListingTypeDefinition saved = listingTypeRepo.save(def);
@@ -109,6 +115,7 @@ public class ListingTypeService {
         def.setDescription(req.description());
         def.setIcon(req.icon());
         def.setColor(req.color());
+        if (req.kind() != null) def.setKind(req.kind());
         def.setPublishable(req.publishable());
         def.setConsumerSearchable(req.consumerSearchable());
         ListingTypeDefinition saved = listingTypeRepo.save(def);
@@ -147,6 +154,22 @@ public class ListingTypeService {
         log.info("Deactivated ListingTypeDefinition id={}", id);
     }
 
+    /**
+     * Rejects a malformed rule at the point of authoring rather than letting it reach the
+     * database, where it would silently evaluate as "always visible" on every read.
+     * Cross-field checks (does the referenced field exist? is there a cycle?) can only be done
+     * against a whole listing type, so those live in {@link SchemaRuleValidator} at publish time.
+     */
+    static Map<String, Object> validatedRule(Map<String, Object> rule, String where) {
+        if (rule == null || rule.isEmpty()) return null;
+        try {
+            VisibilityRules.parseStrict(rule);
+        } catch (IllegalArgumentException e) {
+            throw new ValidationException("Invalid visibleWhen on " + where + ": " + e.getMessage());
+        }
+        return rule;
+    }
+
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
     public ListingTypeSchemaDto toSchemaDto(ListingTypeDefinition def) {
@@ -169,7 +192,8 @@ public class ListingTypeService {
                                         f.isArrayManageable(),
                                         f.getEnumValues(),
                                         f.getItemSchema(),
-                                        f.getValidationRules()
+                                        f.getValidationRules(),
+                                        entry.getVisibleWhen()
                                 );
                             })
                             .toList();
@@ -177,7 +201,8 @@ public class ListingTypeService {
                             sec.getSectionKey(),
                             sec.getLabel() != null ? sec.getLabel() : sec.getFieldGroup().getLabel(),
                             sec.getDisplayOrder(),
-                            fields
+                            fields,
+                            sec.getVisibleWhen()
                     );
                 })
                 .toList();
@@ -204,6 +229,7 @@ public class ListingTypeService {
                 def.getDescription(),
                 def.getIcon(),
                 def.getColor(),
+                def.getKind(),
                 def.isPublishable(),
                 def.isConsumerSearchable(),
                 def.isActive(),

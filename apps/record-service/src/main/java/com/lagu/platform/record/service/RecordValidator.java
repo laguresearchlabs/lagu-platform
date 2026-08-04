@@ -1,6 +1,7 @@
 package com.lagu.platform.record.service;
 
 import com.lagu.platform.common.exception.ValidationException;
+import com.lagu.platform.common.visibility.VisibilityRules;
 import com.lagu.platform.record.client.MetadataClient;
 import com.lagu.platform.record.client.MetadataClient.FieldSchemaDto;
 import com.lagu.platform.record.client.MetadataClient.ObjectTypeSchemaDto;
@@ -39,6 +40,12 @@ public class RecordValidator {
         List<String> errors = new ArrayList<>();
 
         for (FieldSchemaDto field : schema.fields()) {
+            // A field hidden by its own or its section's rule is not part of this record, so it
+            // can be neither required nor type-checked. Without this, a required field the user
+            // was never shown would make the record unsubmittable. Rules are evaluated against
+            // the incoming data, exactly as the client evaluated them to build the form.
+            if (!VisibilityRules.isVisible(field.visibleWhen(), data)) continue;
+
             Object value = data.get(field.name());
 
             if (field.required() && (value == null || isBlank(value))) {
@@ -60,6 +67,33 @@ public class RecordValidator {
         if (!errors.isEmpty()) {
             throw new ValidationException(objectType, errors);
         }
+    }
+
+    /**
+     * Drops values for fields whose visibility rule is currently false.
+     *
+     * <p>Hidden means "not applicable to this record", so a hidden field's value has no business
+     * being stored. events-ui already strips these before submitting, but that is a client
+     * courtesy — a stale client, a direct API call, or a future non-web client would otherwise
+     * persist values for fields nobody can see, which would reappear if the rule later flipped
+     * back.
+     *
+     * <p>Values are removed rather than rejected: rejecting would race with schema changes, where
+     * a client holding a slightly older schema legitimately believes a field is visible.
+     *
+     * <p>Rules are evaluated against the incoming data, not the partially-stripped result, so the
+     * outcome does not depend on the order fields happen to be iterated in.
+     */
+    public Map<String, Object> stripHiddenFields(String objectType, Map<String, Object> data) {
+        ObjectTypeSchemaDto schema = metadataClient.getSchema(objectType.toUpperCase());
+        Map<String, Object> result = new java.util.HashMap<>(data);
+
+        for (FieldSchemaDto field : schema.fields()) {
+            if (!VisibilityRules.isVisible(field.visibleWhen(), data)) {
+                result.remove(field.name());
+            }
+        }
+        return result;
     }
 
     private void validateByType(FieldSchemaDto field, Object value, List<String> errors) {
