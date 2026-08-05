@@ -1,0 +1,562 @@
+{
+    "VENUE": {
+        "icon": "map-pin",
+        "color": "orange",
+        "cardPresentation": {
+            "icon": "map-pin",
+            "badges": {
+            },
+            "landing": {
+                "image": "/images/parthallsmall1.jpeg",
+                "heading": "Party Halls & Venues",
+                "tagline": "Find the perfect venue for your special event",
+                "shortName": "Party Halls",
+                "highlights": [
+                    {
+                        "icon": "map-pin",
+                        "title": "Multiple Locations",
+                        "description": "Venues across the city"
+                    },
+                    {
+                        "icon": "users",
+                        "title": "Various Capacities",
+                        "description": "From intimate to grand celebrations"
+                    },
+                    {
+                        "icon": "sparkles",
+                        "title": "Flexible Booking",
+                        "description": "Easy scheduling and management"
+                    }
+                ]
+            },
+            "urlSlug": "partyhall",
+            "metadata": [
+                {
+                    "icon": "map-pin",
+                    "field": "city",
+                    "label": "Location"
+                },
+                {
+                    "icon": "users",
+                    "unit": "guests",
+                    "field": "capacity",
+                    "label": "Capacity",
+                    "format": "suffix"
+                }
+            ],
+            "priceUnit": "per event",
+            "displayName": "Party Hall",
+            "imageGallery": {
+                "apiEndpoint": "/api/partyhalls/{id}/images",
+                "showGallery": true,
+                "fetchFromApi": true,
+                "fallbackCount": 3
+            },
+            "showPriceRange": true,
+            "expandedDetails": {
+                "sections": [
+                    {
+                        "title": "Capacity",
+                        "fields": [
+                            {
+                                "unit": "guests",
+                                "field": "capacity",
+                                "label": "Maximum Guests",
+                                "format": "suffix"
+                            },
+                            {
+                                "unit": "sq ft",
+                                "field": "area_sqft",
+                                "label": "Area",
+                                "format": "suffix"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Amenities",
+                        "fields": [
+                            {
+                                "field": "amenities",
+                                "label": "Available Amenities",
+                                "format": "enumTokens"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Pricing & Policies",
+                        "fields": [
+                            {
+                                "field": "price",
+                                "label": "Base Price",
+                                "format": "currency"
+                            },
+                            {
+                                "field": "cancellation_policy",
+                                "label": "Cancellation Policy"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "CATERER": {
+        "icon": "utensils",
+        "color": "amber",
+        "cardPresentation": {
+            "icon": "utensils",
+            "badges": {
+                "primary": {
+                    "field": "meal_types",
+                    "format": "enumTokens",
+                    "variant": "info",
+                    "position": "top-right"
+                }
+            },
+            "landing": {
+                "image": "/images/cateringsmall.jpeg",
+                "heading": "Catering Services",
+                "tagline": "Delicious catering from experienced chefs and caterers",
+                "shortName": "Catering",
+                "highlights": [
+                    {
+                        "icon": "utensils",
+                        "title": "Multiple Cuisines",
+                        "description": "North Indian, Chinese, Continental and more"
+                    },
+                    {
+                        "icon": "users",
+                        "title": "Any Guest Count",
+                        "description": "From intimate dinners to large receptions"
+                    },
+                    {
+                        "icon": "sparkles",
+                        "title": "Custom Menus",
+                        "description": "Dietary options and bespoke selections"
+                    }
+                ]
+            },
+            "urlSlug": "catering",
+            "metadata": [
+                {
+                    "icon": "map-pin",
+                    "field": "city",
+                    "label": "Location"
+                },
+                {
+                    "icon": "utensils",
+                    "field": "service_types",
+                    "label": "Service Style",
+                    "format": "enumTokens"
+                }
+            ],
+            "priceUnit": "per person",
+            "searchKeys": [
+                "cuisine_types"
+            ],
+            "displayName": "Catering Service",
+            "imageGallery": {
+                "apiEndpoint": "/api/catering-services/{id}/images",
+                "showGallery": true,
+                "fetchFromApi": true,
+                "fallbackCount": 3
+            },
+            "showPriceRange": true,
+            "expandedDetails": {
+                "sections": [
+                    {
+                        "title": "Service Details",
+                        "fields": [
+                            {
+                                "field": "service_types",
+                                "label": "Service Styles",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "field": "meal_types",
+                                "label": "Meal Types",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "field": "cuisine_types",
+                                "label": "Cuisine Specialties",
+                                "format": "enumTokens"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Capacity",
+                        "fields": [
+                            {
+                                "unit": "guests",
+                                "field": "min_guests",
+                                "label": "Minimum Guests",
+                                "format": "suffix"
+                            },
+                            {
+                                "unit": "guests",
+                                "field": "max_guests",
+                                "label": "Maximum Guests",
+                                "format": "suffix"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Pricing",
+                        "fields": [
+                            {
+                                "field": "price",
+                                "label": "Price per Person",
+                                "format": "currency"
+                            },
+                            {
+                                "field": "provides_staff",
+                                "label": "Staff Provided",
+                                "format": "boolean"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "searchPlaceholder": "Search by name, cuisine, or location..."
+        }
+    },
+    "DECORATOR": {
+        "icon": "palette",
+        "color": "rose",
+        "cardPresentation": {
+            "icon": "palette",
+            "badges": {
+                "primary": {
+                    "field": "style_types",
+                    "format": "enumTokens",
+                    "variant": "info",
+                    "position": "top-left"
+                }
+            },
+            "landing": {
+                "image": "/images/Decorator.jpg",
+                "heading": "Decoration",
+                "tagline": "Transform your venue with stunning decorations and themes",
+                "shortName": "Decoration",
+                "highlights": [
+                    {
+                        "icon": "palette",
+                        "title": "Custom Themes",
+                        "description": "Floral, modern, traditional and more"
+                    },
+                    {
+                        "icon": "sparkles",
+                        "title": "Complete Styling",
+                        "description": "Lighting, flowers and full setup"
+                    },
+                    {
+                        "icon": "users",
+                        "title": "Any Event",
+                        "description": "Weddings, birthdays and corporate events"
+                    }
+                ]
+            },
+            "urlSlug": "decoration",
+            "metadata": [
+                {
+                    "icon": "map-pin",
+                    "field": "city",
+                    "label": "Location"
+                },
+                {
+                    "icon": "palette",
+                    "field": "style_types",
+                    "label": "Styles",
+                    "format": "enumTokens"
+                }
+            ],
+            "priceUnit": "per event",
+            "searchKeys": [
+                "style_types",
+                "event_types_dec"
+            ],
+            "displayName": "Decoration Service",
+            "imageGallery": {
+                "showGallery": true,
+                "fetchFromApi": false,
+                "fallbackCount": 4
+            },
+            "showPriceRange": true,
+            "expandedDetails": {
+                "sections": [
+                    {
+                        "title": "Service Details",
+                        "fields": [
+                            {
+                                "field": "event_types_dec",
+                                "label": "Event Types",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "field": "price_per_sqft",
+                                "label": "Price per sq ft",
+                                "format": "currency",
+                                "emptyText": "Not specified"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Themes & Inclusions",
+                        "fields": [
+                            {
+                                "field": "style_types",
+                                "label": "Themes",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "field": "includes_flowers",
+                                "label": "Flowers Included",
+                                "format": "boolean"
+                            },
+                            {
+                                "field": "includes_lights",
+                                "label": "Lighting Included",
+                                "format": "boolean"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Pricing",
+                        "fields": [
+                            {
+                                "field": "price",
+                                "label": "Base Price",
+                                "format": "currency"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "PHOTOGRAPHER": {
+        "icon": "camera",
+        "color": "sky",
+        "cardPresentation": {
+            "icon": "camera",
+            "badges": {
+                "secondary": {
+                    "field": "experience_years",
+                    "label": "yrs exp",
+                    "variant": "info",
+                    "position": "top-left"
+                }
+            },
+            "landing": {
+                "image": "/images/photography.jpeg",
+                "heading": "Photography",
+                "tagline": "Capture your special moments with professional photographers",
+                "shortName": "Photography",
+                "highlights": [
+                    {
+                        "icon": "camera",
+                        "title": "Event Coverage",
+                        "description": "Weddings, portraits and corporate shoots"
+                    },
+                    {
+                        "icon": "sparkles",
+                        "title": "Quick Delivery",
+                        "description": "Edited galleries turned around fast"
+                    },
+                    {
+                        "icon": "map-pin",
+                        "title": "Travel Ready",
+                        "description": "Photographers who come to your venue"
+                    }
+                ]
+            },
+            "urlSlug": "photography",
+            "metadata": [
+                {
+                    "icon": "map-pin",
+                    "field": "city",
+                    "label": "Location"
+                },
+                {
+                    "icon": "camera",
+                    "unit": "years",
+                    "field": "experience_years",
+                    "label": "Experience",
+                    "format": "suffix"
+                }
+            ],
+            "priceUnit": "per event",
+            "searchKeys": [
+                "specializations"
+            ],
+            "displayName": "Photography Service",
+            "imageGallery": {
+                "apiEndpoint": "/api/photography-services/{id}/images",
+                "showGallery": true,
+                "fetchFromApi": true,
+                "fallbackCount": 6
+            },
+            "showPriceRange": true,
+            "expandedDetails": {
+                "sections": [
+                    {
+                        "title": "Service Details",
+                        "fields": [
+                            {
+                                "field": "specializations",
+                                "label": "Specializations",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "unit": "days",
+                                "field": "delivery_days",
+                                "label": "Delivery Time",
+                                "format": "suffix"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Equipment & Travel",
+                        "fields": [
+                            {
+                                "field": "camera_brands",
+                                "label": "Camera Brands",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "unit": "km",
+                                "field": "travel_radius_km",
+                                "label": "Travel Radius",
+                                "format": "suffix"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Pricing",
+                        "fields": [
+                            {
+                                "field": "price",
+                                "label": "Base Price",
+                                "format": "currency"
+                            },
+                            {
+                                "field": "travel_allowed",
+                                "label": "Travel Available",
+                                "format": "boolean"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "MAKEUP_ARTIST": {
+        "icon": "sparkles",
+        "color": "rose",
+        "cardPresentation": {
+            "icon": "sparkles",
+            "badges": {
+                "primary": {
+                    "field": "makeup_specializations",
+                    "format": "enumTokens",
+                    "variant": "info",
+                    "position": "top-right"
+                }
+            },
+            "landing": {
+                "image": "/images/photography.jpeg",
+                "heading": "Makeup Artists",
+                "tagline": "Bridal and party makeup from professional artists",
+                "shortName": "Makeup",
+                "highlights": [
+                    {
+                        "icon": "sparkles",
+                        "title": "Bridal & Party",
+                        "description": "Specialists for every occasion"
+                    },
+                    {
+                        "icon": "map-pin",
+                        "title": "Home Service",
+                        "description": "Artists who come to you"
+                    },
+                    {
+                        "icon": "users",
+                        "title": "Trusted Brands",
+                        "description": "MAC, Bobbi Brown, Huda and more"
+                    }
+                ]
+            },
+            "urlSlug": "makeup",
+            "metadata": [
+                {
+                    "icon": "map-pin",
+                    "field": "city",
+                    "label": "Location"
+                },
+                {
+                    "icon": "sparkles",
+                    "field": "makeup_specializations",
+                    "label": "Specializations",
+                    "format": "enumTokens"
+                }
+            ],
+            "priceUnit": "per booking",
+            "searchKeys": [
+                "makeup_specializations",
+                "brands_used"
+            ],
+            "displayName": "Makeup Artist",
+            "imageGallery": {
+                "showGallery": true,
+                "fetchFromApi": false,
+                "fallbackCount": 4
+            },
+            "showPriceRange": true,
+            "expandedDetails": {
+                "sections": [
+                    {
+                        "title": "Specializations",
+                        "fields": [
+                            {
+                                "field": "makeup_specializations",
+                                "label": "Styles",
+                                "format": "enumTokens"
+                            },
+                            {
+                                "field": "home_service",
+                                "label": "Home Service",
+                                "format": "boolean"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Products",
+                        "fields": [
+                            {
+                                "field": "brands_used",
+                                "label": "Brands Used",
+                                "format": "enumTokens"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Pricing",
+                        "fields": [
+                            {
+                                "field": "price",
+                                "label": "Base Price",
+                                "format": "currency"
+                            },
+                            {
+                                "field": "cancellation_policy",
+                                "label": "Cancellation Policy"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "searchPlaceholder": "Search makeup artists by name, specialization, or location..."
+        }
+    }
+}
