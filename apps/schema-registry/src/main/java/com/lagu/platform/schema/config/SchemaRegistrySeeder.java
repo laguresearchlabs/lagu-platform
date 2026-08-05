@@ -356,8 +356,15 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                     fge("budget_inr",4,false), fge("venue_ref",5,false),
                     fge("requires_recording",6,false), fge("requires_streaming",7,false)));
 
+        // pan_number is NOT required here. record-service validates every record against the
+        // flattened section->field schema (MetadataClient reads f.required() off these group
+        // entries, not off field_definition), so a required entry is enforced on *record
+        // creation*. vendor-service creates the VENDOR record at registration time, before any
+        // KYC data exists — it registers an empty KYC checklist and PAN is verified later via
+        // document-service — so requiring it here made every POST /api/v1/vendors/register fail
+        // with "pan_number: field is required". Enforce PAN at the KYC step, not at creation.
         ensureFieldGroup("tax_info",            "Tax Information",
-            List.of(fge("gstin",0,false), fge("pan_number",1,true),
+            List.of(fge("gstin",0,false), fge("pan_number",1,false),
                     fge("tax_registration",2,false), fge("service_tax_no",3,false)));
 
         ensureFieldGroup("bank_info",           "Bank Details",
