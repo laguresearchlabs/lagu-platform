@@ -189,6 +189,8 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("dresscode",         "Dress Code",        FieldType.TEXT,        false, false, null),
             field("menu_preference",   "Menu Preference",   FieldType.LONG_TEXT,   false, false, null),
             field("rsvp_deadline",     "RSVP Deadline",     FieldType.DATE,        false, false, null),
+            // Anniversary event specific
+            field("anniversary_years", "Years Married",     FieldType.NUMBER,      false, true,  null),
             // Birthday event specific
             field("birthday_person_name","Birthday Person", FieldType.TEXT,        true,  true,  null),
             field("birthday_person_age","Age",              FieldType.NUMBER,      false, false, null),
@@ -386,6 +388,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         ensureFieldGroup("wish_list",           "Wish List",
             List.of(fge("wish_list",0,false)));
 
+        ensureFieldGroup("anniversary_details", "Anniversary Details",
+            List.of(fge("anniversary_years",0,false)));
+
         ensureFieldGroup("birthday_details",    "Birthday Details",
             List.of(fge("birthday_person_name",0,true), fge("birthday_person_age",1,false),
                     fge("birthday_person_gender",2,false), fge("cake_preference",3,false),
@@ -501,6 +506,17 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("address",                 "Address",          7),
                 sec("media",                   "Media",            8)
             ), false, false, ListingTypeKind.EVENT, "🎂", "amber");
+
+        // Originally authored through the admin portal rather than seeded, which left it with only
+        // its custom section — its records had no name or dates and rendered as "Untitled Event".
+        // Seeded here so the type survives a database reset, leading with the basics every other
+        // event type has.
+        ensureListingType("ANNIVERSARY_EVENT", "Anniversary", "Wedding anniversary celebration",
+            List.of(
+                sec("basic_details",       "Event Overview",      0),
+                sec("event_schedule",      "Schedule",            1),
+                sec("anniversary_details", "Anniversary Details", 2)
+            ), false, false, ListingTypeKind.EVENT, "💐", "rose");
 
         ensureListingType("EVENT_POST", "Event Post", "A post in an event's social feed",
             List.of(sec("event_post_details", "Post", 0)), false, false,

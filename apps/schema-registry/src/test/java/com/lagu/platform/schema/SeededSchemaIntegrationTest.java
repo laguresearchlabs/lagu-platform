@@ -132,7 +132,7 @@ class SeededSchemaIntegrationTest {
         // Seeded from resources/seed/card-presentation.json. Without it every vendor type would
         // silently fall back to events-ui's built-in config, which is exactly the drift this
         // seed step exists to prevent.
-        for (String type : List.of("VENUE", "CATERER", "PHOTOGRAPHER", "DECORATOR")) {
+        for (String type : typesWithCardPresentation()) {
             ListingTypeResponse lt = listingTypeService.getByName(type);
 
             assertThat(lt.icon()).as("icon for %s", type).isNotBlank();
@@ -152,7 +152,7 @@ class SeededSchemaIntegrationTest {
     void everyFieldACardPresentationReferencesExistsInThatTypesSchema() {
         // A card referencing a field the type does not have renders an empty row forever. This is
         // the same class of check SchemaRuleValidator applies to visibility rules.
-        for (String type : List.of("VENUE", "CATERER", "PHOTOGRAPHER", "DECORATOR")) {
+        for (String type : typesWithCardPresentation()) {
             Set<String> known = listingTypeService.getSchema(type).sections().stream()
                     .flatMap(s -> s.fields().stream())
                     .map(ListingTypeSchemaDto.FieldSchemaDto::key)
@@ -168,6 +168,19 @@ class SeededSchemaIntegrationTest {
                         .contains(field);
             }
         }
+    }
+
+    /**
+     * Every type the seed file configures, read from the registry rather than hardcoded — so a
+     * type added to card-presentation.json is covered by these checks automatically.
+     */
+    private List<String> typesWithCardPresentation() {
+        List<String> names = listingTypeService.list().stream()
+                .filter(t -> t.config() != null && t.config().containsKey("cardPresentation"))
+                .map(ListingTypeResponse::name)
+                .toList();
+        assertThat(names).as("seeded card presentations").isNotEmpty();
+        return names;
     }
 
     /** Every `field` key a cardPresentation reads, across metadata and expanded detail sections. */
