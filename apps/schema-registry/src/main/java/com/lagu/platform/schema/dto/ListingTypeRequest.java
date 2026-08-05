@@ -14,6 +14,8 @@ public record ListingTypeRequest(
         String color,
         /** Null defaults to LISTING — an unclassified type is never silently treated as an event. */
         ListingTypeKind kind,
+        /** Client presentation config; see ListingTypeResponse.config. Null leaves it unchanged. */
+        Map<String, Object> config,
         boolean publishable,
         boolean consumerSearchable,
         List<SectionRequest> sections

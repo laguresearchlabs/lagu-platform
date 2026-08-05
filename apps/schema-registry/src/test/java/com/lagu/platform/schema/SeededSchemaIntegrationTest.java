@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -124,6 +125,67 @@ class SeededSchemaIntegrationTest {
                 .allSatisfy(t -> assertThat(t.kind()).isEqualTo(ListingTypeKind.LISTING));
         assertThat(types).filteredOn(t -> "EVENT_POST".equals(t.name()))
                 .allSatisfy(t -> assertThat(t.kind()).isEqualTo(ListingTypeKind.SOCIAL));
+    }
+
+    @Test
+    void vendorListingTypesCarryTheCardPresentationTheClientRendersFrom() {
+        // Seeded from resources/seed/card-presentation.json. Without it every vendor type would
+        // silently fall back to events-ui's built-in config, which is exactly the drift this
+        // seed step exists to prevent.
+        for (String type : List.of("VENUE", "CATERER", "PHOTOGRAPHER", "DECORATOR")) {
+            ListingTypeResponse lt = listingTypeService.getByName(type);
+
+            assertThat(lt.icon()).as("icon for %s", type).isNotBlank();
+            assertThat(lt.color()).as("colour for %s", type).isNotBlank();
+            assertThat(lt.config()).as("config for %s", type).isNotNull();
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> presentation =
+                    (Map<String, Object>) lt.config().get("cardPresentation");
+            assertThat(presentation).as("cardPresentation for %s", type).isNotNull();
+            assertThat(presentation.get("urlSlug")).as("urlSlug for %s", type).isNotNull();
+            assertThat((List<?>) presentation.get("metadata")).as("metadata for %s", type).isNotEmpty();
+        }
+    }
+
+    @Test
+    void everyFieldACardPresentationReferencesExistsInThatTypesSchema() {
+        // A card referencing a field the type does not have renders an empty row forever. This is
+        // the same class of check SchemaRuleValidator applies to visibility rules.
+        for (String type : List.of("VENUE", "CATERER", "PHOTOGRAPHER", "DECORATOR")) {
+            Set<String> known = listingTypeService.getSchema(type).sections().stream()
+                    .flatMap(s -> s.fields().stream())
+                    .map(ListingTypeSchemaDto.FieldSchemaDto::key)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> presentation = (Map<String, Object>)
+                    listingTypeService.getByName(type).config().get("cardPresentation");
+
+            for (String field : referencedFields(presentation)) {
+                assertThat(known)
+                        .as("%s's card references field '%s', which its schema does not define", type, field)
+                        .contains(field);
+            }
+        }
+    }
+
+    /** Every `field` key a cardPresentation reads, across metadata and expanded detail sections. */
+    @SuppressWarnings("unchecked")
+    private static Set<String> referencedFields(Map<String, Object> presentation) {
+        Set<String> fields = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> m : (List<Map<String, Object>>) presentation.getOrDefault("metadata", List.of())) {
+            if (m.get("field") instanceof String f) fields.add(f);
+        }
+        Map<String, Object> expanded = (Map<String, Object>) presentation.get("expandedDetails");
+        if (expanded != null) {
+            for (Map<String, Object> s : (List<Map<String, Object>>) expanded.getOrDefault("sections", List.of())) {
+                for (Map<String, Object> f : (List<Map<String, Object>>) s.getOrDefault("fields", List.of())) {
+                    if (f.get("field") instanceof String key) fields.add(key);
+                }
+            }
+        }
+        return fields;
     }
 
     @Test

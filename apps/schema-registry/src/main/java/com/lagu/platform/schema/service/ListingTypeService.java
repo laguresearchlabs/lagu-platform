@@ -58,6 +58,7 @@ public class ListingTypeService {
         def.setIcon(req.icon());
         def.setColor(req.color());
         def.setKind(req.kind() != null ? req.kind() : ListingTypeKind.LISTING);
+        def.setConfig(req.config());
         def.setPublishable(req.publishable());
         def.setConsumerSearchable(req.consumerSearchable());
 
@@ -116,6 +117,9 @@ public class ListingTypeService {
         def.setIcon(req.icon());
         def.setColor(req.color());
         if (req.kind() != null) def.setKind(req.kind());
+        // Null leaves existing presentation config alone, so a caller that does not manage it
+        // cannot wipe it by omission.
+        if (req.config() != null) def.setConfig(req.config());
         def.setPublishable(req.publishable());
         def.setConsumerSearchable(req.consumerSearchable());
         ListingTypeDefinition saved = listingTypeRepo.save(def);
@@ -230,6 +234,7 @@ public class ListingTypeService {
                 def.getIcon(),
                 def.getColor(),
                 def.getKind(),
+                def.getConfig(),
                 def.isPublishable(),
                 def.isConsumerSearchable(),
                 def.isActive(),

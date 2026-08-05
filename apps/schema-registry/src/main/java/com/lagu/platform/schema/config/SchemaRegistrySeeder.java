@@ -1,14 +1,18 @@
 package com.lagu.platform.schema.config;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.schema.domain.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.*;
 
@@ -45,6 +49,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         seedCountryValidationConfigs();
         seedCategories();
         seedRelationshipDefinitions();
+        seedCardPresentation();
         log.info("SchemaRegistrySeeder complete");
     }
 
@@ -66,6 +71,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("state",             "State",             FieldType.TEXT,        false, true,  null),
             field("country",           "Country",           FieldType.TEXT,        false, true,  null),
             field("postal_code",       "Postal Code",       FieldType.TEXT,        false, false, null),
+            field("landmark",          "Landmark",          FieldType.TEXT,        false, false, null),
             field("latitude",          "Latitude",          FieldType.DECIMAL,     false, false, null),
             field("longitude",         "Longitude",         FieldType.DECIMAL,     false, false, null),
             // Pricing
@@ -77,12 +83,14 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("tax_percent",       "Tax %",             FieldType.DECIMAL,     false, false, null),
             field("min_price",         "Min Price",         FieldType.DECIMAL,     false, false, null),
             field("max_price",         "Max Price",         FieldType.DECIMAL,     false, false, null),
+            field("cancellation_policy","Cancellation Policy", FieldType.LONG_TEXT, false, false, null),
             // Media
             field("cover_image",       "Cover Image",       FieldType.IMAGE,       false, false, null),
             field("gallery",           "Gallery",           FieldType.MULTI_SELECT,false, false, null),
             field("video_url",         "Video URL",         FieldType.URL,         false, false, null),
             // Venue specific
             field("capacity",          "Capacity",          FieldType.NUMBER,      false, true,  null),
+            field("area_sqft",         "Area (sq ft)",      FieldType.NUMBER,      false, true,  null),
             field("venue_type",        "Venue Type",        FieldType.ENUM,        false, true,
                 List.of("BANQUET_HALL","OUTDOOR","ROOFTOP","RESORT","HOTEL","FARMHOUSE","BEACH")),
             field("parking_slots",     "Parking Slots",     FieldType.NUMBER,      false, true,  null),
@@ -90,8 +98,12 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("has_dj",            "DJ Facility",       FieldType.BOOLEAN,     false, false, null),
             field("decoration",        "Decoration",        FieldType.BOOLEAN,     false, false, null),
             field("ac_available",      "AC Available",      FieldType.BOOLEAN,     false, true,  null),
+            // PROJECTOR/KITCHEN/ELEVATOR were discrete booleans on the decommissioned
+            // partyhall-service. They are amenities like any other, so they belong in this list
+            // rather than as three more BOOLEAN fields. Adding enum values is a SAFE schema change.
             field("amenities",         "Amenities",         FieldType.MULTI_SELECT,false, true,
-                List.of("WIFI","GENERATOR","VALET","SWIMMING_POOL","GYM","BAR","STAGE")),
+                List.of("WIFI","GENERATOR","VALET","SWIMMING_POOL","GYM","BAR","STAGE",
+                        "PROJECTOR","KITCHEN","ELEVATOR")),
             // Photographer specific
             field("experience_years",  "Experience (yrs)",  FieldType.NUMBER,      false, true,  null),
             field("specializations",   "Specializations",   FieldType.MULTI_SELECT,false, true,
@@ -108,6 +120,11 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 List.of("NORTH_INDIAN","SOUTH_INDIAN","CHINESE","CONTINENTAL","MUGHLAI","RAJASTHANI","MEDITERRANEAN")),
             field("meal_types",        "Meal Types",        FieldType.MULTI_SELECT,false, true,
                 List.of("VEG","NON_VEG","VEGAN","JAIN")),
+            // Replaces the decommissioned catering-service's single `serviceType` reference.
+            // Modelled as MULTI_SELECT because a caterer typically offers several styles, and to
+            // match cuisine_types/meal_types in the same group.
+            field("service_types",     "Service Styles",    FieldType.MULTI_SELECT,false, true,
+                List.of("BUFFET","PLATED","LIVE_COUNTER","FAMILY_STYLE","BOXED_MEALS","FOOD_TRUCK")),
             field("min_guests",        "Min Guests",        FieldType.NUMBER,      false, true,  null),
             field("max_guests",        "Max Guests",        FieldType.NUMBER,      false, true,  null),
             field("provides_staff",    "Staff Included",    FieldType.BOOLEAN,     false, false, null),
@@ -289,19 +306,21 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         ensureFieldGroup("address",             "Address",
             List.of(fge("address_line1",0,false), fge("address_line2",1,false), fge("city",2,false),
                     fge("state",3,false), fge("country",4,false), fge("postal_code",5,false),
-                    fge("latitude",6,false), fge("longitude",7,false)));
+                    fge("landmark",6,false),
+                    fge("latitude",7,false), fge("longitude",8,false)));
 
         ensureFieldGroup("pricing",             "Pricing",
             List.of(fge("pricing_model",0,false), fge("price",1,false), fge("currency",2,false),
-                    fge("tax_percent",3,false), fge("min_price",4,false), fge("max_price",5,false)));
+                    fge("tax_percent",3,false), fge("min_price",4,false), fge("max_price",5,false),
+                    fge("cancellation_policy",6,false)));
 
         ensureFieldGroup("media",               "Media",
             List.of(fge("cover_image",0,false), fge("gallery",1,false), fge("video_url",2,false)));
 
         ensureFieldGroup("venue_details",       "Venue Details",
-            List.of(fge("capacity",0,true), fge("venue_type",1,false), fge("parking_slots",2,false),
-                    fge("has_catering",3,false), fge("has_dj",4,false), fge("decoration",5,false),
-                    fge("ac_available",6,false), fge("amenities",7,false)));
+            List.of(fge("capacity",0,true), fge("area_sqft",1,false), fge("venue_type",2,false),
+                    fge("parking_slots",3,false), fge("has_catering",4,false), fge("has_dj",5,false),
+                    fge("decoration",6,false), fge("ac_available",7,false), fge("amenities",8,false)));
 
         ensureFieldGroup("photographer_profile","Photographer Profile",
             List.of(fge("experience_years",0,false), fge("specializations",1,false),
@@ -311,8 +330,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
         ensureFieldGroup("caterer_menu",        "Menu & Cuisine",
             List.of(fge("cuisine_types",0,false), fge("meal_types",1,false),
-                    fge("min_guests",2,false), fge("max_guests",3,false),
-                    fge("provides_staff",4,false), fge("provides_cutlery",5,false)));
+                    fge("service_types",2,false),
+                    fge("min_guests",3,false), fge("max_guests",4,false),
+                    fge("provides_staff",5,false), fge("provides_cutlery",6,false)));
 
         ensureFieldGroup("decorator_profile",   "Decorator Profile",
             List.of(fge("style_types",0,false), fge("event_types_dec",1,false),
@@ -407,8 +427,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("basic_details",         "Basic Details",  0),
                 sec("photographer_profile",  "Profile",        1),
                 sec("contact_details",       "Contact",        2),
-                sec("pricing",               "Pricing",        3),
-                sec("media",                 "Portfolio",      4)
+                sec("address",               "Address",        3),
+                sec("pricing",               "Pricing",        4),
+                sec("media",                 "Portfolio",      5)
             ), true, true);
 
         ensureListingType("CATERER",        "Caterer",        "Catering and food service provider",
@@ -426,8 +447,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("basic_details",     "Basic Details",    0),
                 sec("decorator_profile", "Decorator Profile",1),
                 sec("contact_details",   "Contact",          2),
-                sec("pricing",           "Pricing",          3),
-                sec("media",             "Portfolio",        4)
+                sec("address",           "Address",          3),
+                sec("pricing",           "Pricing",          4),
+                sec("media",             "Portfolio",        5)
             ), true, true);
 
         ensureListingType("MAKEUP_ARTIST",  "Makeup Artist",  "Professional makeup artist",
@@ -435,8 +457,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("basic_details",   "Basic Details", 0),
                 sec("makeup_profile",  "Profile",       1),
                 sec("contact_details", "Contact",       2),
-                sec("pricing",         "Pricing",       3),
-                sec("media",           "Portfolio",     4)
+                sec("address",         "Address",       3),
+                sec("pricing",         "Pricing",       4),
+                sec("media",           "Portfolio",     5)
             ), true, true);
 
         // Events are private, membership-gated planning objects, not discoverable marketplace
@@ -864,5 +887,53 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             }
         }
         if (seeded > 0) log.info("Seeded {} relationship definition(s)", seeded);
+    }
+
+    // ── 10. Card presentation (client rendering config) ───────────────────────
+
+    /**
+     * Seeds each listing type's icon, colour and {@code config.cardPresentation} from
+     * {@code resources/seed/card-presentation.json}.
+     *
+     * <p>Held as JSON rather than built as nested Java maps because that is the shape it is stored
+     * and served in — a literal here would be a hand-transcription of the same document, and would
+     * drift. See events-ui's {@code config/cardPresentation.ts} for what the keys mean.
+     *
+     * <p>Unlike the other seed steps this one updates existing rows, since a listing type is
+     * created by an earlier step and its presentation is layered on. It still skips any type that
+     * already has a cardPresentation, so an admin's edits are never overwritten on restart.
+     */
+    @SuppressWarnings("unchecked")
+    private void seedCardPresentation() {
+        Map<String, Map<String, Object>> byType;
+        try (InputStream in = new ClassPathResource("seed/card-presentation.json").getInputStream()) {
+            byType = new ObjectMapper().readValue(in, new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("Could not read seed/card-presentation.json — listing types will fall back to "
+                    + "the client's built-in config: {}", e.getMessage());
+            return;
+        }
+
+        int seeded = 0;
+        for (var entry : byType.entrySet()) {
+            var existing = listingTypeRepo.findByNameAndTenantIdIsNull(entry.getKey());
+            if (existing.isEmpty()) continue;
+
+            ListingTypeDefinition def = existing.get();
+            if (def.getConfig() != null && def.getConfig().containsKey("cardPresentation")) continue;
+
+            Map<String, Object> spec = entry.getValue();
+            if (spec.get("icon") instanceof String icon) def.setIcon(icon);
+            if (spec.get("color") instanceof String color) def.setColor(color);
+
+            Map<String, Object> config = def.getConfig() == null
+                    ? new LinkedHashMap<>() : new LinkedHashMap<>(def.getConfig());
+            config.put("cardPresentation", spec.get("cardPresentation"));
+            def.setConfig(config);
+
+            listingTypeRepo.save(def);
+            seeded++;
+        }
+        if (seeded > 0) log.info("Seeded card presentation for {} listing type(s)", seeded);
     }
 }
