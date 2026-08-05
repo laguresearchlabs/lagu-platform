@@ -120,7 +120,9 @@ class DocumentServiceTest {
     private static final byte[] FAKE_EXE_HEADER = new byte[]{'M', 'Z', 0x00, 0x01}; // Windows PE header
 
     private void stubValidDocType() {
-        when(docTypeRegistry.validCodes()).thenReturn(Set.of("PASSPORT_PHOTO"));
+        // validCodes(listingType) — these tests exercise file validation, not listing-type
+        // routing, and upload with a null listingType resolves to the generic set.
+        when(docTypeRegistry.validCodes(any())).thenReturn(Set.of("PASSPORT_PHOTO"));
     }
 
     @Test
@@ -130,7 +132,7 @@ class DocumentServiceTest {
         MockMultipartFile fakePdf = new MockMultipartFile(
                 "file", "resume.pdf", "application/pdf", FAKE_EXE_HEADER);
 
-        assertThatThrownBy(() -> service.upload(fakePdf, "PASSPORT_PHOTO", null, null))
+        assertThatThrownBy(() -> service.upload(fakePdf, "PASSPORT_PHOTO", null, null, null))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("does not match its declared type");
         verifyNoInteractions(storageService);
@@ -145,7 +147,7 @@ class DocumentServiceTest {
         MockMultipartFile realPdf = new MockMultipartFile(
                 "file", "id.pdf", "application/pdf", REAL_PDF_HEADER);
 
-        service.upload(realPdf, "PASSPORT_PHOTO", null, null); // must not throw
+        service.upload(realPdf, "PASSPORT_PHOTO", null, null, null); // must not throw
         verify(storageService).upload(any(), any(), any());
     }
 
@@ -158,7 +160,7 @@ class DocumentServiceTest {
         MockMultipartFile realPng = new MockMultipartFile(
                 "file", "id.png", "image/png", REAL_PNG_HEADER);
 
-        service.upload(realPng, "PASSPORT_PHOTO", null, null); // must not throw
+        service.upload(realPng, "PASSPORT_PHOTO", null, null, null); // must not throw
     }
 
     @Test
@@ -168,7 +170,7 @@ class DocumentServiceTest {
         MockMultipartFile mismatched = new MockMultipartFile(
                 "file", "id.png", "image/png", REAL_PDF_HEADER);
 
-        assertThatThrownBy(() -> service.upload(mismatched, "PASSPORT_PHOTO", null, null))
+        assertThatThrownBy(() -> service.upload(mismatched, "PASSPORT_PHOTO", null, null, null))
                 .isInstanceOf(ValidationException.class);
     }
 }

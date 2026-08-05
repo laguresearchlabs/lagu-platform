@@ -109,12 +109,14 @@ class DocumentServiceIntegrationTest {
 
         when(documentStorageService.upload(any(), any(), anyString()))
                 .thenAnswer(inv -> "https://storage.example.com/" + UUID.randomUUID() + ".pdf");
-        when(documentTypeRegistry.validCodes())
+        // validCodes(listingType) — these uploads carry no listingType, so the generic set applies
+        when(documentTypeRegistry.validCodes(any()))
                 .thenReturn(Set.of("RESUME", "IDENTITY_PROOF", "PHOTOGRAPH"));
+        // trailing null listingType == generic/HR document, available in every context
         when(documentTypeRegistry.all()).thenReturn(List.of(
-                new DocumentTypeRegistry.DocumentConfig("RESUME", "Resume / CV", true, false),
-                new DocumentTypeRegistry.DocumentConfig("IDENTITY_PROOF", "Identity Proof", true, false),
-                new DocumentTypeRegistry.DocumentConfig("PHOTOGRAPH", "Photograph", false, false)));
+                new DocumentTypeRegistry.DocumentConfig("RESUME", "Resume / CV", true, false, null),
+                new DocumentTypeRegistry.DocumentConfig("IDENTITY_PROOF", "Identity Proof", true, false, null),
+                new DocumentTypeRegistry.DocumentConfig("PHOTOGRAPH", "Photograph", false, false, null)));
     }
 
     // ── upload ────────────────────────────────────────────────────────────────
