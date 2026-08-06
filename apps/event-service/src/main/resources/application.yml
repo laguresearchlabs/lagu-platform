@@ -47,3 +47,10 @@ eureka:
 management:
   endpoints.web.exposure.include: health,info,prometheus
   endpoint.health.show-details: always
+
+platform:
+  security:
+    # GET /api/v1/events/share/{id} only — Open Graph crawlers rendering a share link's
+    # preview card can't authenticate. The handler itself serves PUBLIC events only and
+    # 404s everything else (EventService.getSharePreview).
+    public-paths: ${PLATFORM_SECURITY_PUBLIC_PATHS:/api/v1/events/share}
