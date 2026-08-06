@@ -152,15 +152,25 @@ public class EventMemberService {
         memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
                 .filter(m -> !"DECLINED".equals(m.getStatus()) && !"REMOVED".equals(m.getStatus()))
                 .ifPresent(m -> { throw new ValidationException("Already a member of this event"); });
-        joinRequestRepo.findByTenantIdAndUserId(event.getTenantId(), userId).ifPresent(r -> {
+        // Only a still-PENDING request blocks a new one. A settled row (REJECTED, or APPROVED
+        // for a membership since declined/removed) is revived in place rather than added
+        // alongside — event_join_request is UNIQUE (tenant_id, user_id), and this mirrors how
+        // invite() above reuses a DECLINED/REMOVED member row. Reviving loses the previous
+        // review's audit fields, which nothing reads back; created_at stays at the first ask
+        // (the column is updatable = false) and isn't surfaced in the organizer's list.
+        Optional<EventJoinRequest> existing = joinRequestRepo.findByTenantIdAndUserId(event.getTenantId(), userId);
+        existing.filter(r -> "PENDING".equals(r.getStatus())).ifPresent(r -> {
             throw new ValidationException("A join request is already pending for this event");
         });
 
-        EventJoinRequest jr = new EventJoinRequest();
+        EventJoinRequest jr = existing.orElseGet(EventJoinRequest::new);
         jr.setTenantId(event.getTenantId());
         jr.setUserId(userId);
         jr.setRequestedRole(req.getRequestedRole() != null ? req.getRequestedRole().toUpperCase() : "INVITEE");
         jr.setMessage(req.getMessage());
+        jr.setStatus("PENDING");
+        jr.setReviewedByUserId(null);
+        jr.setReviewedAt(null);
         joinRequestRepo.save(jr);
         return toResponse(jr);
     }

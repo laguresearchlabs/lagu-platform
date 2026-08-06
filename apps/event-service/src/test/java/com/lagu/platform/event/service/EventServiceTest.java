@@ -166,6 +166,47 @@ class EventServiceTest {
     }
 
     @Test
+    void sharePreviewReturnsCardFieldsForPublicEvent() {
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "visibility", "PUBLIC",
+                "name", "Aarav's 5th Birthday",
+                "description", "Cake at 4pm",
+                "cover_image", "https://cdn.example.com/cover.jpg",
+                "city", "Bengaluru",
+                "is_virtual", true))));
+
+        var preview = service.getSharePreview(eventId);
+
+        assertThat(preview.getTitle()).isEqualTo("Aarav's 5th Birthday");
+        assertThat(preview.getDescription()).isEqualTo("Cake at 4pm");
+        assertThat(preview.getCoverImage()).isEqualTo("https://cdn.example.com/cover.jpg");
+        assertThat(preview.getCity()).isEqualTo("Bengaluru");
+        // Absent and non-string values are dropped, never coerced into the card.
+        assertThat(preview.getState()).isNull();
+        assertThat(preview.getStartDatetime()).isNull();
+    }
+
+    @Test
+    void sharePreviewIsNotFoundForNonPublicEvent() {
+        // 404 rather than 403: an unauthenticated caller shouldn't be able to tell a private
+        // event apart from an id that was never issued.
+        when(recordClient.getRecord(recordId, eventId))
+                .thenReturn(Map.of("data", Map.of("data", Map.of("visibility", "PRIVATE", "name", "Secret"))));
+
+        assertThatThrownBy(() -> service.getSharePreview(eventId))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void sharePreviewIsNotFoundWhenVisibilityIsAbsent() {
+        // Matches get()'s check exactly — a missing field is not PUBLIC.
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of());
+
+        assertThatThrownBy(() -> service.getSharePreview(eventId))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
     void getSucceedsForInvitedButNotYetAcceptedMember() {
         // An invited (not yet accepted) member must be able to view the event well enough to
         // decide whether to accept — there's no other endpoint that lets them discover what

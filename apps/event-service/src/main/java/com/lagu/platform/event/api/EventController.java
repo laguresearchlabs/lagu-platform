@@ -6,6 +6,7 @@ import com.lagu.platform.event.dto.CreateEventRequest;
 import com.lagu.platform.event.dto.EventResponse;
 import com.lagu.platform.event.dto.EventSummaryResponse;
 import com.lagu.platform.event.dto.LinkVendorRequest;
+import com.lagu.platform.event.dto.SharePreviewResponse;
 import com.lagu.platform.event.dto.TransitionRequest;
 import com.lagu.platform.event.dto.UpdateEventRequest;
 import com.lagu.platform.event.service.EventService;
@@ -55,6 +56,17 @@ public class EventController {
     @GetMapping("/{eventId}")
     public ResponseEntity<ApiResponse<EventResponse>> get(@PathVariable UUID eventId) {
         return ResponseEntity.ok(ApiResponse.ok(eventService.get(eventId, requireUserId())));
+    }
+
+    /**
+     * Unauthenticated link preview for a PUBLIC event — note the absence of requireUserId().
+     * Opened up in application.yml's platform.security.public-paths because Open Graph
+     * crawlers can't log in; the two-segment path keeps it clear of /{eventId} above, and
+     * gateway-service already routes /api/v1/events/share/** without a JWT.
+     */
+    @GetMapping("/share/{eventId}")
+    public ResponseEntity<ApiResponse<SharePreviewResponse>> sharePreview(@PathVariable UUID eventId) {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.getSharePreview(eventId)));
     }
 
     @PutMapping("/{eventId}")

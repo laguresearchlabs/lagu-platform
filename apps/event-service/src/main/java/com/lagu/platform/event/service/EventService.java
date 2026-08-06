@@ -12,6 +12,7 @@ import com.lagu.platform.event.dto.CreateEventRequest;
 import com.lagu.platform.event.dto.EventResponse;
 import com.lagu.platform.event.dto.EventSummaryResponse;
 import com.lagu.platform.event.dto.LinkVendorRequest;
+import com.lagu.platform.event.dto.SharePreviewResponse;
 import com.lagu.platform.event.dto.TransitionRequest;
 import com.lagu.platform.event.dto.UpdateEventRequest;
 import com.lagu.platform.security.GatewayHeaderFilter;
@@ -99,6 +100,37 @@ public class EventService {
             return toResponse(event, null, data);
         }
         return toResponse(event, member.get(), data);
+    }
+
+    /**
+     * Link-preview projection for GET /share/{id} — the one event endpoint reachable without
+     * an identity, because the crawlers that render Open Graph cards (WhatsApp, Twitterbot,
+     * Facebook) can't authenticate. Anything not explicitly PUBLIC 404s rather than 403s, so
+     * an unauthenticated caller can't use this to confirm a private event even exists; and
+     * PUBLIC events expose only the handful of fields the share page already shows every
+     * logged-in visitor (see SharePreviewResponse).
+     */
+    public SharePreviewResponse getSharePreview(UUID eventId) {
+        Event event = requireEvent(eventId);
+        Map<String, Object> data = fetchData(event);
+        if (!"PUBLIC".equals(data.get("visibility"))) {
+            throw new ResourceNotFoundException("Event", eventId.toString());
+        }
+        return SharePreviewResponse.builder()
+                .objectType(event.getObjectType())
+                .title(str(data.get("name")))
+                .description(str(data.get("description")))
+                .coverImage(str(data.get("cover_image")))
+                .startDatetime(str(data.get("start_datetime")))
+                .city(str(data.get("city")))
+                .state(str(data.get("state")))
+                .build();
+    }
+
+    /** Schema-driven values arrive as loosely-typed JSON — anything non-textual is dropped
+     *  rather than coerced, since only strings are of use to a preview card. */
+    private String str(Object value) {
+        return value instanceof String s && !s.isBlank() ? s : null;
     }
 
     /** Platform-admin listing across every event, regardless of membership. Caller must be

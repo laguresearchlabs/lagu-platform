@@ -310,6 +310,31 @@ class EventMemberServiceTest {
     }
 
     @Test
+    void requestToJoinRevivesSettledRequest() {
+        UUID requester = UUID.randomUUID();
+        UUID reviewer = UUID.randomUUID();
+        EventJoinRequest rejected = new EventJoinRequest();
+        rejected.setId(UUID.randomUUID());
+        rejected.setTenantId(tenantId);
+        rejected.setUserId(requester);
+        rejected.setStatus("REJECTED");
+        rejected.setReviewedByUserId(reviewer);
+        rejected.setReviewedAt(Instant.now());
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+        when(joinRequestRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.of(rejected));
+
+        var response = service.requestToJoin(eventId, requester, new CreateJoinRequestRequest());
+
+        // The UNIQUE (tenant_id, user_id) row is reused, not duplicated, and the previous
+        // review is cleared so the organizer sees a genuinely pending request again.
+        assertThat(response.getStatus()).isEqualTo("PENDING");
+        assertThat(response.getId()).isEqualTo(rejected.getId());
+        assertThat(rejected.getReviewedByUserId()).isNull();
+        assertThat(rejected.getReviewedAt()).isNull();
+        verify(joinRequestRepo).save(rejected);
+    }
+
+    @Test
     void approveRejectsJoinRequestFromAnotherEvent() {
         stubManager(ownerId, "ADMIN");
 
