@@ -164,7 +164,13 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("business_type",     "Business Type",     FieldType.ENUM,        true,  true,
                 List.of("SOLE_PROPRIETORSHIP","PARTNERSHIP","PRIVATE_LIMITED","LLP","PUBLIC_LIMITED")),
             field("gstin",             "GSTIN",             FieldType.TEXT,        false, false, null),
-            field("pan_number",        "PAN Number",        FieldType.TEXT,        true,  false, null),
+            // Not required at the definition level. ListingTypeService resolves a field's
+            // requiredness as `field.isRequired() || entry.isRequired()`, so a definition marked
+            // required cannot be relaxed by the tax_info group entry below — which is why making
+            // only that entry optional left POST /api/v1/vendors/register still failing with
+            // "pan_number: field is required". PAN is verified at the KYC step via
+            // document-service, long after vendor-service creates the VENDOR record.
+            field("pan_number",        "PAN Number",        FieldType.TEXT,        false, false, null),
             field("company_reg_no",    "Company Reg No.",   FieldType.TEXT,        false, false, null),
             // Vendor bank info
             field("account_number",    "Account Number",    FieldType.TEXT,        false, false, null),

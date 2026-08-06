@@ -13,6 +13,9 @@ dependencies {
     implementation(rootProject.libs.spring.boot.validation)
     implementation(rootProject.libs.spring.boot.actuator)
     implementation(rootProject.libs.eureka.client)
+    // Approving a change set applies it to the record via record-service, so this service now
+    // makes a load-balanced service-to-service call like vendor/automation/booking already do.
+    implementation(rootProject.libs.loadbalancer)
     implementation(rootProject.libs.spring.boot.kafka)
     implementation(rootProject.libs.springdoc.openapi)
     implementation(rootProject.libs.micrometer.prometheus)
