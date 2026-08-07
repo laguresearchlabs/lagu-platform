@@ -18,9 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /**
  * Event social feed — replaces event-nest's posts-service. Posts/comments/reports are plain
@@ -72,12 +74,47 @@ public class EventPostService {
                 .build();
     }
 
+    /** How many of the requester's own unpublished posts to surface — this is a transient
+     *  backlog (seconds, unless moderation is on), not a browsable collection. */
+    private static final int OWN_UNPUBLISHED_LIMIT = 20;
+
+    /**
+     * The PUBLISHED feed, plus the requester's <em>own</em> posts that haven't got there yet.
+     *
+     * <p>Publishing runs through workflow-service asynchronously, so a post is DRAFT for a
+     * moment after it's created (and stays PENDING for as long as moderation takes). Listing
+     * only PUBLISHED meant an author watched their post vanish on the refetch that immediately
+     * follows creation. Their own unpublished posts come back tagged with their real status so
+     * the client can mark them; nobody else sees them.
+     */
     public List<PostResponse> listPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
-        return recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PUBLISHED", page, size).stream()
+
+        List<PostResponse> published = recordClient
+                .listRecords(event.getTenantId(), "EVENT_POST", "PUBLISHED", page, size).stream()
                 .map(r -> toPostResponse(r, requesterId))
                 .toList();
+
+        // Only the first page carries them, so the PUBLISHED stream keeps exact page boundaries
+        // — clients treat a short page as the end of the feed.
+        if (page > 0) {
+            return published;
+        }
+
+        List<PostResponse> ownUnpublished = Stream.of("DRAFT", "PENDING")
+                .flatMap(status -> recordClient
+                        .listRecords(event.getTenantId(), "EVENT_POST", status, 0, OWN_UNPUBLISHED_LIMIT).stream())
+                .filter(r -> requesterId.toString().equals(String.valueOf(r.get("createdBy"))))
+                .map(r -> toPostResponse(r, requesterId))
+                .toList();
+
+        if (ownUnpublished.isEmpty()) {
+            return published;
+        }
+        List<PostResponse> combined = new ArrayList<>(ownUnpublished);
+        combined.addAll(published);
+        return combined;
     }
 
     public List<PostResponse> listPendingPosts(UUID eventId, UUID requesterId, int page, int size) {
@@ -310,6 +347,7 @@ public class EventPostService {
                 .status((String) record.get("status"))
                 .likeCount(likeRepo.countByPostRecordId(id))
                 .likedByMe(likeRepo.existsByPostRecordIdAndUserId(id, viewerId))
+                .createdAt(createdAtOf(record))
                 .build();
     }
 
@@ -320,6 +358,7 @@ public class EventPostService {
                 .id(UUID.fromString(String.valueOf(record.get("id"))))
                 .authorUserId(record.get("createdBy") != null ? UUID.fromString(String.valueOf(record.get("createdBy"))) : null)
                 .content((String) fields.get("comment_content"))
+                .createdAt(createdAtOf(record))
                 .build();
     }
 
@@ -332,6 +371,24 @@ public class EventPostService {
                 .reporterUserId(record.get("createdBy") != null ? UUID.fromString(String.valueOf(record.get("createdBy"))) : null)
                 .reason((String) fields.get("report_reason"))
                 .details((String) fields.get("report_details"))
+                .createdAt(createdAtOf(record))
                 .build();
+    }
+
+    /**
+     * RecordResponse.createdAt arrives as an ISO-8601 string in these untyped record maps (they
+     * come off the wire as generic JSON), so it needs parsing rather than a cast. Without this
+     * every listed post/comment/report carried a null timestamp while only the just-created
+     * ones -- built in-process above -- had one.
+     */
+    private OffsetDateTime createdAtOf(Map<String, Object> record) {
+        Object raw = record.get("createdAt");
+        if (raw == null) return null;
+        try {
+            return OffsetDateTime.parse(String.valueOf(raw));
+        } catch (java.time.format.DateTimeParseException e) {
+            log.warn("Unparseable createdAt '{}' on record {}", raw, record.get("id"));
+            return null;
+        }
     }
 }

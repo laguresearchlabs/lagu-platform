@@ -1,9 +1,11 @@
 package com.lagu.platform.event.client;
 
+import com.lagu.platform.common.exception.PlatformException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -132,7 +134,16 @@ public class RecordServiceClient {
                 .toBodilessEntity();
     }
 
-    /** POSTs a workflow trigger; record-service stages it via the outbox and processes it async. */
+    /**
+     * POSTs a workflow trigger; record-service stages it via the outbox and processes it async.
+     *
+     * <p>Failures propagate rather than being swallowed. A dropped trigger leaves the record in
+     * its previous status indefinitely — for a post that means DRAFT, which never appears in any
+     * listing — and returning null here made that indistinguishable from success, so the caller
+     * happily reported a published post that did not exist. Note this only covers the request
+     * being accepted: the transition itself completes asynchronously in workflow-service, so a
+     * success here is not a guarantee that the status has changed yet.
+     */
     public Map<String, Object> requestTransition(UUID recordId, UUID tenantId, UUID actingUserId, String trigger) {
         try {
             return restClient.post()
@@ -144,7 +155,8 @@ public class RecordServiceClient {
                     .body(new ParameterizedTypeReference<>() {});
         } catch (Exception e) {
             log.error("Failed to request transition '{}' on record {}: {}", trigger, recordId, e.getMessage());
-            return null;
+            throw new PlatformException("TRANSITION_FAILED",
+                    "Could not request the '" + trigger + "' transition", HttpStatus.BAD_GATEWAY);
         }
     }
 
