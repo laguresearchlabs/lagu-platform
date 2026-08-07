@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -125,13 +126,23 @@ public class EventPostService {
                 .toList();
     }
 
+    /**
+     * Retires a post into the workflow's terminal REJECTED state.
+     *
+     * <p>This used to call deleteRecord, which could never succeed: record-service denies
+     * DELETE on RECORD to internal service callers by policy (DefaultPermissionEvaluator grants
+     * SVC_* callers CREATE/UPDATE/TRANSITION only), so every delete answered 403 — silently, in
+     * the one place that swallowed the error. REJECTED is terminal and excluded from every
+     * listing, including the author's own unpublished posts, so the post becomes invisible to
+     * everyone. The transition is processed asynchronously by workflow-service.
+     */
     @Transactional
     public void deletePost(UUID eventId, UUID postId, UUID requesterId) {
         Event event = requireEvent(eventId);
         EventMember member = requireMember(event, requesterId);
         Map<String, Object> record = getRecordOrNotFound(postId, event.getTenantId());
         requireAuthorOrManager(record, member, requesterId);
-        recordClient.deleteRecord(postId, event.getTenantId());
+        recordClient.requestTransition(postId, event.getTenantId(), requesterId, "remove");
     }
 
     @Transactional
@@ -192,11 +203,28 @@ public class EventPostService {
                 .build();
     }
 
+    /**
+     * Open reports — those whose post still exists.
+     *
+     * <p>Removing the offending post is how a moderator resolves a report, but the
+     * EVENT_POST_REPORT record outlives the post it points at. Returning those too meant the
+     * queue never emptied and every handled report stayed on screen looking outstanding.
+     */
     public List<PostReportResponse> listReportedPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        return recordClient.listRecords(event.getTenantId(), "EVENT_POST_REPORT", null, page, size).stream()
+        List<PostReportResponse> reports = recordClient
+                .listRecords(event.getTenantId(), "EVENT_POST_REPORT", null, page, size).stream()
                 .map(this::toReportResponse)
+                .toList();
+
+        // Cached per post id — one post commonly draws several reports, and each miss is a
+        // round trip to record-service.
+        Map<UUID, Boolean> postExists = new HashMap<>();
+        return reports.stream()
+                .filter(r -> r.getPostId() != null && postExists.computeIfAbsent(
+                        r.getPostId(),
+                        id -> !unwrap(recordClient.getRecord(id, event.getTenantId())).isEmpty()))
                 .toList();
     }
 

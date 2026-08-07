@@ -96,7 +96,11 @@ public class WorkflowSeeder implements ApplicationRunner {
      * the parent event's post_approval_required flag.
      */
     private void seedEventPostModerationWorkflow() {
-        if (!wfRepo.findForObjectType("EVENT_POST", null).isEmpty()) return;
+        List<WorkflowDefinition> existing = wfRepo.findForObjectType("EVENT_POST", null);
+        if (!existing.isEmpty()) {
+            addRemoveTransitions(existing.get(0));
+            return;
+        }
 
         WorkflowDefinition wf = new WorkflowDefinition();
         wf.setName("event_post_moderation");
@@ -120,10 +124,40 @@ public class WorkflowSeeder implements ApplicationRunner {
         transitions.add(tx(wf, "DRAFT",   "PUBLISHED", "publish",             "Publish",              List.of()));
         transitions.add(tx(wf, "PENDING", "PUBLISHED", "approve",             "Approve",              List.of("ADMIN","MAINTAINER")));
         transitions.add(tx(wf, "PENDING", "REJECTED",  "reject",              "Reject",               List.of("ADMIN","MAINTAINER")));
+        transitions.addAll(removeTransitions(wf));
         wf.setTransitions(transitions);
 
         wfRepo.save(wf);
         log.info("Seeded EVENT_POST moderation workflow");
+    }
+
+    /**
+     * Deleting a post retires it into REJECTED rather than destroying the record, because
+     * internal services are denied RECORD DELETE by policy (see DefaultPermissionEvaluator —
+     * they may CREATE/UPDATE/TRANSITION and nothing else). REJECTED is already terminal and
+     * excluded from every listing, so a "removed" post is invisible to everyone including its
+     * author, which is what deletion has to mean here.
+     */
+    private List<WorkflowTransition> removeTransitions(WorkflowDefinition wf) {
+        return List.of(
+                tx(wf, "DRAFT",     "REJECTED", "remove", "Remove", List.of()),
+                tx(wf, "PENDING",   "REJECTED", "remove", "Remove", List.of()),
+                tx(wf, "PUBLISHED", "REJECTED", "remove", "Remove", List.of()));
+    }
+
+    /**
+     * Stacks seeded before the "remove" trigger existed keep their definition (the seeder is
+     * create-only), so it has to be added in place — otherwise deletion stays broken on every
+     * environment that has already run.
+     */
+    private void addRemoveTransitions(WorkflowDefinition wf) {
+        boolean alreadyPresent = wf.getTransitions().stream()
+                .anyMatch(t -> "remove".equals(t.getTriggerName()));
+        if (alreadyPresent) return;
+
+        wf.getTransitions().addAll(removeTransitions(wf));
+        wfRepo.save(wf);
+        log.info("Added 'remove' transitions to the existing EVENT_POST moderation workflow");
     }
 
     // event-service is the sole caller of this workflow's transitions, always authenticating
