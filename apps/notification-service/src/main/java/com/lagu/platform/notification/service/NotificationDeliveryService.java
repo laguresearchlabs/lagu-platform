@@ -2,6 +2,7 @@ package com.lagu.platform.notification.service;
 
 import com.lagu.platform.events.AutomationEvent;
 import com.lagu.platform.notification.domain.Notification;
+import com.lagu.platform.notification.domain.NotificationCategory;
 import com.lagu.platform.notification.domain.NotificationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,7 @@ public class NotificationDeliveryService {
     private final NotificationRepository         repo;
     private final NotificationPersistenceService persistence;
     private final EmailDeliveryService           emailService;
+    private final NotificationPreferenceService  preferences;
 
     /**
      * Processes an ACTION_SUCCEEDED event with actionType=SEND_NOTIFICATION.
@@ -49,6 +51,28 @@ public class NotificationDeliveryService {
 
         boolean needsInApp = "IN_APP".equals(channel) || "BOTH".equals(channel);
         boolean needsEmail = "EMAIL".equals(channel) || "BOTH".equals(channel);
+
+        // Recipient preferences are applied here — before the idempotency lookup below — so a
+        // suppressed notification leaves no row and no audit artefact at all.
+        //
+        // An unrecognised or absent `category` resolves to TRANSACTIONAL, i.e. it is delivered.
+        // Every automation predating this feature declares no category, and defaulting them to
+        // something suppressible would silently stop them reaching anyone who had switched that
+        // category off. A missed notification is invisible; an unwanted one gets reported.
+        NotificationCategory category = NotificationCategory
+                .parse(str(payload, "category", null))
+                .orElse(NotificationCategory.TRANSACTIONAL);
+        NotificationPreferenceService.Setting allowed = preferences.effective(recipientUserId, category);
+
+        needsInApp = needsInApp && allowed.inApp();
+        needsEmail = needsEmail && allowed.email();
+
+        if (!needsInApp && !needsEmail) {
+            // Not an error and not retryable — the recipient asked for this.
+            log.debug("Notification for event {} suppressed by {} preferences on category {}",
+                    event.getEventId(), recipientUserId, category);
+            return;
+        }
 
         // Idempotency: a Kafka redelivery of the exact same AutomationEvent carries the same
         // eventId (see AutomationEvent.eventId), so re-entering here for it must resume rather

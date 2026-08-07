@@ -2,17 +2,25 @@ package com.lagu.platform.notification.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.dto.PageResult;
+import com.lagu.platform.common.exception.PlatformException;
+import com.lagu.platform.notification.domain.NotificationCategory;
 import com.lagu.platform.notification.dto.NotificationDto;
+import com.lagu.platform.notification.dto.NotificationPreferenceDto;
+import com.lagu.platform.notification.dto.UpdateNotificationPreferencesRequest;
+import com.lagu.platform.notification.service.NotificationPreferenceService;
 import com.lagu.platform.notification.service.NotificationQueryService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.security.RequirePermission;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -21,7 +29,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class NotificationController {
 
-    private final NotificationQueryService queryService;
+    private final NotificationQueryService      queryService;
+    private final NotificationPreferenceService preferenceService;
 
     @GetMapping
     @RequirePermission(resource = "NOTIFICATION", action = "READ")
@@ -69,9 +78,59 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.ok(Map.of("updated", updated)));
     }
 
+    // ── Preferences ───────────────────────────────────────────────────────────
+
+    /**
+     * Effective preferences for the caller: platform defaults merged with their overrides, so
+     * the client never has to know the defaults. TRANSACTIONAL is omitted — it is not a toggle.
+     */
+    @GetMapping("/preferences")
+    @RequirePermission(resource = "NOTIFICATION", action = "READ")
+    public ResponseEntity<ApiResponse<Map<String, List<NotificationPreferenceDto>>>> preferences() {
+        UUID userId = requireUserId();
+        return ResponseEntity.ok(ApiResponse.ok(
+                Map.of("preferences", toDtos(preferenceService.effectiveForUser(userId)))));
+    }
+
+    /** Partial update — categories absent from the body keep their current setting. */
+    @PutMapping("/preferences")
+    @RequirePermission(resource = "NOTIFICATION", action = "UPDATE")
+    public ResponseEntity<ApiResponse<Map<String, List<NotificationPreferenceDto>>>> updatePreferences(
+            @RequestBody @Valid UpdateNotificationPreferencesRequest req) {
+        UUID userId = requireUserId();
+
+        Map<NotificationCategory, NotificationPreferenceService.Setting> changes = new LinkedHashMap<>();
+        for (UpdateNotificationPreferencesRequest.Entry e : req.getPreferences()) {
+            NotificationCategory category = NotificationCategory.parse(e.getCategory())
+                    .orElseThrow(() -> new PlatformException("UNKNOWN_CATEGORY",
+                            "Unknown notification category: " + e.getCategory(), HttpStatus.BAD_REQUEST));
+            changes.put(category,
+                    new NotificationPreferenceService.Setting(e.getInApp(), e.getEmail()));
+        }
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                Map.of("preferences", toDtos(preferenceService.update(userId, changes)))));
+    }
+
+    private static List<NotificationPreferenceDto> toDtos(
+            Map<NotificationCategory, NotificationPreferenceService.Setting> settings) {
+        return settings.entrySet().stream()
+                .map(e -> new NotificationPreferenceDto(e.getKey(), e.getValue().inApp(), e.getValue().email()))
+                .toList();
+    }
+
     private UUID currentUserId() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         return ctx != null ? ctx.getUserId() : null;
+    }
+
+    /** Preferences are strictly self-scoped — there is no path to read or write another user's. */
+    private UUID requireUserId() {
+        UUID userId = currentUserId();
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+        return userId;
     }
 
     private static void requirePlatformAdmin() {

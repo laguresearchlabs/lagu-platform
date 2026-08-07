@@ -88,7 +88,10 @@ public class AutomationSeeder implements ApplicationRunner {
         if (triggerRepo.findByNameAndTenantIdIsNull(name).isPresent()) return;
 
         TriggerDefinition trigger = newTrigger(name, label, eventType, null);
-        trigger.setActions(List.of(sendNotificationAction(trigger, title, message, "{{data.consumerUserId}}")));
+        // Booking lifecycle mail is transactional — a consumer must not be able to opt out of
+        // being told their booking was confirmed or cancelled.
+        trigger.setActions(List.of(sendNotificationAction(trigger, title, message,
+                "{{data.consumerUserId}}", "TRANSACTIONAL")));
         triggerRepo.save(trigger);
         log.info("Seeded trigger: {}", name);
     }
@@ -100,7 +103,8 @@ public class AutomationSeeder implements ApplicationRunner {
         TriggerDefinition trigger = newTrigger(name, "Event Created — " + objectType,
                 "RECORD_CREATED", objectType);
         trigger.setActions(List.of(sendNotificationAction(trigger,
-                "Event Created", "Your event has been created and is ready for planning.")));
+                "Event Created", "Your event has been created and is ready for planning.",
+                "EVENT_UPDATES")));
         triggerRepo.save(trigger);
         log.info("Seeded trigger: {}", name);
     }
@@ -112,7 +116,8 @@ public class AutomationSeeder implements ApplicationRunner {
         TriggerDefinition trigger = newTrigger(name, "Event Status Changed — " + objectType,
                 "RECORD_STATUS_CHANGED", objectType);
         trigger.setActions(List.of(sendNotificationAction(trigger,
-                "Event Status Updated", "Your event status changed to {{currentStatus}}.")));
+                "Event Status Updated", "Your event status changed to {{currentStatus}}.",
+                "EVENT_UPDATES")));
         triggerRepo.save(trigger);
         log.info("Seeded trigger: {}", name);
     }
@@ -128,8 +133,9 @@ public class AutomationSeeder implements ApplicationRunner {
         return trigger;
     }
 
-    private ActionDefinition sendNotificationAction(TriggerDefinition trigger, String title, String message) {
-        return sendNotificationAction(trigger, title, message, "{{changedBy}}");
+    private ActionDefinition sendNotificationAction(TriggerDefinition trigger, String title, String message,
+                                                    String category) {
+        return sendNotificationAction(trigger, title, message, "{{changedBy}}", category);
     }
 
     /**
@@ -138,7 +144,7 @@ public class AutomationSeeder implements ApplicationRunner {
      * should be notified, not the vendor who just acted).
      */
     private ActionDefinition sendNotificationAction(TriggerDefinition trigger, String title, String message,
-                                                    String recipientUserIdTemplate) {
+                                                    String recipientUserIdTemplate, String category) {
         ActionDefinition action = new ActionDefinition();
         action.setTrigger(trigger);
         action.setActionType("SEND_NOTIFICATION");
@@ -149,6 +155,10 @@ public class AutomationSeeder implements ApplicationRunner {
         config.put("message", message);
         config.put("channel", "IN_APP");
         config.put("recipientUserId", recipientUserIdTemplate);
+        // Read by notification-service to decide whether the recipient's preferences allow this.
+        // ActionExecutor forwards the whole config into the event payload, so no change is
+        // needed there. See todo/19-notification-preferences.md.
+        config.put("category", category);
         action.setConfig(config);
         return action;
     }

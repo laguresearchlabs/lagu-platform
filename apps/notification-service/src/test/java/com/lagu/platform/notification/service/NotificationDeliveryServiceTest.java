@@ -3,6 +3,7 @@ package com.lagu.platform.notification.service;
 import com.lagu.platform.events.AutomationEvent;
 import com.lagu.platform.notification.domain.Notification;
 import com.lagu.platform.notification.domain.NotificationRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -26,8 +27,17 @@ class NotificationDeliveryServiceTest {
     private final NotificationPersistenceService persistence = mock(NotificationPersistenceService.class);
     private final EmailDeliveryService emailService = mock(EmailDeliveryService.class);
 
+    private final NotificationPreferenceService preferences = mock(NotificationPreferenceService.class);
+
     private final NotificationDeliveryService service =
-            new NotificationDeliveryService(repo, persistence, emailService);
+            new NotificationDeliveryService(repo, persistence, emailService, preferences);
+
+    /** Default stance for the pre-existing idempotency tests: nothing is suppressed. */
+    @BeforeEach
+    void allowEverything() {
+        when(preferences.effective(any(), any()))
+                .thenReturn(new NotificationPreferenceService.Setting(true, true));
+    }
 
     private static AutomationEvent event(UUID eventId, Map<String, Object> payload) {
         return AutomationEvent.builder()
@@ -166,5 +176,71 @@ class NotificationDeliveryServiceTest {
 
         verify(persistence).save(any());
         verify(repo, never()).findBySourceEventId(any());
+    }
+
+    // ── Recipient preferences ─────────────────────────────────────────────────
+
+    @Test
+    void suppressedCategoryCreatesNoRowAtAll() {
+        UUID eventId = UUID.randomUUID();
+        UUID recipient = UUID.randomUUID();
+        when(preferences.effective(eq(recipient), eq(com.lagu.platform.notification.domain.NotificationCategory.MARKETING)))
+                .thenReturn(new NotificationPreferenceService.Setting(false, false));
+
+        service.deliver(event(eventId, Map.of(
+                "title", "News", "channel", "BOTH",
+                "category", "MARKETING",
+                "recipientUserId", recipient.toString())));
+
+        // Not merely "no email" — a suppressed notification must leave no audit artefact and
+        // must not appear in the recipient's in-app feed either.
+        verifyNoInteractions(persistence, emailService);
+        verify(repo, never()).findBySourceEventId(any());
+    }
+
+    @Test
+    void inAppStillPersistsWhenOnlyEmailIsSuppressed() {
+        UUID eventId = UUID.randomUUID();
+        UUID recipient = UUID.randomUUID();
+        when(repo.findBySourceEventId(eventId)).thenReturn(Optional.empty());
+        when(persistence.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(preferences.effective(eq(recipient), any()))
+                .thenReturn(new NotificationPreferenceService.Setting(true, false));
+
+        service.deliver(event(eventId, Map.of(
+                "title", "Reminder", "channel", "BOTH",
+                "category", "EVENT_REMINDERS",
+                "recipientUserId", recipient.toString())));
+
+        verify(persistence).save(any());
+        verifyNoInteractions(emailService);
+    }
+
+    @Test
+    void notificationWithNoCategoryIsTreatedAsTransactionalAndDelivered() {
+        UUID eventId = UUID.randomUUID();
+        when(repo.findBySourceEventId(eventId)).thenReturn(Optional.empty());
+        when(persistence.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Every automation predating this feature sends no category. They must keep working.
+        service.deliver(event(eventId, Map.of("title", "Hi", "channel", "IN_APP")));
+
+        verify(preferences).effective(any(),
+                eq(com.lagu.platform.notification.domain.NotificationCategory.TRANSACTIONAL));
+        verify(persistence).save(any());
+    }
+
+    @Test
+    void unknownCategoryFallsBackToDeliveringRatherThanDropping() {
+        UUID eventId = UUID.randomUUID();
+        when(repo.findBySourceEventId(eventId)).thenReturn(Optional.empty());
+        when(persistence.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.deliver(event(eventId, Map.of(
+                "title", "Hi", "channel", "IN_APP", "category", "NOT_A_REAL_CATEGORY")));
+
+        verify(preferences).effective(any(),
+                eq(com.lagu.platform.notification.domain.NotificationCategory.TRANSACTIONAL));
+        verify(persistence).save(any());
     }
 }
