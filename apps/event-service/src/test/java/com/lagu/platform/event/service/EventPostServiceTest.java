@@ -125,8 +125,13 @@ class EventPostServiceTest {
         verify(recordClient, never()).deleteRecord(any(), any());
     }
 
+    // Deletion retires the post to REJECTED via the workflow instead of destroying the record.
+    // These previously asserted deleteRecord, which record-service refuses for internal service
+    // callers (DefaultPermissionEvaluator grants SVC_* CREATE/UPDATE/TRANSITION only) — so the
+    // behaviour they locked in was one that answered 403 every time it ran for real.
+
     @Test
-    void deletePostSucceedsForAuthor() {
+    void deletePostRetiresThePostForAuthor() {
         UUID author = UUID.randomUUID();
         when(memberRepo.findByTenantIdAndUserId(tenantId, author))
                 .thenReturn(Optional.of(memberWithRole(author, "INVITEE")));
@@ -134,11 +139,12 @@ class EventPostServiceTest {
 
         service.deletePost(eventId, postId, author);
 
-        verify(recordClient).deleteRecord(postId, tenantId);
+        verify(recordClient).requestTransition(postId, tenantId, author, "remove");
+        verify(recordClient, never()).deleteRecord(any(), any());
     }
 
     @Test
-    void deletePostSucceedsForModeratorEvenIfNotAuthor() {
+    void deletePostRetiresThePostForModeratorEvenIfNotAuthor() {
         UUID author = UUID.randomUUID();
         UUID admin = UUID.randomUUID();
         when(memberRepo.findByTenantIdAndUserId(tenantId, admin))
@@ -147,7 +153,8 @@ class EventPostServiceTest {
 
         service.deletePost(eventId, postId, admin);
 
-        verify(recordClient).deleteRecord(postId, tenantId);
+        verify(recordClient).requestTransition(postId, tenantId, admin, "remove");
+        verify(recordClient, never()).deleteRecord(any(), any());
     }
 
     @Test

@@ -220,12 +220,23 @@ public class EventPostService {
 
         // Cached per post id — one post commonly draws several reports, and each miss is a
         // round trip to record-service.
-        Map<UUID, Boolean> postExists = new HashMap<>();
+        Map<UUID, Boolean> stillOpen = new HashMap<>();
         return reports.stream()
-                .filter(r -> r.getPostId() != null && postExists.computeIfAbsent(
-                        r.getPostId(),
-                        id -> !unwrap(recordClient.getRecord(id, event.getTenantId())).isEmpty()))
+                .filter(r -> r.getPostId() != null && stillOpen.computeIfAbsent(
+                        r.getPostId(), id -> isPostLive(id, event.getTenantId())))
                 .toList();
+    }
+
+    /**
+     * Whether a reported post is still live, and so its report still open.
+     *
+     * <p>Status, not mere existence: removing a post retires it to the terminal REJECTED state
+     * rather than deleting the record (see deletePost), so the record outlives the removal and
+     * an existence check would leave every handled report sitting in the queue.
+     */
+    private boolean isPostLive(UUID postId, UUID tenantId) {
+        Map<String, Object> record = unwrap(recordClient.getRecord(postId, tenantId));
+        return !record.isEmpty() && !"REJECTED".equals(String.valueOf(record.get("status")));
     }
 
     @Transactional
