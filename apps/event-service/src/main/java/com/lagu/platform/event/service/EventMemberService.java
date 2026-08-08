@@ -131,16 +131,38 @@ public class EventMemberService {
         return toResponse(memberRepo.save(member));
     }
 
-    /** The invited user accepts or declines their own INVITED membership row. */
+    /**
+     * The user accepts or declines their own membership.
+     *
+     * <p>Three transitions are allowed: INVITED to either answer, ACCEPTED to DECLINED (this is
+     * "leave event" — the client has no separate endpoint for it), and DECLINED back to ACCEPTED.
+     *
+     * <p>That last one used to be refused, while the UI told people in two places they could
+     * re-accept if they changed their mind. Reviving is also what invite() already does with a
+     * DECLINED row, so the reverse being impossible was inconsistent as well as wrong: a guest
+     * who declined by mistake had to ask an organiser to re-invite them. REMOVED is deliberately
+     * not revivable — that decision was the organiser's, not theirs.
+     */
     @Transactional
     public EventMemberResponse respondToInvite(UUID eventId, UUID userId, boolean accept) {
         Event event = requireEvent(eventId);
         EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not invited to this event"));
-        if (!"INVITED".equals(member.getStatus())) {
-            throw new ValidationException("No pending invitation to respond to");
+        if ("REMOVED".equals(member.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You were removed from this event");
         }
-        member.setStatus(accept ? "ACCEPTED" : "DECLINED");
+        String target = accept ? "ACCEPTED" : "DECLINED";
+        if (target.equals(member.getStatus())) {
+            throw new ValidationException("Nothing to respond to");
+        }
+        // Declining as the last remaining ADMIN would leave the event unmanageable, the same way
+        // removing them would — the guard that covers remove()/updateRole() has to cover walking
+        // out too.
+        if (!accept) {
+            MembershipPolicy.requireManagerRemainsAfterMutation(
+                    memberRepo.findByTenantId(event.getTenantId()), userId, null, LAST_MANAGER_ROLES);
+        }
+        member.setStatus(target);
         return toResponse(memberRepo.save(member));
     }
 

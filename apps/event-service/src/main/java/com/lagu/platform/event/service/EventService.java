@@ -19,6 +19,7 @@ import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -26,10 +27,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +47,19 @@ public class EventService {
     private final EventRepository       eventRepo;
     private final EventMemberRepository memberRepo;
     private final RecordServiceClient   recordClient;
+
+    /**
+     * Fans out listMine()'s per-event record fetches. Blocking IO, so it is deliberately not the
+     * common ForkJoinPool; virtual threads keep the width unbounded-but-cheap, which suits a
+     * workload that is entirely waiting on record-service.
+     */
+    private final ExecutorService listHydrationExecutor =
+            Executors.newVirtualThreadPerTaskExecutor();
+
+    @jakarta.annotation.PreDestroy
+    void shutdownExecutor() {
+        listHydrationExecutor.shutdown();
+    }
 
     @Transactional
     public EventResponse create(CreateEventRequest req, UUID userId) {
@@ -139,16 +159,59 @@ public class EventService {
         String ot = (objectType != null && !objectType.isBlank()) ? objectType.toUpperCase() : null;
         String st = (status != null && !status.isBlank()) ? status.toUpperCase() : null;
         PageRequest pageReq = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return PageResult.from(eventRepo.search(ot, st, pageReq).map(EventSummaryResponse::from));
+        Page<Event> events = eventRepo.search(ot, st, pageReq);
+
+        // Every row's name is fetched from record-service, so they are all started before any is
+        // waited on — mapping them one at a time would cost the page `size` sequential round
+        // trips. Same executor and reasoning as listMine().
+        Map<UUID, CompletableFuture<String>> names = events.getContent().stream()
+                .collect(Collectors.toMap(Event::getId, e -> CompletableFuture.supplyAsync(
+                        () -> fetchData(e).get("name") instanceof String s ? s : null,
+                        listHydrationExecutor)));
+
+        return PageResult.from(events.map(event -> {
+            EventSummaryResponse summary = EventSummaryResponse.from(event);
+            summary.setName(names.get(event.getId()).join());
+            return summary;
+        }));
     }
 
-    /** Events the caller is a member of, accepted or still-pending — pending ones are how an
-     *  invited user discovers they have an invitation to respond to (see get()'s note above). */
+    /**
+     * Events the caller is a member of, accepted or still-pending — pending ones are how an
+     * invited user discovers they have an invitation to respond to (see get()'s note above).
+     *
+     * <p>Each row carries its full record `data`, same as the single-event GET. It used not to,
+     * and the client compensated by re-fetching every event individually — one HTTP round trip
+     * per event on top of this one, each of which came straight back here and did the
+     * record-service call below anyway. Doing it server-side collapses that to a single
+     * request; the per-event record fetches still happen, but in parallel and without the
+     * browser in the loop.
+     */
     public List<EventResponse> listMine(UUID userId) {
-        return memberRepo.findByUserId(userId).stream()
+        List<EventMember> memberships = memberRepo.findByUserId(userId).stream()
                 .filter(m -> !"DECLINED".equals(m.getStatus()))
-                .map(m -> eventRepo.findById(m.getTenantId()).map(e -> toResponse(e, m, null)))
-                .flatMap(java.util.Optional::stream)
+                .toList();
+        if (memberships.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, Event> events = eventRepo.findAllById(memberships.stream().map(EventMember::getTenantId).toList())
+                .stream().collect(Collectors.toMap(Event::getId, e -> e));
+
+        // Concurrent because each fetchData is an independent blocking call to record-service;
+        // serially this costs (event count x round trip) before the first byte goes out. Runs on
+        // a dedicated pool rather than the common ForkJoinPool, which is sized for CPU work and
+        // would be starved by blocking IO.
+        List<CompletableFuture<EventResponse>> futures = memberships.stream()
+                .map(m -> events.get(m.getTenantId()) == null ? null : CompletableFuture.supplyAsync(
+                        () -> toResponse(events.get(m.getTenantId()), m, fetchData(events.get(m.getTenantId()))),
+                        listHydrationExecutor))
+                .filter(Objects::nonNull)
+                .toList();
+
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .sorted(Comparator.comparing(EventResponse::getCreatedAt).reversed())
                 .toList();
     }
 

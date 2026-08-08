@@ -272,6 +272,44 @@ class EventMemberServiceTest {
         assertThat(response.getStatus()).isEqualTo("DECLINED");
     }
 
+    @Test
+    void respondToInviteRevivesADeclinedMembership() {
+        // The UI offers "re-join" and both leave dialogs promise it. This used to be refused,
+        // leaving a guest who declined by mistake dependent on an organiser re-inviting them.
+        UUID invitee = UUID.randomUUID();
+        EventMember declined = memberWithRole(invitee, "INVITEE");
+        declined.setStatus("DECLINED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, invitee)).thenReturn(Optional.of(declined));
+        when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.respondToInvite(eventId, invitee, true).getStatus()).isEqualTo("ACCEPTED");
+    }
+
+    @Test
+    void respondToInviteWontLetARemovedMemberLetThemselvesBackIn() {
+        UUID removed = UUID.randomUUID();
+        EventMember member = memberWithRole(removed, "INVITEE");
+        member.setStatus("REMOVED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, removed)).thenReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> service.respondToInvite(eventId, removed, true))
+                .isInstanceOf(ResponseStatusException.class);
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
+    void respondToInviteWontLetTheLastAdminWalkOut() {
+        // Leaving is a decline, so it needs the same last-manager guard as remove()/updateRole().
+        EventMember onlyAdmin = memberWithRole(ownerId, "ADMIN");
+        onlyAdmin.setStatus("ACCEPTED");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, ownerId)).thenReturn(Optional.of(onlyAdmin));
+        when(memberRepo.findByTenantId(tenantId)).thenReturn(java.util.List.of(onlyAdmin));
+
+        assertThatThrownBy(() -> service.respondToInvite(eventId, ownerId, false))
+                .isInstanceOf(ValidationException.class);
+        verify(memberRepo, never()).save(any());
+    }
+
     // ── join requests ────────────────────────────────────────────────────────
 
     @Test

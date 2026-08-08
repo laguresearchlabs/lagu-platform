@@ -52,6 +52,8 @@ class EventServiceTest {
         event.setObjectType("BIRTHDAY_EVENT");
         event.setOwnerUserId(ownerId);
         when(eventRepo.findById(eventId)).thenReturn(Optional.of(event));
+        // listMine() batch-loads its events rather than one findById per membership row.
+        when(eventRepo.findAllById(any())).thenReturn(java.util.List.of(event));
     }
 
     private EventMember memberWithRole(UUID userId, String role, String status) {
@@ -120,6 +122,21 @@ class EventServiceTest {
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).getMyRole()).isEqualTo("INVITEE");
+    }
+
+    @Test
+    void listMineHydratesEachRowWithItsRecordData() {
+        // The rows used to come back with a null `data`, and the client compensated by
+        // re-fetching every event one at a time.
+        when(memberRepo.findByUserId(ownerId))
+                .thenReturn(java.util.List.of(memberWithRole(ownerId, "ADMIN", "ACCEPTED")));
+        when(recordClient.getRecord(recordId, eventId))
+                .thenReturn(Map.of("data", Map.of("data", Map.of("name", "Priya's 30th"))));
+
+        var results = service.listMine(ownerId);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getData()).containsEntry("name", "Priya's 30th");
     }
 
     @Test

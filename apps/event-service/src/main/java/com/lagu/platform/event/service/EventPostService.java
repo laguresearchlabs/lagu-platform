@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -92,38 +93,49 @@ public class EventPostService {
         Event event = requireEvent(eventId);
         requireMember(event, requesterId);
 
-        List<PostResponse> published = recordClient
-                .listRecords(event.getTenantId(), "EVENT_POST", "PUBLISHED", page, size).stream()
-                .map(r -> toPostResponse(r, requesterId))
-                .toList();
+        List<PostResponse> published = toPostResponses(
+                recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PUBLISHED", page, size), requesterId);
 
         // Only the first page carries them, so the PUBLISHED stream keeps exact page boundaries
         // — clients treat a short page as the end of the feed.
         if (page > 0) {
-            return published;
+            return sortPinnedFirst(published);
         }
 
-        List<PostResponse> ownUnpublished = Stream.of("DRAFT", "PENDING")
+        List<PostResponse> ownUnpublished = toPostResponses(Stream.of("DRAFT", "PENDING")
                 .flatMap(status -> recordClient
                         .listRecords(event.getTenantId(), "EVENT_POST", status, 0, OWN_UNPUBLISHED_LIMIT).stream())
                 .filter(r -> requesterId.toString().equals(String.valueOf(r.get("createdBy"))))
-                .map(r -> toPostResponse(r, requesterId))
-                .toList();
+                .toList(), requesterId);
 
         if (ownUnpublished.isEmpty()) {
-            return published;
+            return sortPinnedFirst(published);
         }
         List<PostResponse> combined = new ArrayList<>(ownUnpublished);
-        combined.addAll(published);
+        combined.addAll(sortPinnedFirst(published));
         return combined;
+    }
+
+    /**
+     * Floats pinned posts to the top of the page.
+     *
+     * <p>Only within the page: record-service orders by createdAt and can't sort on a data field,
+     * so a pinned post that falls on page 3 stays on page 3. The client used to do this sort
+     * itself over whatever pages it held, which produced the same result less predictably (the
+     * order changed as more pages loaded). Doing it here at least makes each page's order stable
+     * and identical for every client.
+     */
+    private List<PostResponse> sortPinnedFirst(List<PostResponse> posts) {
+        return posts.stream()
+                .sorted(java.util.Comparator.comparing(PostResponse::isPinned).reversed())
+                .toList();
     }
 
     public List<PostResponse> listPendingPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
         requireManager(event, requesterId);
-        return recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PENDING", page, size).stream()
-                .map(r -> toPostResponse(r, requesterId))
-                .toList();
+        return toPostResponses(
+                recordClient.listRecords(event.getTenantId(), "EVENT_POST", "PENDING", page, size), requesterId);
     }
 
     /**
@@ -181,15 +193,37 @@ public class EventPostService {
         recordClient.requestTransition(postId, event.getTenantId(), requesterId, "reject");
     }
 
+    /** The only reasons the moderation UI can render — anything else would reach a moderator as
+     *  an unlabelled badge, so it's rejected rather than stored. */
+    private static final Set<String> REPORT_REASONS = Set.of("SPAM", "INAPPROPRIATE", "OFF_TOPIC", "OTHER");
+
     @Transactional
     public PostReportResponse reportPost(UUID eventId, UUID postId, UUID reporterId, CreateReportRequest req) {
         Event event = requireEvent(eventId);
         requireMember(event, reporterId);
-        getRecordOrNotFound(postId, event.getTenantId()); // 404 if the post doesn't exist/isn't in this event
+        Map<String, Object> post = getRecordOrNotFound(postId, event.getTenantId()); // 404 if not in this event
+
+        String reason = req.getReason().toUpperCase();
+        if (!REPORT_REASONS.contains(reason)) {
+            throw new ValidationException("Invalid report reason: " + req.getReason());
+        }
+        if (reporterId.toString().equals(String.valueOf(post.get("createdBy")))) {
+            throw new ValidationException("You can't report your own post");
+        }
+        // One report per person per post. Without this the same user could file the same report
+        // repeatedly, and each one showed up as its own badge in the moderator's queue —
+        // inflating how contested a post looked and giving anyone a way to bury it.
+        boolean alreadyReported = recordClient
+                .listRecords(event.getTenantId(), "EVENT_POST_REPORT", null, 0, EXISTING_REPORTS_SCAN_LIMIT).stream()
+                .anyMatch(r -> reporterId.toString().equals(String.valueOf(r.get("createdBy")))
+                        && postId.toString().equals(String.valueOf(dataOf(r).get("reported_post_id"))));
+        if (alreadyReported) {
+            throw new ValidationException("You've already reported this post");
+        }
 
         Map<String, Object> data = Map.of(
                 "reported_post_id", postId.toString(),
-                "report_reason", req.getReason().toUpperCase(),
+                "report_reason", reason,
                 "report_details", req.getDetails() != null ? req.getDetails() : "");
         Map<String, Object> recordResponse = recordClient.createRecord(event.getTenantId(), reporterId, "EVENT_POST_REPORT", data);
         UUID reportId = recordClient.extractRecordId(recordResponse);
@@ -203,12 +237,21 @@ public class EventPostService {
                 .build();
     }
 
+    /** How far back to scan the report log when checking whether this user already reported this
+     *  post. Reports are low-volume per event; a bound keeps a runaway queue from making the
+     *  duplicate check itself expensive. */
+    private static final int EXISTING_REPORTS_SCAN_LIMIT = 200;
+
     /**
-     * Open reports — those whose post still exists.
+     * Open reports — those whose post is still live — each carrying the reported post's content.
      *
      * <p>Removing the offending post is how a moderator resolves a report, but the
      * EVENT_POST_REPORT record outlives the post it points at. Returning those too meant the
      * queue never emptied and every handled report stayed on screen looking outstanding.
+     *
+     * <p>The liveness check has to read each reported post anyway, so the same read supplies the
+     * content and author the moderator needs to judge it — the client has no other way to reach a
+     * post that isn't on a feed page it happens to have loaded.
      */
     public List<PostReportResponse> listReportedPosts(UUID eventId, UUID requesterId, int page, int size) {
         Event event = requireEvent(eventId);
@@ -220,23 +263,31 @@ public class EventPostService {
 
         // Cached per post id — one post commonly draws several reports, and each miss is a
         // round trip to record-service.
-        Map<UUID, Boolean> stillOpen = new HashMap<>();
+        Map<UUID, Map<String, Object>> livePosts = new HashMap<>();
         return reports.stream()
-                .filter(r -> r.getPostId() != null && stillOpen.computeIfAbsent(
-                        r.getPostId(), id -> isPostLive(id, event.getTenantId())))
+                .filter(r -> r.getPostId() != null)
+                .filter(r -> !livePosts.computeIfAbsent(
+                        r.getPostId(), id -> livePostOrEmpty(id, event.getTenantId())).isEmpty())
+                .map(r -> {
+                    Map<String, Object> post = livePosts.get(r.getPostId());
+                    r.setPostContent((String) dataOf(post).get("post_content"));
+                    Object author = post.get("createdBy");
+                    r.setPostAuthorUserId(author != null ? UUID.fromString(String.valueOf(author)) : null);
+                    return r;
+                })
                 .toList();
     }
 
     /**
-     * Whether a reported post is still live, and so its report still open.
+     * The reported post if it is still live, or an empty map if its report is already resolved.
      *
      * <p>Status, not mere existence: removing a post retires it to the terminal REJECTED state
      * rather than deleting the record (see deletePost), so the record outlives the removal and
      * an existence check would leave every handled report sitting in the queue.
      */
-    private boolean isPostLive(UUID postId, UUID tenantId) {
+    private Map<String, Object> livePostOrEmpty(UUID postId, UUID tenantId) {
         Map<String, Object> record = unwrap(recordClient.getRecord(postId, tenantId));
-        return !record.isEmpty() && !"REJECTED".equals(String.valueOf(record.get("status")));
+        return "REJECTED".equals(String.valueOf(record.get("status"))) ? Map.of() : record;
     }
 
     @Transactional
@@ -379,27 +430,57 @@ public class EventPostService {
         return member;
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Maps a page of post records, resolving every post's like count and the viewer's own likes
+     * in two queries rather than the two-per-post the single-record path costs. A 20-post feed
+     * was issuing 40 statements before the page could be serialised.
+     */
+    private List<PostResponse> toPostResponses(List<Map<String, Object>> records, UUID viewerId) {
+        if (records.isEmpty()) return List.of();
+
+        List<UUID> postIds = records.stream()
+                .map(r -> UUID.fromString(String.valueOf(r.get("id"))))
+                .toList();
+
+        Map<UUID, Long> counts = likeRepo.countByPostRecordIdIn(postIds).stream()
+                .collect(java.util.stream.Collectors.toMap(row -> (UUID) row[0], row -> (Long) row[1]));
+        Set<UUID> likedByViewer = Set.copyOf(likeRepo.findLikedPostIds(viewerId, postIds));
+
+        return records.stream()
+                .map(r -> {
+                    UUID id = UUID.fromString(String.valueOf(r.get("id")));
+                    return toPostResponse(r, counts.getOrDefault(id, 0L), likedByViewer.contains(id));
+                })
+                .toList();
+    }
+
+    /** Single-post path — the like state costs its own two queries here, which is what a
+     *  one-post response is worth. Pages go through {@link #toPostResponses}. */
     private PostResponse toPostResponse(Map<String, Object> record, UUID viewerId) {
+        UUID id = UUID.fromString(String.valueOf(record.get("id")));
+        return toPostResponse(record, likeRepo.countByPostRecordId(id),
+                likeRepo.existsByPostRecordIdAndUserId(id, viewerId));
+    }
+
+    private PostResponse toPostResponse(Map<String, Object> record, long likeCount, boolean likedByMe) {
         // `record` is always an already-unwrapped RecordResponse map here (id/status/data/
         // createdBy at the top level) -- both listRecords' content items and unwrap()'s output
         // have that shape.
         Map<String, Object> fields = dataOf(record);
-        UUID id = UUID.fromString(String.valueOf(record.get("id")));
         Object imageIdsRaw = fields.get("post_image_ids");
         List<UUID> imageIds = imageIdsRaw instanceof List<?> list
                 ? list.stream().map(v -> UUID.fromString(String.valueOf(v))).toList() : null;
 
         return PostResponse.builder()
-                .id(id)
+                .id(UUID.fromString(String.valueOf(record.get("id"))))
                 .authorUserId(record.get("createdBy") != null ? UUID.fromString(String.valueOf(record.get("createdBy"))) : null)
                 .content((String) fields.get("post_content"))
                 .imageIds(imageIds)
                 .pinned(Boolean.TRUE.equals(fields.get("post_pinned")))
                 .locked(Boolean.TRUE.equals(fields.get("post_locked")))
                 .status((String) record.get("status"))
-                .likeCount(likeRepo.countByPostRecordId(id))
-                .likedByMe(likeRepo.existsByPostRecordIdAndUserId(id, viewerId))
+                .likeCount(likeCount)
+                .likedByMe(likedByMe)
                 .createdAt(createdAtOf(record))
                 .build();
     }
