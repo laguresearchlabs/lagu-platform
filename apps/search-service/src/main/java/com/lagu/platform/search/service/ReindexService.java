@@ -65,6 +65,28 @@ public class ReindexService {
         log.info("Reindex complete: org={} objectType={} indexed={}", tenantId, objectType, indexed);
     }
 
+    /**
+     * Rebuilds a single document from record-service. Used when a STATUS_CHANGED arrives for a
+     * record whose CREATED event is no longer on the topic (Kafka retention is shorter than the
+     * lifetime of a record), so the partial update has nothing to patch.
+     *
+     * <p>Deliberately synchronous, unlike {@link #reindex}: the caller is a Kafka listener that
+     * must know whether the document exists before it acks.
+     *
+     * @return false if record-service says the record no longer exists — there is nothing to index
+     */
+    public boolean reindexOne(String recordId, String tenantId, String objectType) throws IOException {
+        Map<String, Object> record = recordClient.getRecord(recordId, tenantId);
+        if (record == null) return false;
+
+        mappingBuilder.ensureIndex(tenantId, objectType);
+        String index = mappingBuilder.indexName(tenantId, objectType);
+
+        Map<String, Object> doc = buildDoc(record, tenantId, objectType);
+        osClient.index(r -> r.index(index).id(recordId).document(doc));
+        return true;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> buildDoc(Map<String, Object> record, String tenantId, String objectType) {
         Map<String, Object> doc = new HashMap<>();

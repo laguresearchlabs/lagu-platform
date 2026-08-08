@@ -3,9 +3,11 @@ package com.lagu.platform.search.event;
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.events.RecordEvent;
 import com.lagu.platform.search.service.IndexMappingBuilder;
+import com.lagu.platform.search.service.ReindexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.client.opensearch.OpenSearchClient;
+import org.opensearch.client.opensearch._types.OpenSearchException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
@@ -22,6 +24,7 @@ public class SearchDocumentIndexer {
 
     private final OpenSearchClient     osClient;
     private final IndexMappingBuilder  mappingBuilder;
+    private final ReindexService       reindexService;
 
     @KafkaListener(
             topics = PlatformTopics.RECORD_EVENTS,
@@ -74,7 +77,12 @@ public class SearchDocumentIndexer {
         String tenantId      = event.getTenantId().toString();
         String objectType = event.getObjectType();
         String recordId   = event.getRecordId().toString();
-        String index      = mappingBuilder.indexName(tenantId, objectType);
+
+        // Unlike indexFull() this path used to skip ensureIndex, so a STATUS_CHANGED arriving
+        // before any CREATED for that org/type (a fresh index, or a consumer replaying from
+        // earliest) hit index_not_found_exception — a 404 that no amount of retrying can fix.
+        mappingBuilder.ensureIndex(tenantId, objectType);
+        String index = mappingBuilder.indexName(tenantId, objectType);
 
         Map<String, Object> patch = Map.of(
                 "status",    event.getCurrentStatus(),
@@ -83,17 +91,49 @@ public class SearchDocumentIndexer {
 
         final String idx = index;
         final String id  = recordId;
-        osClient.update(r -> r.index(idx).id(id).doc(patch), Map.class);
-        log.debug("Partial-updated status for record {} in {}", recordId, index);
+        try {
+            osClient.update(r -> r.index(idx).id(id).doc(patch), Map.class);
+            log.debug("Partial-updated status for record {} in {}", recordId, index);
+        } catch (OpenSearchException e) {
+            if (!isDocumentMissing(e)) throw e;
+            // The index exists but the document does not — the record's CREATED event aged out of
+            // Kafka (retention is 168h) before this consumer group replayed. A partial update has
+            // nothing to patch and no retry can change that, so rebuild the document from
+            // record-service instead of dead-lettering a status change that is perfectly valid.
+            if (reindexService.reindexOne(recordId, tenantId, objectType)) {
+                log.info("Rebuilt missing document {} in {} from record-service", recordId, index);
+            } else {
+                log.warn("STATUS_CHANGED for record {}, absent from both {} and record-service; skipping",
+                        recordId, index);
+            }
+        }
+    }
+
+    /** A 404 the update API returns when the index is present but the document id is not. */
+    private static boolean isDocumentMissing(OpenSearchException e) {
+        return e.status() == 404
+                && e.error() != null
+                && "document_missing_exception".equals(e.error().type());
     }
 
     private void delete(RecordEvent event) throws IOException {
         String tenantId      = event.getTenantId().toString();
         String objectType = event.getObjectType();
         String recordId   = event.getRecordId().toString();
-        String index      = mappingBuilder.indexName(tenantId, objectType);
 
-        osClient.delete(r -> r.index(index).id(recordId));
-        log.debug("Deleted record {} from {}", recordId, index);
+        // Same gap as partialUpdate: deleting from an index that was never created threw
+        // index_not_found_exception instead of being the no-op it should be.
+        mappingBuilder.ensureIndex(tenantId, objectType);
+        String index = mappingBuilder.indexName(tenantId, objectType);
+
+        try {
+            osClient.delete(r -> r.index(index).id(recordId));
+            log.debug("Deleted record {} from {}", recordId, index);
+        } catch (OpenSearchException e) {
+            if (e.status() != 404) throw e;
+            // Removing something that was never indexed is the outcome this event wanted anyway.
+            // Dead-lettering it would be pure noise.
+            log.debug("Record {} already absent from {}", recordId, index);
+        }
     }
 }
