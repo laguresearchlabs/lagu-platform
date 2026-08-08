@@ -29,6 +29,17 @@ public class SearchDocumentIndexer {
             properties = {"spring.json.value.default.type=com.lagu.platform.events.RecordEvent"}
     )
     public void handle(RecordEvent event, Acknowledgment ack) throws IOException {
+        // Every branch resolves an index name from tenantId + objectType and uses recordId as the
+        // document id, so a null in any of the three is unindexable no matter how often we retry.
+        // Drop it with a warning rather than letting the NPE burn 3 retries and a DLT slot on a
+        // record we could never process.
+        if (event.getTenantId() == null || event.getObjectType() == null || event.getRecordId() == null) {
+            log.warn("Skipping {} event: missing recordId={} tenantId={} objectType={}",
+                    event.getEventType(), event.getRecordId(), event.getTenantId(), event.getObjectType());
+            ack.acknowledge();
+            return;
+        }
+
         switch (event.getEventType()) {
             case "CREATED", "UPDATED" -> indexFull(event);
             case "STATUS_CHANGED"     -> partialUpdate(event);

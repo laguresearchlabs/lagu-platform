@@ -35,6 +35,17 @@ public class ListingEventConsumer {
             properties = {"spring.json.value.default.type=com.lagu.platform.events.ListingEvent"}
     )
     public void handle(ListingEvent event, Acknowledgment ack) throws IOException {
+        // Both branches resolve a consumer index from objectType and use recordId as the document
+        // id (tenantId is indexed on the document), so a null in any of the three is unindexable no
+        // matter how often we retry. Drop it with a warning instead of burning retries and a DLT
+        // slot on a snapshot we could never process.
+        if (event.getTenantId() == null || event.getObjectType() == null || event.getRecordId() == null) {
+            log.warn("Skipping {} event: missing recordId={} tenantId={} objectType={}",
+                    event.getEventType(), event.getRecordId(), event.getTenantId(), event.getObjectType());
+            ack.acknowledge();
+            return;
+        }
+
         switch (event.getEventType()) {
             case "PUBLISHED"   -> index(event);
             case "UNPUBLISHED" -> delete(event);
