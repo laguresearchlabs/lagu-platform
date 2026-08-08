@@ -296,13 +296,27 @@ public class EventPostService {
                 .toList();
     }
 
+    /**
+     * Detaches the comment from its post.
+     *
+     * <p>Like deletePost this can't call deleteRecord — internal service callers are denied
+     * DELETE on RECORD (DefaultPermissionEvaluator). Posts solve that with a workflow
+     * transition to REJECTED, but EVENT_COMMENT deliberately has no workflow (see addComment),
+     * and inventing one for a single action would be disproportionate. listComments resolves
+     * comments purely by walking the post's EVENT_COMMENT relationships, so dropping the edge
+     * removes it from every listing — and unlike a transition it takes effect immediately,
+     * since relationship writes count as RECORD UPDATE rather than going through Kafka.
+     *
+     * <p>The comment record itself is left orphaned and unreachable, the same trade the post
+     * path makes by keeping REJECTED records around.
+     */
     @Transactional
     public void deleteComment(UUID eventId, UUID postId, UUID commentId, UUID requesterId) {
         Event event = requireEvent(eventId);
         EventMember member = requireMember(event, requesterId);
         Map<String, Object> comment = getRecordOrNotFound(commentId, event.getTenantId());
         requireAuthorOrManager(comment, member, requesterId);
-        recordClient.deleteRecord(commentId, event.getTenantId());
+        recordClient.deleteRelationship(postId, event.getTenantId(), "EVENT_COMMENT", commentId);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

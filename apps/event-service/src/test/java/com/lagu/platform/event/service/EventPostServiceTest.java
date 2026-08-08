@@ -158,6 +158,42 @@ class EventPostServiceTest {
     }
 
     @Test
+    void deleteCommentDetachesItFromThePost() {
+        // EVENT_COMMENT has no workflow to transition through, so removal drops the post's
+        // relationship instead — listComments resolves comments by walking those edges, and
+        // relationship writes are RECORD UPDATE, which internal callers are allowed.
+        UUID author = UUID.randomUUID();
+        UUID commentId = UUID.randomUUID();
+        when(memberRepo.findByTenantIdAndUserId(tenantId, author))
+                .thenReturn(Optional.of(memberWithRole(author, "INVITEE")));
+        when(recordClient.getRecord(commentId, tenantId)).thenReturn(Map.of("data",
+                Map.of("id", commentId.toString(), "createdBy", author.toString(),
+                        "data", Map.of("comment_content", "hi"))));
+
+        service.deleteComment(eventId, postId, commentId, author);
+
+        verify(recordClient).deleteRelationship(postId, tenantId, "EVENT_COMMENT", commentId);
+        verify(recordClient, never()).deleteRecord(any(), any());
+    }
+
+    @Test
+    void deleteCommentRejectedForAnotherMember() {
+        UUID author = UUID.randomUUID();
+        UUID stranger = UUID.randomUUID();
+        UUID commentId = UUID.randomUUID();
+        when(memberRepo.findByTenantIdAndUserId(tenantId, stranger))
+                .thenReturn(Optional.of(memberWithRole(stranger, "INVITEE")));
+        when(recordClient.getRecord(commentId, tenantId)).thenReturn(Map.of("data",
+                Map.of("id", commentId.toString(), "createdBy", author.toString(),
+                        "data", Map.of("comment_content", "hi"))));
+
+        assertThatThrownBy(() -> service.deleteComment(eventId, postId, commentId, stranger))
+                .isInstanceOf(ResponseStatusException.class);
+
+        verify(recordClient, never()).deleteRelationship(any(), any(), any(), any());
+    }
+
+    @Test
     void addCommentRejectedWhenPostLocked() {
         UUID member = UUID.randomUUID();
         UUID author = UUID.randomUUID();
