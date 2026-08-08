@@ -22,6 +22,17 @@ spring:
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    # search-service publishes no domain events, but the auto-configured KafkaTemplate is what
+    # DeadLetterPublishingRecoverer uses to write <topic>.DLT — and the failed record's value is a
+    # deserialized event object, not a String. Without JsonSerializer here the DLT publish throws
+    # ClassCastException, the error handler can never recover, and the listener re-seeks forever.
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
     consumer:
       group-id: search-service
       auto-offset-reset: earliest
