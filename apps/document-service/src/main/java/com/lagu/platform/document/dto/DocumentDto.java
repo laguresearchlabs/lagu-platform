@@ -32,7 +32,12 @@ public class DocumentDto {
     private OffsetDateTime uploadedAt;
     private OffsetDateTime updatedAt;
 
-    public static DocumentDto from(Document d) {
+    /**
+     * @param signedUrl freshly signed download URL for {@code d}'s stored key. Passed in rather
+     *                  than read off the entity because the entity holds a key, not a URL — the
+     *                  URL is minted per request and expires shortly after.
+     */
+    public static DocumentDto from(Document d, String signedUrl) {
         return DocumentDto.builder()
                 .id(d.getId())
                 .tenantId(d.getTenantId())
@@ -40,7 +45,7 @@ public class DocumentDto {
                 .documentType(d.getDocumentType())
                 .identitySubType(d.getIdentitySubType())
                 .fileName(d.getFileName())
-                .fileUrl(d.getFileUrl())
+                .fileUrl(signedUrl)
                 .mimeType(d.getMimeType())
                 .fileSizeBytes(d.getFileSizeBytes())
                 .status(d.getStatus())

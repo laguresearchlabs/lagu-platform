@@ -48,11 +48,17 @@ public class RecordValidator {
 
             Object value = data.get(field.name());
 
-            if (field.required() && (value == null || isBlank(value))) {
+            // A gallery with a minimum photo count is required by that alone. Without this, an
+            // admin setting minCount=5 on an optional gallery would get a rule that fires for a
+            // vendor who uploads four photos and stays silent for one who uploads none — which
+            // is the opposite of what "at least five photos" is asking for.
+            boolean required = field.required() || MediaFieldRules.requiresContent(field);
+
+            if (required && (value == null || isBlank(value))) {
                 errors.add(field.name() + ": field is required");
                 continue;
             }
-            if (value == null || (!field.required() && isBlank(value))) continue;
+            if (value == null || (!required && isBlank(value))) continue;
 
             validateByType(field, value, errors);
         }
@@ -96,6 +102,49 @@ public class RecordValidator {
         return result;
     }
 
+    /**
+     * Replaces FILE/IMAGE values in an incoming write with the ones already stored, dropping
+     * them entirely when the record has none.
+     *
+     * <p>These fields hold an object storage key, and the only thing entitled to write one is
+     * the confirm step in {@code RecordFileController}, which mints the key itself and verifies
+     * the uploaded bytes before saving it. The generic record write reaches the same JSONB
+     * though, and it used to accept any non-blank string there — so a caller with UPDATE on
+     * their own record could set {@code cover_image} to a key belonging to a different record
+     * and then collect a signed URL for it from the download endpoint. Keys are guessable
+     * enough to matter: the record id is in the path, and the rest is a UUID plus the original
+     * filename.
+     *
+     * <p>Client-supplied values are ignored rather than rejected, matching how
+     * {@link #stripHiddenFields} treats fields a caller should not be setting — a read-modify-
+     * write client that sends the record back unchanged keeps working, and one that tampers
+     * simply has no effect.
+     *
+     * @param existing the record's current data; empty for a create, where no upload can have
+     *                 happened yet because the key is scoped to a record id that does not exist
+     */
+    public Map<String, Object> preserveServerOwnedFields(String objectType,
+                                                         Map<String, Object> incoming,
+                                                         Map<String, Object> existing) {
+        ObjectTypeSchemaDto schema = metadataClient.getSchema(objectType.toUpperCase());
+        Map<String, Object> result = new java.util.HashMap<>(incoming);
+
+        for (FieldSchemaDto field : schema.fields()) {
+            if (!SERVER_OWNED_TYPES.contains(field.type())) continue;
+            Object stored = existing.get(field.name());
+            if (stored != null) {
+                result.put(field.name(), stored);
+            } else {
+                result.remove(field.name());
+            }
+        }
+        return result;
+    }
+
+    /** Field types whose value only this service may write. See {@link #preserveServerOwnedFields}. */
+    private static final java.util.Set<String> SERVER_OWNED_TYPES = java.util.Set.of(
+            MediaFieldRules.TYPE_FILE, MediaFieldRules.TYPE_IMAGE, MediaFieldRules.TYPE_GALLERY);
+
     private void validateByType(FieldSchemaDto field, Object value, List<String> errors) {
         String type = field.type();
         switch (type) {
@@ -115,6 +164,7 @@ public class RecordValidator {
             case "TIME"     -> validateTime(field, value, errors);
             case "ENTITY_REFERENCE", "USER_REFERENCE" -> validateReference(field, value, errors);
             case "FILE", "IMAGE" -> validateFileOrImage(field, value, errors);
+            case "MEDIA_GALLERY" -> validateGallery(field, value, errors);
             case "CURRENCY" -> validateCurrency(field, value, errors);
             case "GEOLOCATION", "ADDRESS" -> validateStructured(field, value, errors);
             // JSON is deliberately unvalidated beyond being valid JSON (already guaranteed by
@@ -306,11 +356,42 @@ public class RecordValidator {
         }
     }
 
-    /** FILE/IMAGE fields hold the URL RecordFileController wrote back after upload — not the
-     *  raw multipart payload, which never travels through this JSON validation path. */
+    /**
+     * FILE/IMAGE values are server-owned, so by the time validation runs the value here is the
+     * stored key {@code RecordFileController} wrote after verifying the uploaded bytes —
+     * {@link #preserveServerOwnedFields} has already replaced whatever the client sent.
+     *
+     * <p>Nothing further to check, then: the key was produced by this service, and its bytes
+     * were sniffed at confirm. Only the {@code required} check above still applies, and it is
+     * the meaningful one — it asks whether an upload happened.
+     */
     private void validateFileOrImage(FieldSchemaDto field, Object value, List<String> errors) {
         if (!(value instanceof String str) || str.isBlank()) {
-            errors.add(field.name() + ": must be a non-empty file/image URL");
+            errors.add(field.name() + ": must reference an uploaded file");
+        }
+    }
+
+    /**
+     * A gallery's items are server-owned in the same way a FILE value is, so the shape is
+     * already established by the time this runs — {@code RecordGalleryController} wrote it.
+     *
+     * <p>What is worth checking here is the count, because that is a statement about the
+     * finished listing rather than about any one upload. {@code minCount} is the control an
+     * admin reaches for to hold listing quality up ("a venue needs five photos before it can be
+     * submitted"), and it can only be enforced where the whole record is in view.
+     */
+    private void validateGallery(FieldSchemaDto field, Object value, List<String> errors) {
+        if (!(value instanceof List<?> items)) {
+            errors.add(field.name() + ": must be a list of gallery items");
+            return;
+        }
+        int min = MediaFieldRules.minCount(field);
+        if (items.size() < min) {
+            errors.add(field.name() + ": needs at least " + min + " photo(s), has " + items.size());
+        }
+        int max = MediaFieldRules.maxCount(field);
+        if (items.size() > max) {
+            errors.add(field.name() + ": holds " + items.size() + " photo(s), maximum is " + max);
         }
     }
 

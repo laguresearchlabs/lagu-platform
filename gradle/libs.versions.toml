@@ -11,6 +11,9 @@ testcontainers          = "1.21.0"
 jackson                 = "2.19.0"
 opensearch-client       = "2.19.0"
 awaitility              = "4.2.2"
+aws-sdk                 = "2.31.16"
+gcs                     = "2.49.0"
+twelvemonkeys           = "3.12.0"
 
 [libraries]
 # Spring Boot starters
@@ -37,6 +40,15 @@ flyway-core                 = { module = "org.flywaydb:flyway-core", version.ref
 flyway-postgresql           = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
 spring-boot-flyway          = { module = "org.springframework.boot:spring-boot-starter-flyway" }
 spring-boot-jackson2        = { module = "org.springframework.boot:spring-boot-jackson2" }
+
+# Object storage (libs/storage)
+# S3Presigner ships inside the s3 artifact — no separate presigner dependency.
+aws-s3                      = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+aws-auth                    = { module = "software.amazon.awssdk:auth", version.ref = "aws-sdk" }
+gcs                         = { module = "com.google.cloud:google-cloud-storage", version.ref = "gcs" }
+# ImageIO has no WebP reader, and WebP is an allowed upload format — without this plugin every
+# WebP upload would skip dimension checks and thumbnail generation.
+imageio-webp                = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "twelvemonkeys" }
 
 # Jackson
 jackson-databind            = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }

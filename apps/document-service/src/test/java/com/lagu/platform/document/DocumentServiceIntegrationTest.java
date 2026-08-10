@@ -2,16 +2,17 @@ package com.lagu.platform.document;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.document.domain.DocumentRepository;
-import com.lagu.platform.document.service.DocumentStorageService;
 import com.lagu.platform.document.service.DocumentTypeRegistry;
 import com.lagu.platform.events.PlatformTopics;
+import com.lagu.platform.storage.ObjectMeta;
+import com.lagu.platform.storage.PresignedUpload;
+import com.lagu.platform.storage.StorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,22 +20,25 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -64,11 +68,20 @@ class DocumentServiceIntegrationTest {
         r.add("spring.flyway.user",         postgres::getUsername);
         r.add("spring.flyway.password",     postgres::getPassword);
         r.add("platform.gateway.shared-secret", () -> TEST_GATEWAY_SECRET);
+        // Neither backend configuration activates ("gcs" and "s3" are the only values that
+        // match), so StorageConfig never tries to resolve Application Default Credentials —
+        // which would fail outright in CI. Only StorageProperties and the mock below exist.
+        r.add("platform.storage.provider", () -> "none");
     }
 
-    /** Stub out the image-service proxy — we test document lifecycle, not file storage. */
+    /** Stub the storage backend — we test document lifecycle, not bucket I/O. Backed by
+     *  {@link #storedBytes} so magic-byte checks at confirm time see real content. */
     @MockitoBean
-    DocumentStorageService documentStorageService;
+    StorageService storage;
+
+    /** What the "uploaded" object contains. Defaults to a valid PDF; a test that needs a
+     *  mismatch overwrites it before calling the upload helper. */
+    byte[] storedBytes;
 
     /** Stub instead of relying on DocumentTypeRegistry's real schema-registry-unreachable
      *  fallback list, which uses "HR_IDENTITY_PROOF" — DocumentService's identitySubType
@@ -107,16 +120,34 @@ class DocumentServiceIntegrationTest {
                 .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
                 .build();
 
-        when(documentStorageService.upload(any(), any(), anyString()))
-                .thenAnswer(inv -> "https://storage.example.com/" + UUID.randomUUID() + ".pdf");
+        storedBytes = "%PDF-1.4\ntest content".getBytes();
+
+        // Echo the key back so the confirm step sees the same one the service minted, and
+        // serve stat/readRange from storedBytes so size and magic-byte checks are real.
+        when(storage.presignUpload(anyString(), anyString(), any()))
+                .thenAnswer(inv -> new PresignedUpload(
+                        "https://bucket.example.com/put/" + inv.getArgument(0),
+                        inv.getArgument(0),
+                        inv.getArgument(1),
+                        Instant.now().plusSeconds(900)));
+        when(storage.stat(anyString()))
+                .thenAnswer(inv -> Optional.of(new ObjectMeta(
+                        inv.getArgument(0), storedBytes.length, "application/pdf", Instant.now())));
+        when(storage.readRange(anyString(), anyInt()))
+                .thenAnswer(inv -> Arrays.copyOf(
+                        storedBytes, Math.min(storedBytes.length, (int) inv.getArgument(1))));
+        when(storage.presignDownload(anyString(), any()))
+                .thenAnswer(inv -> "https://bucket.example.com/get/" + inv.getArgument(0));
         // validCodes(listingType) — these uploads carry no listingType, so the generic set applies
         when(documentTypeRegistry.validCodes(any()))
                 .thenReturn(Set.of("RESUME", "IDENTITY_PROOF", "PHOTOGRAPH"));
-        // trailing null listingType == generic/HR document, available in every context
+        // trailing null listingType == generic/HR document, available in every context;
+        // null mime types and 0 max size == no admin override, so the platform default applies
         when(documentTypeRegistry.all()).thenReturn(List.of(
-                new DocumentTypeRegistry.DocumentConfig("RESUME", "Resume / CV", true, false, null),
-                new DocumentTypeRegistry.DocumentConfig("IDENTITY_PROOF", "Identity Proof", true, false, null),
-                new DocumentTypeRegistry.DocumentConfig("PHOTOGRAPH", "Photograph", false, false, null)));
+                new DocumentTypeRegistry.DocumentConfig("RESUME", "Resume / CV", true, false, null, null, 0),
+                new DocumentTypeRegistry.DocumentConfig("IDENTITY_PROOF", "Identity Proof", true, false, null, null, 0),
+                new DocumentTypeRegistry.DocumentConfig("PHOTOGRAPH", "Photograph", false, false, null, null, 0)));
+        when(documentTypeRegistry.policyFor(any())).thenReturn(DocumentTypeRegistry.DEFAULT_POLICY);
     }
 
     // ── upload ────────────────────────────────────────────────────────────────
@@ -159,22 +190,52 @@ class DocumentServiceIntegrationTest {
     }
 
     @Test
-    void uploadWithBytesNotMatchingDeclaredPdfType_returns400() {
+    void confirmWithBytesNotMatchingDeclaredPdfType_returns400() {
         // Regression coverage for the review's finding: Content-Type/extension were both
         // client-supplied with no check the bytes actually matched. This is a real (renamed
         // executable-shaped) mismatch, not just a wrong extension.
-        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
-        form.add("file", new NamedByteArrayResource("resume.pdf", new byte[]{'M', 'Z', 0, 1}));
-        form.add("documentType", "RESUME");
+        //
+        // Presigned uploads make this check load-bearing in a way it wasn't before: the bytes
+        // go straight to the bucket, so step 1 sees nothing but declarations and confirm is
+        // the only place the actual content is ever examined.
+        storedBytes = new byte[]{'M', 'Z', 0, 1};
+        String key = requestUploadUrl(userClient, "RESUME", null, "resume.pdf", "application/pdf");
 
-        assertThatThrownBy(() -> userClient.post()
-                .uri("/api/v1/documents")
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(form)
-                .retrieve().toEntity(Map.class))
+        assertThatThrownBy(() ->
+                confirmUpload(userClient, key, "RESUME", null, "resume.pdf", "application/pdf"))
                 .isInstanceOf(HttpClientErrorException.class)
                 .satisfies(ex -> assertThat(((HttpClientErrorException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void confirmWithAnotherUsersKey_returns400() {
+        // The key embeds the uploader's id. Without this check a caller could confirm an object
+        // someone else uploaded and take ownership of the resulting document record.
+        String foreignKey = "document/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "_test.pdf";
+
+        assertThatThrownBy(() ->
+                confirmUpload(userClient, foreignKey, "RESUME", null, "test.pdf", "application/pdf"))
+                .isInstanceOf(HttpClientErrorException.class)
+                .satisfies(ex -> assertThat(((HttpClientErrorException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void documentUrlIsSignedFreshOnRead_notPersisted() {
+        // The defect that motivated storing keys instead of URLs: image-service returned a
+        // 10-minute signed URL and callers persisted it, so every reference expired. fileUrl
+        // must now be minted per request from the stored key.
+        String id = extractId(uploadFile(userClient, "RESUME", null));
+
+        Map<String, Object> data = extractData(userClient.get()
+                .uri("/api/v1/documents/" + id)
+                .retrieve().toEntity(Map.class));
+
+        assertThat((String) data.get("fileUrl")).startsWith("https://bucket.example.com/get/document/");
+        assertThat(documentRepository.findById(UUID.fromString(id)).orElseThrow().getFileKey())
+                .startsWith("document/" + USER_ID + "/")
+                .doesNotContain("http");
     }
 
     // ── getById / list ────────────────────────────────────────────────────────
@@ -347,19 +408,50 @@ class DocumentServiceIntegrationTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * Drives the full three-step upload: request a URL, (the PUT is what the mocked backend
+     * stands in for), then confirm. Returns the confirm response, which is the one carrying
+     * the created document.
+     */
     @SuppressWarnings("unchecked")
     private ResponseEntity<Map> uploadFile(RestClient client, String documentType, String subType) {
-        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
-        // Must actually look like a PDF — DocumentService.validateFile() now checks the magic
-        // bytes, not just Content-Type/extension.
-        form.add("file", new NamedByteArrayResource("test.pdf", "%PDF-1.4\ntest content".getBytes()));
-        form.add("documentType", documentType);
-        if (subType != null) form.add("identitySubType", subType);
+        String key = requestUploadUrl(client, documentType, subType, "test.pdf", "application/pdf");
+        return confirmUpload(client, key, documentType, subType, "test.pdf", "application/pdf");
+    }
+
+    @SuppressWarnings("unchecked")
+    private String requestUploadUrl(RestClient client, String documentType, String subType,
+                                    String fileName, String contentType) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("documentType", documentType);
+        if (subType != null) body.put("identitySubType", subType);
+        body.put("fileName", fileName);
+        body.put("contentType", contentType);
+        body.put("sizeBytes", storedBytes.length);
+
+        Map<String, Object> data = extractData(client.post()
+                .uri("/api/v1/documents/upload-url")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .toEntity(Map.class));
+        return (String) data.get("key");
+    }
+
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<Map> confirmUpload(RestClient client, String key, String documentType,
+                                              String subType, String fileName, String contentType) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("key", key);
+        body.put("documentType", documentType);
+        if (subType != null) body.put("identitySubType", subType);
+        body.put("fileName", fileName);
+        body.put("contentType", contentType);
 
         return client.post()
-                .uri("/api/v1/documents")
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(form)
+                .uri("/api/v1/documents/confirm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
                 .retrieve()
                 .toEntity(Map.class);
     }
@@ -374,13 +466,4 @@ class DocumentServiceIntegrationTest {
         return (String) extractData(resp).get("id");
     }
 
-    /** ByteArrayResource with a filename so Spring sets Content-Disposition correctly. */
-    static class NamedByteArrayResource extends ByteArrayResource {
-        private final String filename;
-        NamedByteArrayResource(String filename, byte[] content) {
-            super(content);
-            this.filename = filename;
-        }
-        @Override public String getFilename() { return filename; }
-    }
 }

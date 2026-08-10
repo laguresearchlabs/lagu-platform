@@ -4,7 +4,9 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.listing.domain.ListingAvailability;
 import com.lagu.platform.listing.domain.ListingSnapshot;
+import com.lagu.platform.listing.service.ListingCoverService;
 import com.lagu.platform.listing.service.ListingSnapshotService;
+import com.lagu.platform.listing.service.ListingVisibility;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -22,6 +25,7 @@ import java.util.UUID;
 public class ListingController {
 
     private final ListingSnapshotService snapshotService;
+    private final ListingCoverService coverService;
 
     // ── Consumer (public) endpoints ───────────────────────────────────────────
 
@@ -33,6 +37,28 @@ public class ListingController {
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(ApiResponse.ok(snapshotService.searchPublished(objectType, page, size)));
     }
+
+    /**
+     * Cover photos for a page of listings, in one call.
+     *
+     * <p>A results page shows twenty tiles wanting one thumbnail each; fetching them through the
+     * per-record gallery endpoint is twenty round trips before anything renders. Photos come from
+     * each listing's frozen snapshot, so a vendor's unapproved uploads never appear here.
+     *
+     * <p>Same visibility rule as {@link #getSnapshot}: a listing the caller could not open is not
+     * one whose photo they get either.
+     */
+    @PostMapping("/cover-urls")
+    public ResponseEntity<ApiResponse<Map<UUID, ListingCoverService.Cover>>> coverUrls(
+            @RequestBody CoverUrlsRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                coverService.coversFor(request.recordIds(), request.galleryField())));
+    }
+
+    /**
+     * @param galleryField null for the conventional {@code gallery} field
+     */
+    public record CoverUrlsRequest(List<UUID> recordIds, String galleryField) {}
 
     /**
      * A PUBLISHED snapshot is genuinely public (that's what "consumer-facing" means for this
@@ -49,9 +75,7 @@ public class ListingController {
     }
 
     private boolean isVisibleToCaller(ListingSnapshot snapshot) {
-        if ("PUBLISHED".equals(snapshot.getStatus())) return true;
-        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
-        return ctx != null && (ctx.isPlatformAdmin() || snapshot.getTenantId().equals(ctx.getTenantId()));
+        return ListingVisibility.isVisibleToCaller(snapshot);
     }
 
     // ── Vendor (authenticated) endpoints ─────────────────────────────────────

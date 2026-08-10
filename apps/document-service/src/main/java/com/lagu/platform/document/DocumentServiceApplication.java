@@ -7,7 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication(scanBasePackages = {
         "com.lagu.platform.document",
         "com.lagu.platform.common",
-        "com.lagu.platform.security"
+        "com.lagu.platform.security",
+        "com.lagu.platform.storage"
 })
 @EnableScheduling
 public class DocumentServiceApplication {

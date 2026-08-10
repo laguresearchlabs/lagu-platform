@@ -86,7 +86,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("cancellation_policy","Cancellation Policy", FieldType.LONG_TEXT, false, false, null),
             // Media
             field("cover_image",       "Cover Image",       FieldType.IMAGE,       false, false, null),
-            field("gallery",           "Gallery",           FieldType.MULTI_SELECT,false, false, null),
+            field("gallery",           "Gallery",           FieldType.MEDIA_GALLERY,false, false, null),
             field("video_url",         "Video URL",         FieldType.URL,         false, false, null),
             // Venue specific
             field("capacity",          "Capacity",          FieldType.NUMBER,      false, true,  null),

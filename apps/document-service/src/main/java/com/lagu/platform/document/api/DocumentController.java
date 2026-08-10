@@ -2,23 +2,23 @@ package com.lagu.platform.document.api;
 
 import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.common.dto.PageResult;
+import com.lagu.platform.document.dto.ConfirmUploadRequest;
 import com.lagu.platform.document.dto.DocumentDto;
 import com.lagu.platform.document.dto.DocumentReviewRequest;
 import com.lagu.platform.document.dto.DocumentSubmissionStatusResponse;
+import com.lagu.platform.document.dto.UploadUrlRequest;
+import com.lagu.platform.document.dto.UploadUrlResponse;
 import com.lagu.platform.document.service.DocumentService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.security.RequirePermission;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,31 +30,40 @@ public class DocumentController {
     private final DocumentService service;
 
     /**
-     * Upload a document. Accepts multipart/form-data.
+     * Step 1 of 3 — request a presigned upload URL.
      *
-     * Required params: file, documentType
-     * Optional params: identitySubType (required when documentType=IDENTITY_PROOF),
-     *                  expiryDate (ISO date, e.g. 2030-01-15),
-     *                  listingType (e.g. "VENDOR" — unlocks that listing type's own document
-     *                  types, such as PAN_CARD/GST_CERTIFICATE/BANK_CANCELLED_CHEQUE, in addition
-     *                  to the generic/HR set; omit for the historical generic-only behavior)
+     * <p>Uploads go straight from the client to the storage bucket; bytes never pass through
+     * this service. The flow is:
+     * <ol>
+     *   <li>{@code POST /upload-url} — returns {@code uploadUrl} and {@code key}</li>
+     *   <li>{@code PUT} the file to {@code uploadUrl} with the {@code Content-Type} header set
+     *       to the {@code contentType} in the response (it is bound into the signature)</li>
+     *   <li>{@code POST /confirm} with the {@code key} — creates the document record</li>
+     * </ol>
      *
-     * Valid documentType values depend on listingType — see GET /submission-status or
+     * <p>Valid documentType values depend on listingType — see GET /submission-status or
      * schema-registry's GET /api/v1/document-requirements/catalog for the full set.
-     *
      * Identity sub-types: AADHAAR | PASSPORT | DRIVING_LICENSE | VOTER_ID | PAN_CARD
      */
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping("/upload-url")
     @RequirePermission(resource = "DOCUMENT", action = "CREATE")
-    public ResponseEntity<ApiResponse<DocumentDto>> upload(
-            @RequestParam("file")                                         MultipartFile file,
-            @RequestParam("documentType")                                 String documentType,
-            @RequestParam(value = "identitySubType", required = false)    String identitySubType,
-            @RequestParam(value = "expiryDate",      required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)                LocalDate expiryDate,
-            @RequestParam(value = "listingType",     required = false)    String listingType) {
+    public ResponseEntity<ApiResponse<UploadUrlResponse>> requestUploadUrl(
+            @Valid @RequestBody UploadUrlRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(service.requestUploadUrl(request)));
+    }
 
-        DocumentDto dto = service.upload(file, documentType, identitySubType, expiryDate, listingType);
+    /**
+     * Step 3 of 3 — confirm the upload landed and create the document record.
+     *
+     * <p>Verifies the object exists, is within the size limit, and that its leading bytes match
+     * the declared content type before anything is persisted. Rejects (and deletes) the object
+     * otherwise.
+     */
+    @PostMapping("/confirm")
+    @RequirePermission(resource = "DOCUMENT", action = "CREATE")
+    public ResponseEntity<ApiResponse<DocumentDto>> confirmUpload(
+            @Valid @RequestBody ConfirmUploadRequest request) {
+        DocumentDto dto = service.confirmUpload(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(dto));
     }
 

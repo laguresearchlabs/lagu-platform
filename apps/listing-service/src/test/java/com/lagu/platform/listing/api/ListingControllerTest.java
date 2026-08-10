@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 class ListingControllerTest {
 
     private final ListingSnapshotService snapshotService = mock(ListingSnapshotService.class);
-    private final ListingController controller = new ListingController(snapshotService);
+    private final ListingController controller = new ListingController(snapshotService, mock(com.lagu.platform.listing.service.ListingCoverService.class));
 
     private MockedStatic<GatewayHeaderFilter> gatewayMock;
 

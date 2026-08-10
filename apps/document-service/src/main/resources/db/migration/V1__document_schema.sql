@@ -2,7 +2,7 @@ CREATE SCHEMA IF NOT EXISTS documents;
 
 CREATE TABLE documents.document (
     id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id              UUID         NOT NULL,
+    tenant_id           UUID         NOT NULL,
     user_id             UUID         NOT NULL,
 
     -- Document classification
@@ -11,7 +11,9 @@ CREATE TABLE documents.document (
 
     -- File metadata
     file_name           VARCHAR(500) NOT NULL,
-    file_url            TEXT         NOT NULL,   -- URL from image-service
+    -- Storage object key, e.g. document/{userId}/{uuid}_{filename}. Never a URL: download URLs
+    -- are signed per request and expire, so a persisted one would go stale within minutes.
+    file_key            TEXT         NOT NULL,
     mime_type           VARCHAR(100),
     file_size_bytes     BIGINT,
 
@@ -29,11 +31,11 @@ CREATE TABLE documents.document (
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_doc_user_org
-    ON documents.document (user_id, org_id, document_type, status);
+CREATE INDEX idx_doc_user_tenant
+    ON documents.document (user_id, tenant_id, document_type, status);
 
-CREATE INDEX idx_doc_org_status
-    ON documents.document (org_id, status, uploaded_at DESC);
+CREATE INDEX idx_doc_tenant_status
+    ON documents.document (tenant_id, status, uploaded_at DESC);
 
 CREATE INDEX idx_doc_type_user
-    ON documents.document (org_id, user_id, document_type);
+    ON documents.document (tenant_id, user_id, document_type);

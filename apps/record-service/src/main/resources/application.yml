@@ -93,3 +93,31 @@ platform:
   outbox:
     enabled: true
     table: record_outbox
+  storage:
+    # Key prefix this service owns. Scope its bucket IAM binding to the same prefix so
+    # record-service can neither read nor overwrite another service's objects — that
+    # scoping is what replaces the old single-pod credential boundary.
+    domain: record
+    provider: ${STORAGE_PROVIDER:gcs}
+    upload-url-ttl: 15m
+    download-url-ttl: 10m
+    gcs:
+      bucket: ${GCS_BUCKET:}
+      # Keyless setups only (no private key in the pod): signing then goes through IAM
+      # signBlob while impersonating this account. Unset when a key file is mounted.
+      service-account-email: ${GCS_SIGNER_SA:}
+      # The deployed path: prod is on-prem k3s with no Workload Identity, so each service
+      # mounts its own key, IAM-conditioned to its own object prefix.
+      credentials-location: ${GCP_CREDENTIALS_LOCATION:}
+    s3:
+      bucket: ${S3_BUCKET:}
+      region: ${AWS_REGION:}
+    scanner:
+      # Streams every confirmed upload to clamd before it is persisted. Off by default so local
+      # runs and tests need no daemon; on wherever real uploads happen. When enabled an
+      # unreachable clamd fails uploads — that is the point of scanning, and this flag is the
+      # supported way to switch it off rather than a timeout doing it silently.
+      enabled: ${CLAMAV_ENABLED:false}
+      host: ${CLAMAV_HOST:clamav}
+      port: ${CLAMAV_PORT:3310}
+      timeout: 30s

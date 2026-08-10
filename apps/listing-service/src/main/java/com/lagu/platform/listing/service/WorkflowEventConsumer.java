@@ -50,6 +50,9 @@ public class WorkflowEventConsumer {
                     "Could not fetch record " + event.getRecordId() + " for snapshot publication");
         }
 
+        // `record` is the record itself, already unwrapped from the ApiResponse envelope by the
+        // client — so `data` here is the field map the snapshot is meant to hold, and
+        // verificationTier resolves to the record's real tier rather than always defaulting.
         @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) record.get("data");
         String verificationTier = extractString(record, "verificationTier", "NONE");

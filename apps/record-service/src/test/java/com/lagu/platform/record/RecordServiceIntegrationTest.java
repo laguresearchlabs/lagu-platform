@@ -17,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import com.lagu.platform.storage.StorageService;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -70,10 +71,18 @@ class RecordServiceIntegrationTest {
         r.add("spring.data.redis.host",     redis::getHost);
         r.add("spring.data.redis.port",     () -> redis.getMappedPort(6379));
         r.add("platform.gateway.shared-secret", () -> TEST_GATEWAY_SECRET);
+        // Neither storage backend configuration activates ("gcs" and "s3" are the only values
+        // that match), so StorageConfig never tries to resolve Application Default
+        // Credentials — which would fail outright in CI.
+        r.add("platform.storage.provider", () -> "none");
     }
 
     @MockitoBean
     MetadataClient metadataClient;
+
+    /** No bucket in tests; RecordFileController's flow is covered separately. */
+    @MockitoBean
+    StorageService storage;
 
     @LocalServerPort int port;
     @Autowired ObjectMapper json;

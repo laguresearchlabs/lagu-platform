@@ -109,7 +109,8 @@ class RecordValidatorFieldTypesTest {
 
     @Test
     void imageRejectsNonStringValue() {
-        assertRejects(field("cover_image", "IMAGE", false, null, null), 12345, "non-empty file/image URL");
+        assertRejects(field("cover_image", "IMAGE", false, null, null), 12345,
+                "must reference an uploaded file");
     }
 
     @Test
@@ -123,9 +124,64 @@ class RecordValidatorFieldTypesTest {
         validate(field("cover_image", "IMAGE", false, null, null), "   ");
     }
 
+    /** By the time this validator runs, the value is the storage key RecordService restored
+     *  from the stored record — a client-supplied one never reaches here. */
     @Test
-    void fileAcceptsUrlString() {
-        validate(field("attachment", "FILE", false, null, null), "https://cdn.example.com/f.pdf");
+    void fileAcceptsAStorageKey() {
+        validate(field("attachment", "FILE", false, null, null),
+                "record/3f1c9b1e-0000-0000-0000-000000000000/9ab2_site-plan.pdf");
+    }
+
+    // ---- MEDIA_GALLERY ----
+
+    private static Object galleryOf(int photoCount) {
+        return java.util.stream.IntStream.range(0, photoCount)
+                .mapToObj(i -> Map.<String, Object>of(
+                        "id", java.util.UUID.randomUUID().toString(),
+                        "key", "record/abc/photo-" + i,
+                        "isPrimary", i == 0))
+                .toList();
+    }
+
+    @Test
+    void galleryAcceptsAListOfItems() {
+        validate(field("gallery", "MEDIA_GALLERY", false, null, null), galleryOf(3));
+    }
+
+    @Test
+    void galleryRejectsANonListValue() {
+        assertRejects(field("gallery", "MEDIA_GALLERY", false, null, null),
+                "a-single-key", "must be a list of gallery items");
+    }
+
+    /** The listing-quality control an admin actually reaches for: a venue needs enough photos
+     *  before it can be submitted. Only enforceable where the whole record is in view. */
+    @Test
+    void galleryEnforcesTheConfiguredMinimumCount() {
+        assertRejects(field("gallery", "MEDIA_GALLERY", false, null, Map.of("minCount", 5)),
+                galleryOf(3), "needs at least 5 photo(s)");
+    }
+
+    @Test
+    void galleryEnforcesTheConfiguredMaximumCount() {
+        assertRejects(field("gallery", "MEDIA_GALLERY", false, null, Map.of("maxCount", 2)),
+                galleryOf(4), "maximum is 2");
+    }
+
+    /**
+     * A minimum count makes the gallery required by itself. Otherwise the rule would fire for a
+     * vendor who uploads four of five photos and stay silent for one who uploads none — the
+     * opposite of what "at least five photos" asks for.
+     */
+    @Test
+    void aMinimumCountMakesTheGalleryRequired() {
+        assertRejects(field("gallery", "MEDIA_GALLERY", false, null, Map.of("minCount", 5)),
+                List.of(), "is required");
+    }
+
+    @Test
+    void anOptionalGalleryWithNoMinimumMayBeEmpty() {
+        validate(field("gallery", "MEDIA_GALLERY", false, null, null), List.of());
     }
 
     // ---- CURRENCY ----

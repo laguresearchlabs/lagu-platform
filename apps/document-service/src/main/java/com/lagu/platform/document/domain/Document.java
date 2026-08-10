@@ -38,8 +38,14 @@ public class Document {
     @Column(name = "file_name", nullable = false, length = 500)
     private String fileName;
 
-    @Column(name = "file_url", nullable = false, columnDefinition = "TEXT")
-    private String fileUrl;
+    /**
+     * Object key in the storage bucket, not a URL. It used to hold whatever image-service
+     * returned, which was a signed URL that expired ten minutes later — so every stored
+     * reference died shortly after upload. Download URLs are now signed per request from this
+     * key; see {@code DocumentService.toDto}.
+     */
+    @Column(name = "file_key", nullable = false, columnDefinition = "TEXT")
+    private String fileKey;
 
     @Column(name = "mime_type", length = 100)
     private String mimeType;

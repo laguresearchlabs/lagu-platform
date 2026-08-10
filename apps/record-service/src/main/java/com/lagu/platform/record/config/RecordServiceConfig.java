@@ -33,8 +33,8 @@ public class RecordServiceConfig {
     // to the literal Eureka server host as if it were a service ID, breaking heartbeats entirely
     // (see https://github.com/spring-cloud/spring-cloud-netflix/issues/4382, unresolved as of
     // Spring Cloud Netflix's current release). @Primary steers that unqualified lookup to this
-    // plain builder instead; schemaRegistryRestClient/imageRestClient below use @Qualifier to stay
-    // pinned to the load-balanced one regardless of which bean is primary.
+    // plain builder instead; schemaRegistryRestClient below uses @Qualifier to stay pinned to
+    // the load-balanced one regardless of which bean is primary.
     @Bean
     @Primary
     public RestClient.Builder restClientBuilder() {
@@ -53,17 +53,9 @@ public class RecordServiceConfig {
                 .build();
     }
 
-    @Bean
-    public RestClient imageRestClient(
-            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder,
-            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
-            String gatewaySharedSecret) {
-        return loadBalancedRestClientBuilder.clone()
-                .baseUrl("http://image-service")
-                .defaultHeader("X-Internal-Service", "record-service")
-                .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .build();
-    }
+    // imageRestClient is gone. File uploads no longer proxy through image-service — or through
+    // this JVM: clients PUT straight to the bucket using a presigned URL minted by libs/storage.
+    // See RecordFileController.
 
     @Bean
     public ObjectMapper objectMapper() {

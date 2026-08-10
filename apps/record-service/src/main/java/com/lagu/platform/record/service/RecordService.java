@@ -67,7 +67,11 @@ public class RecordService {
     @Transactional
     public RecordResponse create(CreateRecordRequest req) {
         PlatformSecurityContext ctx = requireTenantContext();
-        validator.validate(req.getObjectType(), req.getData());
+        // No upload can precede the record: keys are scoped to a record id that does not exist
+        // yet, so any FILE/IMAGE value in a create payload is necessarily client-invented.
+        Map<String, Object> data = validator.preserveServerOwnedFields(
+                req.getObjectType(), req.getData(), Map.of());
+        validator.validate(req.getObjectType(), data);
 
         // Initial status is owned by the workflow engine. Letting callers pick one would let a
         // vendor create a record directly in ACTIVE/PUBLISHED, skipping approval entirely.
@@ -85,7 +89,7 @@ public class RecordService {
         // reads from the same cached copy rather than fetching again.
         record.setSchemaVersion(currentSchemaVersion(req.getObjectType().toUpperCase()));
         record.setStatus(req.getStatus() != null ? req.getStatus().toUpperCase() : "DRAFT");
-        record.setData(validator.stripHiddenFields(req.getObjectType(), req.getData()));
+        record.setData(validator.stripHiddenFields(req.getObjectType(), data));
         record.setCreatedBy(ctx.getUserId());
         record.setUpdatedBy(ctx.getUserId());
 
@@ -106,10 +110,12 @@ public class RecordService {
     public RecordResponse update(UUID id, UpdateRecordRequest req) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         Record record = findForContext(id, ctx);
-        validator.validate(record.getObjectType(), req.getData());
+        Map<String, Object> data = validator.preserveServerOwnedFields(
+                record.getObjectType(), req.getData(), record.getData());
+        validator.validate(record.getObjectType(), data);
 
         Map<String, Object> oldData = new HashMap<>(record.getData());
-        record.setData(validator.stripHiddenFields(record.getObjectType(), req.getData()));
+        record.setData(validator.stripHiddenFields(record.getObjectType(), data));
         // Validation above ran against the live schema, so a successful save means the data now
         // satisfies it — move the record forward rather than leaving it pinned to the version it
         // was created under. Records that cannot satisfy a new requirement fail validation above
@@ -130,6 +136,10 @@ public class RecordService {
 
         Map<String, Object> merged = new HashMap<>(record.getData());
         merged.putAll(partialData);
+        // The merge starts from stored data, but partialData can still overwrite a file key —
+        // so the same restore has to run here as on a full update.
+        merged = validator.preserveServerOwnedFields(
+                record.getObjectType(), merged, record.getData());
         validator.validate(record.getObjectType(), merged);
 
         Map<String, Object> oldData = new HashMap<>(record.getData());

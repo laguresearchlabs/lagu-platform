@@ -54,19 +54,7 @@ public class DocumentServiceConfig {
         return template;
     }
 
-    @Bean
-    public RestClient imageRestClient(
-            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder loadBalancedRestClientBuilder,
-            @Value("${platform.gateway.shared-secret:CHANGE_ME_INSECURE_DEFAULT_SECRET_ROTATE_IN_PROD}")
-            String gatewaySharedSecret) {
-        // Was missing X-Platform-Gateway-Secret — the only internal client in the platform that
-        // was. GatewayHeaderFilter treats X-Internal-Service as untrusted (and the request as
-        // unauthenticated) without a matching secret, so image-service would have rejected every
-        // upload here as unauthenticated even once it exists to receive them.
-        return loadBalancedRestClientBuilder.clone()
-                .baseUrl("http://image-service")
-                .defaultHeader("X-Internal-Service", "document-service")
-                .defaultHeader("X-Platform-Gateway-Secret", gatewaySharedSecret)
-                .build();
-    }
+    // imageRestClient is gone. File storage no longer goes through image-service — or through
+    // this JVM at all: clients PUT straight to the bucket using a presigned URL minted by
+    // libs/storage. See DocumentService.requestUploadUrl.
 }

@@ -14,6 +14,10 @@ public interface ListingSnapshotRepository extends JpaRepository<ListingSnapshot
 
     Optional<ListingSnapshot> findByRecordId(UUID recordId);
 
+    /** Several listings at once, for a results page. Note this is by {@code recordId}, not by the
+     *  entity's own {@code id} — {@code findAllById} would query the wrong column. */
+    List<ListingSnapshot> findByRecordIdIn(java.util.Collection<UUID> recordIds);
+
     List<ListingSnapshot> findByTenantIdOrderByUpdatedAtDesc(UUID tenantId);
 
     /** Consumer search — published only, boosted by searchBoost DESC. */

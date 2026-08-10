@@ -8,7 +8,7 @@ API, business objects are stored here as a `Record` row with an `object_type` ta
 arbitrary JSONB `data` payload, validated at write time against a schema fetched from
 schema-registry. It owns record CRUD, an audit trail of every change, named relationships between
 records (e.g. linking a vendor record to a venue record), a verification/trust-tier subsystem, and
-file/image field uploads (delegated to image-service). It does not own workflow/approval logic
+file/image field uploads (presigned direct-to-bucket via `libs/storage`). It does not own workflow/approval logic
 itself — status changes are requested here but actually applied by workflow-service, which round-trips
 the decision back over Kafka.
 
@@ -51,8 +51,11 @@ Two REST clients reach other services (both via Eureka-backed load-balanced `Res
   `todo/13-no-code-vendor-platform-adr.md`), which is why the class is still named
   `MetadataClient` while pointing at schema-registry. Schema lookups are cached in Redis
   (`metadata-schema` cache, 10-minute TTL) and invalidated on `SCHEMA_PUBLISHED` events.
-- **`ImageServiceClient`** — uploads multipart files to image-service
-  (`http://image-service`) under group type `PLATFORM_RECORD`, returning the resulting URL.
+- **`libs/storage`** — mints presigned PUT/GET URLs for `FILE`/`IMAGE` fields under the `record/`
+  key prefix. File bytes never enter this JVM; the record's JSONB field holds the object **key**,
+  and download URLs are signed per request by `GET /{id}/files/{fieldName}`. This replaced a
+  proxy to image-service that stored a 10-minute signed URL into the record, so the field went
+  stale minutes after upload.
 
 `RecordValidator` validates a record's JSONB `data` against the schema for its `object_type`:
 required fields, and per-type checks for `NUMBER`/`DECIMAL` (min/max), `TEXT`/`LONG_TEXT`
@@ -75,7 +78,10 @@ All endpoints require gateway-authenticated identity (see Security below) and ar
 | DELETE | `/api/v1/records/{id}` | Soft-delete (sets `status = DELETED`) |
 | POST | `/api/v1/records/{id}/status` | Request a status transition (`trigger`, `comment`); does **not** change status synchronously — publishes `STATUS_TRANSITION_REQUESTED` and waits for workflow-service to respond |
 | GET | `/api/v1/records/{id}/history` | Paged audit history for a record |
-| POST | `/api/v1/records/{id}/files/{fieldName}` (multipart) | Upload a file/image for a `FILE`/`IMAGE`-typed field; stores the resulting URL from image-service into that field |
+| POST | `/api/v1/records/{id}/files/{fieldName}/upload-url` | Step 1 — presigned PUT URL for a `FILE`/`IMAGE`-typed field. Body: `fileName`, `contentType`, `sizeBytes`. Returns `uploadUrl`, `key`, `expiresAt` |
+| — | *(client `PUT`s the file to `uploadUrl`)* | Step 2 — bytes go straight to the bucket; `Content-Type` must match, it is bound into the signature |
+| POST | `/api/v1/records/{id}/files/{fieldName}/confirm` | Step 3 — body `key`. Verifies the object exists and is non-empty, then stores the **key** in that JSONB field |
+| GET | `/api/v1/records/{id}/files/{fieldName}` | Freshly signed, short-lived download URL for a file field |
 | GET | `/api/v1/records/{recordId}/verification` | Fetch a record's verification state |
 | PUT | `/api/v1/records/{recordId}/verification` | Set verification tier (`NONE`/`BASIC`/`ENHANCED`/`PREMIUM`), notes, expiry |
 | POST | `/api/v1/records/{recordId}/verification/revoke` | Revoke verification (`reason` in body) |

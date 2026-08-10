@@ -47,7 +47,8 @@
             "priceUnit": "per event",
             "displayName": "Party Hall",
             "imageGallery": {
-                "apiEndpoint": "/api/partyhalls/{id}/images",
+                "apiEndpoint": "/api/v1/records/{id}/gallery/{field}",
+                "galleryField": "gallery",
                 "showGallery": true,
                 "fetchFromApi": true,
                 "fallbackCount": 3
@@ -156,7 +157,8 @@
             ],
             "displayName": "Catering Service",
             "imageGallery": {
-                "apiEndpoint": "/api/catering-services/{id}/images",
+                "apiEndpoint": "/api/v1/records/{id}/gallery/{field}",
+                "galleryField": "gallery",
                 "showGallery": true,
                 "fetchFromApi": true,
                 "fallbackCount": 3
@@ -278,8 +280,10 @@
             ],
             "displayName": "Decoration Service",
             "imageGallery": {
+                "apiEndpoint": "/api/v1/records/{id}/gallery/{field}",
+                "galleryField": "gallery",
                 "showGallery": true,
-                "fetchFromApi": false,
+                "fetchFromApi": true,
                 "fallbackCount": 4
             },
             "showPriceRange": true,
@@ -392,7 +396,8 @@
             ],
             "displayName": "Photography Service",
             "imageGallery": {
-                "apiEndpoint": "/api/photography-services/{id}/images",
+                "apiEndpoint": "/api/v1/records/{id}/gallery/{field}",
+                "galleryField": "gallery",
                 "showGallery": true,
                 "fetchFromApi": true,
                 "fallbackCount": 6
@@ -508,8 +513,10 @@
             ],
             "displayName": "Makeup Artist",
             "imageGallery": {
+                "apiEndpoint": "/api/v1/records/{id}/gallery/{field}",
+                "galleryField": "gallery",
                 "showGallery": true,
-                "fetchFromApi": false,
+                "fetchFromApi": true,
                 "fallbackCount": 4
             },
             "showPriceRange": true,

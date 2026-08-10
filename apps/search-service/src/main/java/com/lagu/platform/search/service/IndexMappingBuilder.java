@@ -129,6 +129,11 @@ public class IndexMappingBuilder {
             case "DATE"      -> Property.of(p -> p.date(d -> d.format("yyyy-MM-dd")));
             case "DATETIME"  -> Property.of(p -> p.date(d -> d.format("strict_date_time||epoch_millis")));
             case "GEOLOCATION" -> Property.of(p -> p.geoPoint(g -> g));
+            // A gallery is an array of objects nobody searches on — it is fetched by record id
+            // to render a page. Mapping it as a keyword like the default below would reject the
+            // whole document at index time, since an object is not a keyword. Disabled means
+            // stored and returned but not indexed, which is exactly what a photo list needs.
+            case "MEDIA_GALLERY" -> Property.of(p -> p.object(o -> o.enabled(false)));
             // Everything else is a keyword (enum, phone, email, url, etc.)
             default -> Property.of(p -> p.keyword(k -> k.ignoreAbove(512)));
         };

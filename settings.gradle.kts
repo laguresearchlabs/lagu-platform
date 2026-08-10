@@ -5,6 +5,7 @@ include(
     "libs:events",
     "libs:security",
     "libs:membership",
+    "libs:storage",
     "apps:schema-registry",
     "apps:record-service",
     "apps:workflow-service",

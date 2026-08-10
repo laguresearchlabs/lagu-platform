@@ -128,7 +128,13 @@ class PlatformEndToEndIT {
                     "SPRING_DATA_REDIS_PORT", "6379",
                     "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
                     "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
-                    "EUREKA_CLIENT_ENABLED", "false"
+                    "EUREKA_CLIENT_ENABLED", "false",
+                    // libs/storage defaults to the GCS backend, which resolves Application
+                    // Default Credentials at startup — there are none in this container, so the
+                    // app would never pass its health check. "none" matches neither backend's
+                    // @ConditionalOnProperty, so no storage client is built. These tests drive
+                    // record CRUD and events, not file upload.
+                    "STORAGE_PROVIDER", "none"
             ),
             List.of("--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
 

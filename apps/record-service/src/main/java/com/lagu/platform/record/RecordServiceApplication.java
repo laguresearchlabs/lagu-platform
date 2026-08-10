@@ -9,7 +9,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableCaching
 @EnableScheduling  // OutboxRelay polling + cleanup
-@ComponentScan(basePackages = {"com.lagu.platform.record", "com.lagu.platform.common", "com.lagu.platform.security"})
+@ComponentScan(basePackages = {"com.lagu.platform.record", "com.lagu.platform.common",
+        "com.lagu.platform.security", "com.lagu.platform.storage"})
 public class RecordServiceApplication {
 
     public static void main(String[] args) {

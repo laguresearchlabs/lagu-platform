@@ -4,12 +4,22 @@ import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.document.domain.Document;
 import com.lagu.platform.document.domain.DocumentRepository;
+import com.lagu.platform.document.dto.ConfirmUploadRequest;
 import com.lagu.platform.document.dto.DocumentDto;
 import com.lagu.platform.document.dto.DocumentSubmissionStatusResponse;
 import com.lagu.platform.document.dto.DocumentSubmissionStatusResponse.DocumentTypeStatus;
+import com.lagu.platform.document.dto.UploadUrlRequest;
+import com.lagu.platform.document.dto.UploadUrlResponse;
 import com.lagu.platform.document.event.DocumentEventPublisher;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
+import com.lagu.platform.storage.ImageConstraints;
+import com.lagu.platform.storage.MediaIngest;
+import com.lagu.platform.storage.MediaPolicy;
+import com.lagu.platform.storage.PresignedUpload;
+import com.lagu.platform.storage.StorageKeys;
+import com.lagu.platform.storage.StorageProperties;
+import com.lagu.platform.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -17,7 +27,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -30,49 +39,102 @@ import java.util.*;
 public class DocumentService {
 
     private final DocumentRepository     repository;
-    private final DocumentStorageService storageService;
+    private final StorageService         storage;
+    private final StorageProperties      storageProperties;
     private final DocumentEventPublisher publisher;
     private final DocumentTypeRegistry   docTypeRegistry;
+    private final MediaIngest            mediaIngest;
 
-    @Transactional
-    public DocumentDto upload(MultipartFile file,
-                              String documentType,
-                              String identitySubType,
-                              LocalDate expiryDate,
-                              String listingType) {
+    /**
+     * Step 1: authorize the upload and hand back a presigned PUT.
+     *
+     * <p>No document row is created here. The client uploads straight to the bucket, so until
+     * {@link #confirmUpload} runs there is nothing to record — and a client that abandons the
+     * upload leaves only an orphaned object, not a document pointing at bytes that never arrived.
+     */
+    public UploadUrlResponse requestUploadUrl(UploadUrlRequest request) {
         PlatformSecurityContext ctx = requireContext();
 
-        validateDocumentType(documentType, identitySubType, listingType);
-        validateFile(file);
+        validateDocumentType(request.getDocumentType(), request.getIdentitySubType(),
+                request.getListingType());
+        docTypeRegistry.policyFor(request.getDocumentType())
+                .checkDeclared(request.getFileName(), request.getContentType(), request.getSizeBytes());
 
-        String fileUrl = storageService.upload(file, ctx.getUserId(), documentType);
+        String key = StorageKeys.buildPending(storageProperties.getDomain(), ctx.getUserId(),
+                request.getFileName());
+        PresignedUpload upload = storage.presignUpload(key, request.getContentType().toLowerCase(),
+                storageProperties.getUploadUrlTtl());
+
+        return UploadUrlResponse.builder()
+                .uploadUrl(upload.url())
+                .key(upload.key())
+                .contentType(upload.contentType())
+                .expiresAt(upload.expiresAt())
+                .build();
+    }
+
+    /**
+     * Step 3: the bytes are in the bucket — verify them and create the document row.
+     *
+     * <p>This is where validation actually bites. Step 1 only saw what the client claimed; here
+     * the object's real size comes from the bucket and its leading bytes are sniffed against the
+     * declared type. Under the old multipart flow that sniff ran on the request body; with
+     * direct-to-bucket uploads it has to happen against stored bytes or it does not happen at all.
+     */
+    @Transactional
+    public DocumentDto confirmUpload(ConfirmUploadRequest request) {
+        PlatformSecurityContext ctx = requireContext();
+
+        validateDocumentType(request.getDocumentType(), request.getIdentitySubType(),
+                request.getListingType());
+        MediaPolicy policy = docTypeRegistry.policyFor(request.getDocumentType());
+
+        String key = request.getKey();
+        // The key embeds the uploader's id, so this both confirms the key came from an
+        // upload-url call and stops a caller confirming an object uploaded by someone else.
+        if (!StorageKeys.isOwnedBy(key, storageProperties.getDomain(), ctx.getUserId())) {
+            throw new com.lagu.platform.common.exception.ValidationException(
+                    "Key does not belong to this user");
+        }
+
+        // Verifies the object, scans it for malware, and promotes it out of pending/ to its
+        // durable key. No derivatives: an identity document is reviewed at full size by a human
+        // and never rendered as a tile, so a thumbnail would be an extra copy of a scan of
+        // someone's passport for no benefit.
+        MediaIngest.Result ingested = mediaIngest.confirm(MediaIngest.Request.builder()
+                .pendingKey(key)
+                .policy(policy)
+                .image(ImageConstraints.NONE)
+                .derivatives(false)
+                .build());
 
         Document doc = new Document();
         doc.setTenantId(ctx.getTenantId());
         doc.setUserId(ctx.getUserId());
-        doc.setDocumentType(documentType.toUpperCase());
-        doc.setIdentitySubType(identitySubType != null ? identitySubType.toUpperCase() : null);
-        doc.setFileName(sanitizeFileName(file.getOriginalFilename()));
-        doc.setFileUrl(fileUrl);
-        doc.setMimeType(file.getContentType());
-        doc.setFileSizeBytes(file.getSize());
-        doc.setExpiryDate(expiryDate);
+        doc.setDocumentType(request.getDocumentType().toUpperCase());
+        doc.setIdentitySubType(request.getIdentitySubType() != null
+                ? request.getIdentitySubType().toUpperCase() : null);
+        doc.setFileName(StorageKeys.sanitizeFileName(request.getFileName()));
+        doc.setFileKey(ingested.key());
+        doc.setMimeType(ingested.contentType());
+        doc.setFileSizeBytes(ingested.sizeBytes());
+        doc.setExpiryDate(request.getExpiryDate());
         doc.setStatus("UPLOADED");
 
         Document saved = repository.save(doc);
         publisher.publish(saved, "DOCUMENT_UPLOADED");
-        return DocumentDto.from(saved);
+        return toDto(saved);
     }
 
     public List<DocumentDto> listMyDocuments() {
         PlatformSecurityContext ctx = requireContext();
         return repository.findByUserIdAndTenantIdOrderByUploadedAtDesc(ctx.getUserId(), ctx.getTenantId())
-                .stream().map(DocumentDto::from).toList();
+                .stream().map(this::toDto).toList();
     }
 
     public DocumentDto getById(UUID id) {
         PlatformSecurityContext ctx = requireContext();
-        return DocumentDto.from(findForContext(id, ctx));
+        return toDto(findForContext(id, ctx));
     }
 
     public DocumentSubmissionStatusResponse getSubmissionStatus() {
@@ -130,14 +192,14 @@ public class DocumentService {
         var paged = ctx.isPlatformAdmin()
                 ? repository.findByStatusOrderByUploadedAtAsc("UPLOADED", pageReq)
                 : repository.findByTenantIdAndStatusOrderByUploadedAtAsc(ctx.getTenantId(), "UPLOADED", pageReq);
-        return PageResult.from(paged.map(DocumentDto::from));
+        return PageResult.from(paged.map(this::toDto));
     }
 
     /** Platform-admin: every document for one org, regardless of uploader — the KYC review panel
      *  on a vendor's admin detail page. Caller must be authorized by the controller first. */
     public List<DocumentDto> listForTenantAdmin(UUID tenantId) {
         return repository.findByTenantIdOrderByUploadedAtDesc(tenantId)
-                .stream().map(DocumentDto::from).toList();
+                .stream().map(this::toDto).toList();
     }
 
     @Transactional
@@ -146,7 +208,7 @@ public class DocumentService {
         Document doc = findForContext(id, ctx);
         doc.setStatus("UNDER_REVIEW");
         doc.setReviewedBy(ctx.getUserId());
-        return DocumentDto.from(repository.save(doc));
+        return toDto(repository.save(doc));
     }
 
     @Transactional
@@ -159,7 +221,7 @@ public class DocumentService {
         doc.setRejectionReason(null);
         Document saved = repository.save(doc);
         publisher.publish(saved, "DOCUMENT_VERIFIED");
-        return DocumentDto.from(saved);
+        return toDto(saved);
     }
 
     @Transactional
@@ -172,7 +234,7 @@ public class DocumentService {
         doc.setRejectionReason(reason);
         Document saved = repository.save(doc);
         publisher.publish(saved, "DOCUMENT_REJECTED");
-        return DocumentDto.from(saved);
+        return toDto(saved);
     }
 
     /** Nightly: mark documents with passed expiry dates as EXPIRED. */
@@ -218,89 +280,16 @@ public class DocumentService {
         return ctx;
     }
 
-    // Identity/verification documents: photos and scans only. No executables, HTML/SVG (stored
-    // XSS risk if ever rendered inline), or arbitrary office/archive formats.
-    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
-            "image/jpeg", "image/png", "image/webp", "application/pdf");
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "jpg", "jpeg", "png", "webp", "pdf");
-    private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024;
-
-    private void validateFile(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new com.lagu.platform.common.exception.ValidationException("File must not be empty");
-        }
-        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new com.lagu.platform.common.exception.ValidationException(
-                    "File exceeds maximum size of " + (MAX_FILE_SIZE_BYTES / (1024 * 1024)) + "MB");
-        }
-
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
-            throw new com.lagu.platform.common.exception.ValidationException(
-                    "Unsupported file type: " + contentType + ". Allowed: " + ALLOWED_CONTENT_TYPES);
-        }
-
-        String extension = extensionOf(file.getOriginalFilename());
-        if (extension == null || !ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new com.lagu.platform.common.exception.ValidationException(
-                    "Unsupported file extension: " + extension + ". Allowed: " + ALLOWED_EXTENSIONS);
-        }
-
-        // Content-Type and extension are both entirely client-supplied — a renamed executable
-        // sent with Content-Type: application/pdf and a .pdf name passed both checks above with
-        // nothing to actually verify the bytes are a PDF. A magic-byte sniff closes that.
-        if (!matchesDeclaredType(file, contentType.toLowerCase())) {
-            throw new com.lagu.platform.common.exception.ValidationException(
-                    "File content does not match its declared type (" + contentType + ")");
-        }
-    }
-
-    private static final Map<String, byte[]> MAGIC_BYTES = Map.of(
-            "application/pdf", new byte[]{'%', 'P', 'D', 'F'},
-            "image/png",       new byte[]{(byte) 0x89, 'P', 'N', 'G'},
-            "image/jpeg",      new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}
-    );
-
-    /** WEBP has no fixed single signature check here (RIFF....WEBP, non-contiguous) — matched
-     *  separately rather than forcing it into the simple prefix table above. */
-    private boolean matchesDeclaredType(MultipartFile file, String contentType) {
-        byte[] header;
-        try (var in = file.getInputStream()) {
-            header = in.readNBytes(12);
-        } catch (java.io.IOException e) {
-            throw new com.lagu.platform.common.exception.ValidationException("Could not read uploaded file");
-        }
-
-        if ("image/webp".equals(contentType)) {
-            return header.length >= 12
-                    && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
-                    && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P';
-        }
-
-        byte[] expected = MAGIC_BYTES.get(contentType);
-        if (expected == null) return false; // unreachable given ALLOWED_CONTENT_TYPES, fail closed
-        if (header.length < expected.length) return false;
-        for (int i = 0; i < expected.length; i++) {
-            if (header[i] != expected[i]) return false;
-        }
-        return true;
-    }
-
-    private String extensionOf(String fileName) {
-        if (fileName == null) return null;
-        int dot = fileName.lastIndexOf('.');
-        if (dot < 0 || dot == fileName.length() - 1) return null;
-        return fileName.substring(dot + 1).toLowerCase();
-    }
-
-    /** Strips path separators and control characters; keeps the original name otherwise readable. */
-    private String sanitizeFileName(String fileName) {
-        if (fileName == null) return null;
-        String base = fileName.replace("\\", "/");
-        base = base.substring(base.lastIndexOf('/') + 1);
-        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
-        return base.length() > 255 ? base.substring(base.length() - 255) : base;
+    /**
+     * Maps to the API shape, signing a fresh download URL from the stored key.
+     *
+     * <p>{@code fileUrl} stays in the response for clients, but it is now generated per request
+     * and short-lived rather than being a value read back out of the database — which is the
+     * whole point of storing keys instead of URLs.
+     */
+    private DocumentDto toDto(Document d) {
+        return DocumentDto.from(d,
+                storage.presignDownload(d.getFileKey(), storageProperties.getDownloadUrlTtl()));
     }
 
     private void validateDocumentType(String documentType, String identitySubType, String listingType) {

@@ -8,24 +8,32 @@ proof, photographs, academic certificates, address proof, and other supporting f
 tracks each document through a review workflow (`UPLOADED` -> `UNDER_REVIEW` -> `VERIFIED` /
 `REJECTED`, plus a scheduled `EXPIRED` transition for time-limited identity documents) so that
 org managers/owners can review submissions and the platform can answer "has this user
-completed their document checklist?" It does not store file bytes itself — actual file
-storage is delegated to `image-service` (see below) — this service is the system of record
-for document *metadata*, ownership, and review status.
+completed their document checklist?" It never handles file bytes — clients transfer those
+directly to and from object storage (see below) — this service is the system of record for
+document *metadata*, ownership, and review status.
 
 ## Architecture / responsibilities
 
 - Owns a `document` table (schema `documents`) keyed by `tenant_id`/`user_id`, storing document
-  type, a URL/reference to the stored file (`file_url`), MIME type, size, review status,
-  rejection reason, reviewer, and an optional `expiry_date` plus a free-form `jsonb` metadata
-  column.
-- **File storage**: `DocumentStorageService` does not write to local disk or S3 directly. It
-  proxies the multipart upload to another microservice, **image-service**, via a
-  load-balanced (Eureka-resolved) `RestClient` hitting `POST /api/v1/images/upload` with
-  `group-type=HR_DOCUMENT`, `group-id=<userId>`, `sub-group-type=<documentType>`. It reads
-  `signedUrl` (falling back to `imageURL`, then a bare `id`) out of image-service's response
-  and persists that as `file_url`. So the actual blob storage backend used by image-service
-  (S3, disk, etc.) is opaque to this codebase — it was not found anywhere in
-  document-service's source.
+  type, the storage object key (`file_key`), MIME type, size, review status, rejection reason,
+  reviewer, and an optional `expiry_date` plus a free-form `jsonb` metadata column.
+- **File storage**: via `libs/storage`, using presigned direct-to-bucket transfers. Bytes never
+  enter this JVM. Uploads are three steps:
+  1. `POST /api/v1/documents/upload-url` — validates the document type and the client's declared
+     name/type/size, then returns a presigned PUT URL plus the object key.
+  2. The client `PUT`s the file straight to the bucket, with `Content-Type` matching what was
+     declared (it is bound into the signature).
+  3. `POST /api/v1/documents/confirm` — verifies the object exists, takes its **real** size from
+     the bucket, re-sniffs its leading bytes against the declared type, and only then creates
+     the document row.
+
+  Step 3 is where validation actually bites: step 1 sees nothing but client declarations. The
+  key embeds the uploader's id (`document/{userId}/{uuid}_{filename}`), so a caller cannot
+  confirm an object someone else uploaded. `file_key` holds a **key, not a URL** — download URLs
+  are signed per request and expire shortly after.
+
+  This replaced a proxy to the standalone `image-service`, which returned a 10-minute signed URL
+  that was then persisted as `file_url`, so every stored reference expired minutes after upload.
 - **Document type catalog**: `DocumentTypeRegistry` loads the list of valid document types
   (code, label, required flag, expiry-tracked flag) from `schema-registry`
   (`GET http://schema-registry/api/v1/document-requirements/catalog`) at startup and refreshes
@@ -59,7 +67,9 @@ All endpoints are under `/api/v1/documents`, defined in `DocumentController`:
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| POST | `/api/v1/documents` (multipart/form-data) | DOCUMENT:CREATE | Upload a document. Params: `file`, `documentType` (`RESUME`, `IDENTITY_PROOF`, `PHOTOGRAPH`, `ACADEMIC_CERTIFICATE`, `ADDRESS_PROOF`, `OTHER`), optional `identitySubType` (required when `documentType=IDENTITY_PROOF`; one of `AADHAAR`, `PASSPORT`, `DRIVING_LICENSE`, `VOTER_ID`, `PAN_CARD`), optional `expiryDate` (ISO date). Returns 201 with the created document. |
+| POST | `/api/v1/documents/upload-url` | DOCUMENT:CREATE | Step 1. Body: `documentType` (`RESUME`, `IDENTITY_PROOF`, `PHOTOGRAPH`, `ACADEMIC_CERTIFICATE`, `ADDRESS_PROOF`, `OTHER`), optional `identitySubType` (required when `documentType=IDENTITY_PROOF`; one of `AADHAAR`, `PASSPORT`, `DRIVING_LICENSE`, `VOTER_ID`, `PAN_CARD`), optional `listingType`, plus `fileName`, `contentType`, `sizeBytes`. Returns a presigned `uploadUrl`, the object `key`, and `expiresAt`. |
+| — | *(client `PUT`s the file to `uploadUrl`)* | — | Step 2. `Content-Type` must match the returned `contentType` — it is bound into the signature. Bytes go straight to the bucket. |
+| POST | `/api/v1/documents/confirm` | DOCUMENT:CREATE | Step 3. Body: `key` plus the same document-type fields, `fileName`, `contentType`, optional `expiryDate` (ISO date). Verifies the stored object (existence, real size, magic bytes) and returns 201 with the created document. |
 | GET | `/api/v1/documents` | DOCUMENT:READ | List all documents uploaded by the authenticated user, newest first. |
 | GET | `/api/v1/documents/{id}` | DOCUMENT:READ | Fetch a single document by ID (scoped to the caller's org unless the caller is a platform admin). |
 | GET | `/api/v1/documents/submission-status` | DOCUMENT:READ | Returns a checklist across all known document types with each type's current status (`MISSING`, `UPLOADED`, `UNDER_REVIEW`, `VERIFIED`, `REJECTED`, `EXPIRED`) plus `allRequiredSubmitted`/`allRequiredVerified` booleans. |
@@ -157,11 +167,13 @@ Default local port: `8081` (per `application-loc.yml`; differs from the `8080` u
 packaged Docker image / `Dockerfile` `EXPOSE 8080`, and from the `8106` host port
 docker-compose maps to it).
 
-This service also expects `image-service` (for actual file storage) and `schema-registry` (for
-the document type catalog) to be reachable via Eureka/load-balanced calls at `http://image-service`
-and `http://schema-registry` respectively; without them, uploads will fail (image-service
-unreachable) or the document type list will silently fall back to the static list described
-above (schema-registry unreachable).
+This service expects `schema-registry` (for the document type catalog) to be reachable via a
+Eureka/load-balanced call at `http://schema-registry`; without it the document type list
+silently falls back to the static list described above.
+
+File storage needs `platform.storage.*` configured (bucket, and `gcs.service-account-email` for
+signing under Workload Identity) — see `application.yml`. There is no storage service to reach:
+signing is in-process and the client talks to the bucket directly.
 
 Via Docker Compose (from repo root), with the `apps` or `full` compose profile:
 
@@ -196,19 +208,21 @@ support re-enabling this test as-is.
 
 ## Notable design decisions and gotchas
 
-- **No local/S3 file storage in this service** — it is a thin proxy/metadata layer in front of
-  `image-service`. Anyone looking for actual blob storage code (bucket names, disk paths, etc.)
-  won't find it here.
+- **No file bytes pass through this service** — it signs presigned URLs via `libs/storage` and
+  records object keys. Blob-handling code (bucket names, signing, ranged reads) lives in
+  `libs/storage`, not here.
+- **Validation happens at confirm, not at upload-url** — with direct-to-bucket transfers the
+  service never sees the payload, so the magic-byte check that used to run on the multipart body
+  now runs against the stored object via a ranged read. Anything relying on step 1's declared
+  content type is checking a client's claim, not a fact.
 - **`RestClient.Builder` bean collision with Eureka**: `DocumentServiceConfig` documents (via
   code comment) a specific problem — Eureka's own auto-configured HTTP client for
   registration/heartbeats autowires *any* unqualified `RestClient.Builder` bean, including a
   `@LoadBalanced` one, which breaks heartbeats by trying to load-balance requests to the literal
   Eureka server host. The fix here is a `@Primary`, non-load-balanced `RestClient.Builder` plus
-  a separately `@Qualifier`-pinned load-balanced builder used explicitly by `imageRestClient`.
-- **Two different HTTP client types in use**: `imageRestClient` (a load-balanced `RestClient`)
-  is used for uploads to image-service; a separately configured load-balanced `RestTemplate` is
-  used by `DocumentTypeRegistry` for polling schema-registry. This split is intentional per the
-  code comments, not an inconsistency to "fix."
+  a separately `@Qualifier`-pinned load-balanced builder. The load-balanced `RestTemplate` used
+  by `DocumentTypeRegistry` to poll schema-registry is configured separately again — that split
+  is intentional per the code comments, not an inconsistency to "fix."
 - `@EnableScheduling` is enabled at the application class level, backing both the daily
   document-expiry job and the hourly document-type-catalog refresh.
 - Multi-tenancy: nearly every query and mutation in `DocumentService` scopes by both `userId`
