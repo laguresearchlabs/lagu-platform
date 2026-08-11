@@ -1,5 +1,6 @@
 package com.lagu.platform.event.service;
 
+import com.lagu.platform.common.media.GalleryItem;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.event.client.RecordServiceClient;
@@ -38,6 +39,8 @@ import java.util.stream.Stream;
 @Transactional(readOnly = true)
 public class EventPostService {
 
+    private final EventMembershipGuard membership;
+
     private final EventRepository eventRepo;
     private final EventMemberRepository memberRepo;
     private final EventPostLikeRepository likeRepo;
@@ -50,9 +53,6 @@ public class EventPostService {
 
         Map<String, Object> data = new java.util.HashMap<>();
         data.put("post_content", req.getContent());
-        if (req.getImageIds() != null) {
-            data.put("post_image_ids", req.getImageIds().stream().map(UUID::toString).toList());
-        }
         data.put("post_pinned", false);
         data.put("post_locked", false);
 
@@ -69,7 +69,9 @@ public class EventPostService {
 
         return PostResponse.builder()
                 .id(postId).authorUserId(authorUserId).content(req.getContent())
-                .imageIds(req.getImageIds()).pinned(false).locked(false)
+                // Empty by construction: photos are uploaded to the post's gallery after it
+                // exists, since the storage key is scoped to this record id.
+                .images(List.of()).pinned(false).locked(false)
                 .status(approvalRequired ? "PENDING" : "PUBLISHED")
                 .likeCount(0).likedByMe(false)
                 .createdAt(OffsetDateTime.now())
@@ -408,26 +410,18 @@ public class EventPostService {
         }
     }
 
+    // Delegated to EventMembershipGuard so the photo album enforces the identical rule. Kept as
+    // thin wrappers rather than inlined at ~15 call sites.
     private Event requireEvent(UUID eventId) {
-        return eventRepo.findById(eventId)
-                .orElseThrow(() -> new ResourceNotFoundException("Event", eventId.toString()));
+        return membership.requireEvent(eventId);
     }
 
     private EventMember requireMember(Event event, UUID userId) {
-        EventMember member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
-        if (!"ACCEPTED".equals(member.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Membership not accepted");
-        }
-        return member;
+        return membership.requireMember(event, userId);
     }
 
     private EventMember requireManager(Event event, UUID userId) {
-        EventMember member = requireMember(event, userId);
-        if (!member.canManage()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ADMIN or MAINTAINER role required");
-        }
-        return member;
+        return membership.requireManager(event, userId);
     }
 
     /**
@@ -446,12 +440,73 @@ public class EventPostService {
                 .collect(java.util.stream.Collectors.toMap(row -> (UUID) row[0], row -> (Long) row[1]));
         Set<UUID> likedByViewer = Set.copyOf(likeRepo.findLikedPostIds(viewerId, postIds));
 
+        // Photos are signed for the whole page in one call, exactly as like counts are counted
+        // in one query. Per-post signing would put a round trip behind every item in the feed.
+        Map<String, String> signedUrls = signGalleries(records);
+
         return records.stream()
                 .map(r -> {
                     UUID id = UUID.fromString(String.valueOf(r.get("id")));
-                    return toPostResponse(r, counts.getOrDefault(id, 0L), likedByViewer.contains(id));
+                    return toPostResponse(r, counts.getOrDefault(id, 0L), likedByViewer.contains(id),
+                            signedUrls);
                 })
                 .toList();
+    }
+
+    /**
+     * Signed URLs for every photo across a page of posts, keyed by storage key.
+     *
+     * <p>Each key travels with the post's own record id — repeated per key, because a post's
+     * photos all belong to it — which is what record-service verifies before signing.
+     */
+    private Map<String, String> signGalleries(List<Map<String, Object>> records) {
+        List<RecordServiceClient.MediaKey> keys = new ArrayList<>();
+        for (Map<String, Object> record : records) {
+            UUID postId = UUID.fromString(String.valueOf(record.get("id")));
+            for (GalleryItem item : galleryOf(record)) {
+                keys.add(new RecordServiceClient.MediaKey(postId, item.fullKeyOrOriginal()));
+                keys.add(new RecordServiceClient.MediaKey(postId, item.cardKeyOrOriginal()));
+            }
+        }
+        return recordClient.signMediaKeys(keys);
+    }
+
+    /**
+     * A post's photos with their URLs resolved, dropping any the signer refused.
+     *
+     * <p>A photo whose display URL is missing is omitted rather than rendered as a broken tile —
+     * the rest of the post still reads.
+     */
+    private List<PostResponse.PostImage> imagesOf(Map<String, Object> record,
+                                                   Map<String, String> signedUrls) {
+        List<PostResponse.PostImage> images = new ArrayList<>();
+        for (GalleryItem item : galleryOf(record)) {
+            String url = signedUrls.get(item.fullKeyOrOriginal());
+            if (url == null) continue;
+            String thumb = signedUrls.get(item.cardKeyOrOriginal());
+            images.add(PostResponse.PostImage.builder()
+                    .id(item.id())
+                    .url(url)
+                    .thumbnailUrl(thumb != null ? thumb : url)
+                    .caption(item.caption())
+                    .build());
+        }
+        return images;
+    }
+
+    /**
+     * A post's gallery, or empty when it has none.
+     *
+     * <p>Forgiving on purpose: this reads JSONB written by record-service and, pre-launch, may
+     * still hold the old image-service id array. GalleryItem skips anything that is not an
+     * object, so that reads as no photos rather than an error.
+     */
+    private List<GalleryItem> galleryOf(Map<String, Object> record) {
+        try {
+            return GalleryItem.listFrom(dataOf(record).get("post_images"));
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     /** Single-post path — the like state costs its own two queries here, which is what a
@@ -459,23 +514,22 @@ public class EventPostService {
     private PostResponse toPostResponse(Map<String, Object> record, UUID viewerId) {
         UUID id = UUID.fromString(String.valueOf(record.get("id")));
         return toPostResponse(record, likeRepo.countByPostRecordId(id),
-                likeRepo.existsByPostRecordIdAndUserId(id, viewerId));
+                likeRepo.existsByPostRecordIdAndUserId(id, viewerId),
+                signGalleries(List.of(record)));
     }
 
-    private PostResponse toPostResponse(Map<String, Object> record, long likeCount, boolean likedByMe) {
+    private PostResponse toPostResponse(Map<String, Object> record, long likeCount, boolean likedByMe,
+                                        Map<String, String> signedUrls) {
         // `record` is always an already-unwrapped RecordResponse map here (id/status/data/
         // createdBy at the top level) -- both listRecords' content items and unwrap()'s output
         // have that shape.
         Map<String, Object> fields = dataOf(record);
-        Object imageIdsRaw = fields.get("post_image_ids");
-        List<UUID> imageIds = imageIdsRaw instanceof List<?> list
-                ? list.stream().map(v -> UUID.fromString(String.valueOf(v))).toList() : null;
 
         return PostResponse.builder()
                 .id(UUID.fromString(String.valueOf(record.get("id"))))
                 .authorUserId(record.get("createdBy") != null ? UUID.fromString(String.valueOf(record.get("createdBy"))) : null)
                 .content((String) fields.get("post_content"))
-                .imageIds(imageIds)
+                .images(imagesOf(record, signedUrls))
                 .pinned(Boolean.TRUE.equals(fields.get("post_pinned")))
                 .locked(Boolean.TRUE.equals(fields.get("post_locked")))
                 .status((String) record.get("status"))

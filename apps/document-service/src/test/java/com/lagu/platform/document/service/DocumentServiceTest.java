@@ -287,6 +287,97 @@ class DocumentServiceTest {
         verify(storage).delete(key);
     }
 
+    // ---- deletion ----
+
+    /**
+     * Hard delete, by decision: an erasure request has to actually erase, so the object goes with
+     * the row. These pin who may do it and that the file really is removed.
+     */
+    @Test
+    void ownerCanDeleteTheirOwnDocumentAndItsFile() {
+        UUID tenantId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Document doc = doc(docId, tenantId, userId);
+        doc.setFileKey("document/" + userId + "/abc_id.pdf");
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc));
+        asCaller(ctx(userId, tenantId, "USER"));
+
+        service.delete(docId);
+
+        verify(repository).delete(doc);
+        verify(storage).delete("document/" + userId + "/abc_id.pdf");
+        // The event is what survives the file — it records that the document existed and was
+        // removed, without keeping the scan itself.
+        verify(publisher).publish(doc, "DOCUMENT_DELETED");
+    }
+
+    @Test
+    void platformAdminCanDeleteAnyDocument() {
+        UUID docId = UUID.randomUUID();
+        Document doc = doc(docId, UUID.randomUUID(), UUID.randomUUID());
+        doc.setFileKey("document/x/abc_id.pdf");
+        when(repository.findById(docId)).thenReturn(Optional.of(doc));
+        asCaller(ctx(UUID.randomUUID(), UUID.randomUUID(), "PLATFORM_ADMIN"));
+
+        service.delete(docId);
+
+        verify(repository).delete(doc);
+    }
+
+    /**
+     * Reviewers can read every document in their org to verify it — that is the job. Destroying
+     * one is not, so ORG_MANAGER gets past findForContext and is stopped by canDelete.
+     */
+    @Test
+    void aReviewerCannotDeleteSomeoneElsesDocument() {
+        UUID tenantId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Document doc = doc(docId, tenantId, UUID.randomUUID());
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc));
+        asCaller(ctx(UUID.randomUUID(), tenantId, "ORG_MANAGER"));
+
+        assertThatThrownBy(() -> service.delete(docId))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(repository, never()).delete(any());
+        verify(storage, never()).delete(anyString());
+    }
+
+    @Test
+    void aColleagueCannotDeleteAnotherUsersDocument() {
+        UUID tenantId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        when(repository.findByIdAndTenantId(docId, tenantId))
+                .thenReturn(Optional.of(doc(docId, tenantId, UUID.randomUUID())));
+        asCaller(ctx(UUID.randomUUID(), tenantId, "USER"));
+
+        assertThatThrownBy(() -> service.delete(docId))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(storage, never()).delete(anyString());
+    }
+
+    /**
+     * The row is removed first and the object second on purpose: a failed storage delete leaves
+     * an orphan, which is recoverable, where the other order would leave a document row pointing
+     * at bytes that no longer exist.
+     */
+    @Test
+    void aFailedObjectDeleteStillRemovesTheDocument() {
+        UUID tenantId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Document doc = doc(docId, tenantId, userId);
+        doc.setFileKey("document/" + userId + "/abc_id.pdf");
+        when(repository.findByIdAndTenantId(docId, tenantId)).thenReturn(Optional.of(doc));
+        doThrow(new com.lagu.platform.storage.StorageException("bucket down"))
+                .when(storage).delete(anyString());
+        asCaller(ctx(userId, tenantId, "USER"));
+
+        service.delete(docId);   // must not throw
+
+        verify(repository).delete(doc);
+    }
+
     // ---- admin-configured limits ----
 
     /**

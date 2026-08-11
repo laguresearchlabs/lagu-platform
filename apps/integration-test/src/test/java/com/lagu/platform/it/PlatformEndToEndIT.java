@@ -176,8 +176,14 @@ class PlatformEndToEndIT {
                     "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
                     "EUREKA_CLIENT_ENABLED", "false"
             ),
-            // listing-service fetches records over HTTP when snapshotting a published listing
-            List.of("--spring.cloud.discovery.client.simple.instances.record-service[0].uri=http://record-service:8080"));
+            // listing-service fetches records over HTTP when snapshotting a published listing,
+            // and asks schema-registry whether the listing type is publishable/consumer-searchable
+            // before it does. Only record-service was configured here, so with Eureka off the
+            // schema lookup failed with "No servers available for service: schema-registry",
+            // listing-service skipped the snapshot, and nothing ever reached the consumer index —
+            // which surfaced much later as a bare "total: 0" from consumer search.
+            List.of("--spring.cloud.discovery.client.simple.instances.record-service[0].uri=http://record-service:8080",
+                    "--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
 
     private static RestClient schemaRegistryClient;
     private static RestClient recordServiceClient;
@@ -309,7 +315,11 @@ class PlatformEndToEndIT {
         // Allowed transitions must be role-filtered: an ORG_MANAGER sees "publish", an
         // unprivileged ORG_MEMBER sees nothing actionable from SUBMITTED.
         JsonNode managerView = workflowStatus(tenantId, userId, "ORG_MANAGER", recordId);
-        assertThat(triggerNames(managerView)).contains("publish");
+        // "PUBLISH", not "publish": WorkflowDefinitionService normalises trigger names to
+        // uppercase on save, the same as objectType, initialStatus and state names. The request
+        // above deliberately sends lowercase to exercise case-insensitive matching — but what
+        // comes back is the stored canonical form, and asserting otherwise tests nothing real.
+        assertThat(triggerNames(managerView)).contains("PUBLISH");
         JsonNode memberView = workflowStatus(tenantId, userId, "ORG_MEMBER", recordId);
         assertThat(triggerNames(memberView)).isEmpty();
 
@@ -370,17 +380,33 @@ class PlatformEndToEndIT {
     private static GenericContainer<?> appContainer(String jarDirSystemProperty, String alias,
                                                       Map<String, String> env, List<String> args) {
         String jarPath = resolveBootJar(jarDirSystemProperty);
-        List<String> command = new java.util.ArrayList<>(List.of("java", "-jar", "/app/app.jar"));
+        // Explicit heap cap. These containers have no memory limit, so an unconstrained JVM
+        // sizes its heap from the *host's* RAM — five of them together will happily commit more
+        // than a CI runner has, and the resulting failure looks like a container startup
+        // timeout rather than an OOM. 512m is ample for a service under test.
+        List<String> command = new java.util.ArrayList<>(
+                List.of("java", "-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-jar", "/app/app.jar"));
         command.addAll(args);
 
         GenericContainer<?> container = new GenericContainer<>(DockerImageName.parse("eclipse-temurin:25-jre-alpine"))
                 .withNetwork(NETWORK)
                 .withNetworkAliases(alias)
+                // Pin the app to the port this helper exposes and health-checks. Services do not
+                // agree on a default — listing-service is 8108 and booking-service 8109, while the
+                // rest are 8080 — so without this those two boot fine on their own port while the
+                // wait strategy polls 8080 until it times out, and deepStart then tears down the
+                // services that were still starting alongside them.
+                .withEnv("SERVER_PORT", "8080")
                 .withCopyFileToContainer(MountableFile.forHostPath(jarPath), "/app/app.jar")
                 .withCommand(command.toArray(new String[0]))
                 .withExposedPorts(8080)
+                // Three minutes, not two. Four of these boot in parallel, and a Spring service
+                // with Flyway plus Hibernate needs 60-105s under that contention — measured, not
+                // guessed: at two minutes the services were still mid-migration when the wait
+                // expired, and deepStart then tore down siblings that were starting fine. A CI
+                // runner with fewer cores is not going to be quicker.
                 .waitingFor(Wait.forHttp("/actuator/health").forPort(8080)
-                        .forStatusCode(200).withStartupTimeout(Duration.ofMinutes(2)))
+                        .forStatusCode(200).withStartupTimeout(Duration.ofMinutes(3)))
                 .withLogConsumer(frame -> System.out.print("[" + alias + "] " + frame.getUtf8String()));
         env.forEach(container::withEnv);
         return container;
@@ -449,7 +475,18 @@ class PlatformEndToEndIT {
                     + " " + e.getResponseBodyAsString(), e);
         }
         try {
-            return JSON.readTree(raw);
+            JsonNode envelope = JSON.readTree(raw);
+            // Unwrap the ApiResponse envelope, exactly as postForData does for every other
+            // endpoint. SearchController answers ResponseEntity<ApiResponse<SearchResponse>>, so
+            // total/results live under "data" — reading them off the envelope yields null, and
+            // callers then NPE on .asLong() rather than seeing a useful assertion failure.
+            JsonNode data = envelope.get("data");
+            if (data == null || data.isNull()) {
+                throw new AssertionError("Search response had no 'data' envelope: " + raw);
+            }
+            return data;
+        } catch (AssertionError e) {
+            throw e;
         } catch (Exception e) {
             throw new AssertionError("Could not parse search response: " + raw, e);
         }
@@ -556,7 +593,16 @@ class PlatformEndToEndIT {
                     + " " + e.getResponseBodyAsString(), e);
         }
         try {
-            return JSON.readTree(raw);
+            // Same ApiResponse envelope as the authenticated search — total/results live under
+            // "data". See the note in search() above; this helper had the identical defect.
+            JsonNode envelope = JSON.readTree(raw);
+            JsonNode data = envelope.get("data");
+            if (data == null || data.isNull()) {
+                throw new AssertionError("Consumer search response had no 'data' envelope: " + raw);
+            }
+            return data;
+        } catch (AssertionError e) {
+            throw e;
         } catch (Exception e) {
             throw new AssertionError("Could not parse consumer search response: " + raw, e);
         }

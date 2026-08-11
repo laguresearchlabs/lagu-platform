@@ -14,5 +14,8 @@ public class CreatePostRequest {
     @Size(max = 2000)
     private String content;
 
-    private List<UUID> imageIds;
+    // Deliberately no image field. A post's photos are uploaded to its own record gallery AFTER
+    // the post exists — the storage key is scoped to the record id, so there is nothing to attach
+    // at creation. record-service also strips client-supplied gallery values on write, so a field
+    // here would silently do nothing.
 }

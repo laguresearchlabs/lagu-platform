@@ -222,7 +222,13 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("wedding_website_url","Wedding Website",  FieldType.URL,         false, false, null),
             // Event social feed (posts/comments/reports) — replaces event-nest's posts-service
             field("post_content",       "Content",           FieldType.LONG_TEXT,   true,  false, null),
-            field("post_image_ids",     "Images",            FieldType.JSON,        false, false, null),
+            // MEDIA_GALLERY, not JSON: a post's attachments are uploaded photos, so they get the
+            // same pipeline a listing gallery does — scanning, dimension rules, derivatives,
+            // ordering and per-request signing — with no media code in event-service at all.
+            // Posts are EVENT_POST records, so record-service's gallery endpoints already serve
+            // them. This previously held image-service UUIDs, which is what tied event posts to
+            // a service the platform no longer needs.
+            field("post_images",        "Images",            FieldType.MEDIA_GALLERY,false, false, null),
             field("post_pinned",        "Pinned",            FieldType.BOOLEAN,     false, false, null),
             field("post_locked",        "Comments Locked",   FieldType.BOOLEAN,     false, false, null),
             field("comment_content",    "Content",           FieldType.TEXT,        true,  false, null),
@@ -417,7 +423,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                     fge("wedding_website_url",4,false)));
 
         ensureFieldGroup("event_post_details",  "Post",
-            List.of(fge("post_content",0,true), fge("post_image_ids",1,false),
+            List.of(fge("post_content",0,true), fge("post_images",1,false),
                     fge("post_pinned",2,false), fge("post_locked",3,false)));
 
         ensureFieldGroup("event_comment_details","Comment",

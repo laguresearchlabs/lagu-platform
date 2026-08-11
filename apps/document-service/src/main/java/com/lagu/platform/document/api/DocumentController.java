@@ -134,6 +134,24 @@ public class DocumentController {
         return ResponseEntity.ok(ApiResponse.ok(service.verify(id)));
     }
 
+    /**
+     * Permanently removes a document and its file.
+     *
+     * <p>Owner or platform admin only — deliberately not reviewers, who can read every document
+     * in their org to verify it but have no business destroying one. Hard delete: the object goes
+     * with the row, so this is not recoverable.
+     *
+     * <p>Guarded by DOCUMENT:DELETE rather than reusing the READ or REVIEW grants, so the
+     * permission model can distinguish it; ownership is enforced in the service on top, the same
+     * way every other document read is.
+     */
+    @DeleteMapping("/{id}")
+    @RequirePermission(resource = "DOCUMENT", action = "DELETE")
+    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
     /** Reject a document with an optional reason. */
     @PostMapping("/{id}/reject")
     @RequirePermission(resource = "DOCUMENT", action = "REVIEW")

@@ -46,9 +46,9 @@ class ListingCoverServiceTest {
         asAnonymousConsumer();
         // Echo a signed URL per key, as record-service would.
         when(recordServiceClient.signMediaKeys(any())).thenAnswer(inv -> {
-            Map<UUID, String> keys = inv.getArgument(0);
+            java.util.Collection<RecordServiceClient.MediaKey> keys = inv.getArgument(0);
             Map<String, String> urls = new HashMap<>();
-            keys.values().forEach(key -> urls.put(key, "https://bucket/signed/" + key));
+            keys.forEach(k -> urls.put(k.key(), "https://bucket/signed/" + k.key()));
             return urls;
         });
     }
@@ -150,7 +150,7 @@ class ListingCoverServiceTest {
 
         assertThat(service.coversFor(List.of(id))).isEmpty();
         // Nothing is even signed for it.
-        verify(recordServiceClient).signMediaKeys(argThat(Map::isEmpty));
+        verify(recordServiceClient).signMediaKeys(argThat(java.util.Collection::isEmpty));
     }
 
     @Test
@@ -212,6 +212,94 @@ class ListingCoverServiceTest {
         doReturn(Map.of()).when(recordServiceClient).signMediaKeys(any());
 
         assertThat(service.coversFor(List.of(id))).isEmpty();
+    }
+
+    // ── detail page carousel ──────────────────────────────────────────────────
+
+    /** The public counterpart to record-service's gallery endpoint, which an anonymous consumer
+     *  cannot reach because it requires RECORD:READ. */
+    @Test
+    void returnsEveryPhotoInOrderForOneListing() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.of(
+                snapshot(id, "PUBLISHED", List.of(
+                        item("record/" + id + "/1_a.jpg", false, "side", "record/" + id + "/1_a__card.jpg"),
+                        item("record/" + id + "/2_b.jpg", true, "front", "record/" + id + "/2_b__card.jpg")))));
+
+        List<ListingCoverService.Photo> photos = service.photosFor(id, null);
+
+        assertThat(photos).hasSize(2);
+        assertThat(photos).extracting(ListingCoverService.Photo::getCaption)
+                .containsExactly("side", "front");
+        assertThat(photos).extracting(ListingCoverService.Photo::getPosition).containsExactly(0, 1);
+        assertThat(photos.get(1).isPrimary()).isTrue();
+        // Display URL is the full derivative; the thumbnail is the card one.
+        assertThat(photos.get(1).getUrl()).endsWith("2_b.jpg");
+        assertThat(photos.get(1).getThumbnailUrl()).endsWith("2_b__card.jpg");
+    }
+
+    /** One signing call for the whole carousel, not one per photo. */
+    @Test
+    void signsTheWholeCarouselInOneCall() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.of(
+                snapshot(id, "PUBLISHED", List.of(
+                        item("record/" + id + "/1_a.jpg", true, null, null),
+                        item("record/" + id + "/2_b.jpg", false, null, null),
+                        item("record/" + id + "/3_c.jpg", false, null, null)))));
+
+        service.photosFor(id, null);
+
+        verify(recordServiceClient, times(1)).signMediaKeys(any());
+    }
+
+    /**
+     * Every key must travel with the record it belongs to — that pairing is what record-service
+     * verifies before signing. A carousel signs many keys for one record, which is why the
+     * contract is a list of pairs rather than a map keyed by record id.
+     */
+    @Test
+    void everyKeySentCarriesTheOwningRecordId() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.of(
+                snapshot(id, "PUBLISHED", List.of(
+                        item("record/" + id + "/1_a.jpg", true, null, "record/" + id + "/1_a__card.jpg")))));
+
+        service.photosFor(id, null);
+
+        verify(recordServiceClient).signMediaKeys(argThat(keys ->
+                keys.stream().allMatch(k -> id.equals(k.recordId()))
+                        && keys.size() == 2));   // full + card for the one photo
+    }
+
+    @Test
+    void anUnpublishedListingsCarouselIsEmptyForAnonymousCallers() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.of(
+                snapshot(id, "UNPUBLISHED", List.of(item("record/" + id + "/1_a.jpg", true, null, null)))));
+
+        assertThat(service.photosFor(id, null)).isEmpty();
+        verifyNoInteractions(recordServiceClient);
+    }
+
+    /** Absent and not-visible look identical, so this cannot be used to probe for unpublished
+     *  listings by id. */
+    @Test
+    void anUnknownListingIsEmptyRatherThanAnError() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.empty());
+
+        assertThat(service.photosFor(id, null)).isEmpty();
+    }
+
+    @Test
+    void aPhotoThatCannotBeSignedIsDroppedNotRenderedBroken() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByRecordId(id)).thenReturn(java.util.Optional.of(
+                snapshot(id, "PUBLISHED", List.of(item("record/" + id + "/1_a.jpg", true, null, null)))));
+        doReturn(Map.of()).when(recordServiceClient).signMediaKeys(any());
+
+        assertThat(service.photosFor(id, null)).isEmpty();
     }
 
     @Test

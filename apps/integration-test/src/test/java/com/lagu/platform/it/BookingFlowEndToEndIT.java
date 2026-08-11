@@ -221,17 +221,33 @@ class BookingFlowEndToEndIT {
     private static GenericContainer<?> appContainer(String jarDirSystemProperty, String alias,
                                                       Map<String, String> env, List<String> args) {
         String jarPath = resolveBootJar(jarDirSystemProperty);
-        List<String> command = new java.util.ArrayList<>(List.of("java", "-jar", "/app/app.jar"));
+        // Explicit heap cap. These containers have no memory limit, so an unconstrained JVM
+        // sizes its heap from the *host's* RAM — five of them together will happily commit more
+        // than a CI runner has, and the resulting failure looks like a container startup
+        // timeout rather than an OOM. 512m is ample for a service under test.
+        List<String> command = new java.util.ArrayList<>(
+                List.of("java", "-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-jar", "/app/app.jar"));
         command.addAll(args);
 
         GenericContainer<?> container = new GenericContainer<>(DockerImageName.parse("eclipse-temurin:25-jre-alpine"))
                 .withNetwork(NETWORK)
                 .withNetworkAliases(alias)
+                // Pin the app to the port this helper exposes and health-checks. Services do not
+                // agree on a default — listing-service is 8108 and booking-service 8109, while the
+                // rest are 8080 — so without this those two boot fine on their own port while the
+                // wait strategy polls 8080 until it times out, and deepStart then tears down the
+                // services that were still starting alongside them.
+                .withEnv("SERVER_PORT", "8080")
                 .withCopyFileToContainer(MountableFile.forHostPath(jarPath), "/app/app.jar")
                 .withCommand(command.toArray(new String[0]))
                 .withExposedPorts(8080)
+                // Three minutes, not two. Four of these boot in parallel, and a Spring service
+                // with Flyway plus Hibernate needs 60-105s under that contention — measured, not
+                // guessed: at two minutes the services were still mid-migration when the wait
+                // expired, and deepStart then tore down siblings that were starting fine. A CI
+                // runner with fewer cores is not going to be quicker.
                 .waitingFor(Wait.forHttp("/actuator/health").forPort(8080)
-                        .forStatusCode(200).withStartupTimeout(Duration.ofMinutes(2)))
+                        .forStatusCode(200).withStartupTimeout(Duration.ofMinutes(3)))
                 .withLogConsumer(frame -> System.out.print("[" + alias + "] " + frame.getUtf8String()));
         env.forEach(container::withEnv);
         return container;

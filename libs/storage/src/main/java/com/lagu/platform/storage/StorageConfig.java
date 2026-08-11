@@ -4,10 +4,10 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -49,11 +49,37 @@ public class StorageConfig {
      * a missing property.
      */
     @Bean
-    @ConditionalOnMissingBean(MediaScanner.class)
+    @ConditionalOnProperty(name = "platform.storage.scanner.enabled",
+                           havingValue = "false", matchIfMissing = true)
     MediaScanner noOpMediaScanner() {
         log.warn("Malware scanning is DISABLED (platform.storage.scanner.enabled=false). " +
                  "Uploads are checked for format but not for content.");
         return (content, key) -> MediaScanner.ScanResult.ok();
+    }
+
+    /**
+     * Lets a service start when {@code provider} names neither backend.
+     *
+     * <p>Keyed on the same property as the two backends, so the three conditions are exhaustive
+     * and mutually exclusive and exactly one {@link StorageService} is registered regardless of
+     * processing order. {@code @ConditionalOnMissingBean} would read more naturally but is only
+     * order-guaranteed inside auto-configuration, and this is a plain {@code @Configuration}.
+     *
+     * <p>Tests that need a working stub replace this with {@code @MockitoBean}, which overrides
+     * the definition rather than competing with it.
+     *
+     * <p>Without this, {@code provider: none} left nothing to inject and every service with an
+     * upload path failed to start — which is how the end-to-end test, which sets
+     * {@code STORAGE_PROVIDER=none} because it drives record CRUD rather than uploads, stopped
+     * being able to boot record-service at all.
+     */
+    @Bean
+    @Conditional(OnNoStorageBackend.class)
+    StorageService unavailableStorageService() {
+        log.warn("No object storage backend configured (platform.storage.provider is neither " +
+                 "'gcs' nor 's3'). The service will start, but any file upload or download will " +
+                 "fail.");
+        return new UnavailableStorageService();
     }
 
     /** The confirm-time pipeline every upload path shares. */

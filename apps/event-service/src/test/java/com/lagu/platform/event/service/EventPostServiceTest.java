@@ -33,7 +33,12 @@ class EventPostServiceTest {
     private final EventMemberRepository memberRepo = mock(EventMemberRepository.class);
     private final EventPostLikeRepository likeRepo = mock(EventPostLikeRepository.class);
     private final RecordServiceClient recordClient = mock(RecordServiceClient.class);
-    private final EventPostService service = new EventPostService(eventRepo, memberRepo, likeRepo, recordClient);
+    // A real guard over the same mocked repositories, not a mock of it: the membership rules
+    // (accepted-only, manager-only) are part of what these tests assert, and stubbing them out
+    // would leave the assertions checking nothing.
+    private final EventMembershipGuard membership = new EventMembershipGuard(eventRepo, memberRepo);
+    private final EventPostService service =
+            new EventPostService(membership, eventRepo, memberRepo, likeRepo, recordClient);
 
     private final UUID eventId = UUID.randomUUID();
     // Event.id doubles as the org-partition key now (see Event.java) — alias kept so this file's

@@ -7,8 +7,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "platform.storage")
 public class StorageProperties {
 
-    /** Backend to use: {@code gcs} or {@code s3}. */
-    private String provider = "gcs";
+    public static final String PROVIDER_GCS = "gcs";
+    public static final String PROVIDER_S3 = "s3";
+
+    /**
+     * Backend to use. Anything other than {@link #PROVIDER_GCS} or {@link #PROVIDER_S3} means
+     * "no object storage": the service still starts, but every upload and download fails. See
+     * {@link UnavailableStorageService}.
+     */
+    public static final String DEFAULT_PROVIDER = PROVIDER_GCS;
+
+    private String provider = DEFAULT_PROVIDER;
 
     /**
      * Key prefix this service owns, e.g. {@code record} or {@code document}. Every key it mints

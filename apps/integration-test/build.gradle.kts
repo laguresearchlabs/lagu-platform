@@ -59,7 +59,10 @@ tasks.named<Test>("test") {
         showStandardStreams = true
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
-    // Cold JVM starts for up to 3 app containers + 4 infra containers comfortably exceed JUnit's
-    // usual test timeouts.
-    timeout.set(Duration.ofMinutes(15))
+    // Two test classes, each standing up its own full stack: 4 infra containers plus up to 5
+    // Spring services, every one a cold JVM running Flyway and Hibernate before it answers a
+    // health check. Fifteen minutes was enough only while the suite failed fast during container
+    // startup; once the tests actually ran to completion it went past it and Gradle killed the
+    // task, which reads as "Timeout has been exceeded" with no test failure to explain it.
+    timeout.set(Duration.ofMinutes(30))
 }

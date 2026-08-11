@@ -44,7 +44,13 @@ public class DefaultPermissionEvaluator implements PermissionEvaluator {
         if ("NOTIFICATION".equals(resource)) return true;
 
         // Documents: any authenticated user can upload/read their own;
-        // REVIEW action (verify/reject) requires ORG_MANAGER or ORG_OWNER
+        // REVIEW action (verify/reject) requires ORG_MANAGER or ORG_OWNER.
+        //
+        // Note what this grant is and is not. It is role-shaped: it cannot see WHOSE document an
+        // id refers to, so READ and DELETE both pass here for any authenticated caller and the
+        // ownership rule lives in DocumentService.findForContext/canDelete. DELETE is destructive
+        // and irreversible, so that pairing is load-bearing — a future endpoint annotated
+        // DOCUMENT:DELETE without its own ownership check would be open to every logged-in user.
         if ("DOCUMENT".equals(resource)) {
             if ("REVIEW".equals(action)) return ctx.hasAnyRole("ORG_MANAGER", "ORG_OWNER");
             return true;

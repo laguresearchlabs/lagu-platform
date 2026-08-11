@@ -34,6 +34,52 @@ public class RecordServiceClient {
                 .build();
     }
 
+    /**
+     * One key to sign, paired with the record it belongs to. Many-to-one: a post's gallery signs
+     * several keys that all belong to that post's record, and each must still travel with the
+     * record id — it is what record-service checks the key against before signing.
+     */
+    public record MediaKey(UUID recordId, String key) {}
+
+    /**
+     * Signs media keys in bulk, so a feed of posts costs one call rather than one per post.
+     *
+     * <p>record-service does the signing because its bucket credential is the one IAM-scoped to
+     * the {@code record/} prefix; giving event-service its own access to save a hop would dissolve
+     * that boundary for something that happens once per page.
+     *
+     * @return signed URL per key; a key that could not be signed is simply absent
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, String> signMediaKeys(java.util.Collection<MediaKey> keys) {
+        if (keys == null || keys.isEmpty()) return Map.of();
+
+        List<Map<String, String>> items = keys.stream()
+                .filter(k -> k.recordId() != null && k.key() != null)
+                .distinct()
+                .map(k -> Map.of("recordId", k.recordId().toString(), "key", k.key()))
+                .toList();
+        if (items.isEmpty()) return Map.of();
+
+        try {
+            Map<String, Object> envelope = restClient.post()
+                    .uri("/internal/records/media/sign")
+                    .body(Map.<String, Object>of("items", items))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {});
+            if (envelope == null || !(envelope.get("data") instanceof Map)) {
+                log.warn("Unexpected response signing {} media key(s) for posts", items.size());
+                return Map.of();
+            }
+            return (Map<String, String>) envelope.get("data");
+        } catch (Exception e) {
+            // Photos are decoration on a feed; a post without its images still reads. Failing the
+            // whole feed because signing was unavailable would turn that into an outage.
+            log.warn("Could not sign {} media key(s) for posts: {}", items.size(), e.getMessage());
+            return Map.of();
+        }
+    }
+
     public Map<String, Object> createRecord(UUID tenantId, UUID actingUserId, String objectType,
                                              Map<String, Object> data) {
         try {

@@ -7,6 +7,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,18 +37,31 @@ public class RecordServiceClient {
      * boundary. Each key travels with the record it belongs to, which is what lets the other side
      * verify it rather than trusting it.
      *
-     * @param keysByRecord key to sign, per record id
+     * @param keys the keys to sign, each paired with its owning record
      * @return signed URL per key; a key that could not be signed is simply absent
      */
-    @SuppressWarnings("unchecked")
-    public Map<String, String> signMediaKeys(Map<UUID, String> keysByRecord) {
-        if (keysByRecord.isEmpty()) return Map.of();
+    /**
+     * One key to sign, paired with the record it belongs to.
+     *
+     * <p>A pair rather than a map entry because the relationship is many-to-one: a gallery
+     * carousel signs a dozen keys that all belong to the same record, and every one of them must
+     * still travel with that record id — it is what the far side checks the key against before
+     * signing. Keying a map by record id could only ever carry one.
+     */
+    public record MediaKey(UUID recordId, String key) {}
 
-        List<Map<String, String>> items = keysByRecord.entrySet().stream()
-                .map(entry -> Map.of(
-                        "recordId", entry.getKey().toString(),
-                        "key", entry.getValue()))
+    @SuppressWarnings("unchecked")
+    public Map<String, String> signMediaKeys(Collection<MediaKey> keys) {
+        if (keys == null || keys.isEmpty()) return Map.of();
+
+        List<Map<String, String>> items = keys.stream()
+                .filter(k -> k.recordId() != null && k.key() != null)
+                .distinct()
+                .map(k -> Map.of(
+                        "recordId", k.recordId().toString(),
+                        "key", k.key()))
                 .toList();
+        if (items.isEmpty()) return Map.of();
 
         Map<String, Object> envelope = restClient.post()
                 .uri("/internal/records/media/sign")
@@ -60,7 +74,7 @@ public class RecordServiceClient {
             // renders. Failing the whole search because signing was unavailable would turn a
             // cosmetic dependency into an outage.
             log.warn("Unexpected response signing {} media key(s); returning none",
-                    keysByRecord.size());
+                    items.size());
             return Map.of();
         }
         return (Map<String, String>) envelope.get("data");

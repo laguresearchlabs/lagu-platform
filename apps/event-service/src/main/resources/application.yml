@@ -49,6 +49,27 @@ management:
   endpoint.health.show-details: always
 
 platform:
+  storage:
+    # Key prefix this service owns. Scope its bucket IAM binding to the same prefix so
+    # event-service can neither read nor overwrite record-service's or document-service's
+    # objects — that scoping is what replaces the old single-pod credential boundary.
+    domain: event
+    provider: ${STORAGE_PROVIDER:gcs}
+    upload-url-ttl: 15m
+    download-url-ttl: 10m
+    gcs:
+      bucket: ${GCS_BUCKET:}
+      service-account-email: ${GCS_SIGNER_SA:}
+      credentials-location: ${GCP_CREDENTIALS_LOCATION:}
+    s3:
+      bucket: ${S3_BUCKET:}
+      region: ${AWS_REGION:}
+    scanner:
+      enabled: ${CLAMAV_ENABLED:false}
+      host: ${CLAMAV_HOST:clamav}
+      port: ${CLAMAV_PORT:3310}
+      timeout: 30s
+
   security:
     # GET /api/v1/events/share/{id} only — Open Graph crawlers rendering a share link's
     # preview card can't authenticate. The handler itself serves PUBLIC events only and

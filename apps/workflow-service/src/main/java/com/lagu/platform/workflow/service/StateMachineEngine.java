@@ -113,6 +113,19 @@ public class StateMachineEngine {
 
     /** {@code tenantId} null means the caller is a platform admin (checked by the controller before
      *  calling this) — anyone else must pass their own org, and only ever sees that org's state. */
+    /**
+     * Read-only, but transactional — the session has to outlive the repository call.
+     *
+     * <p>{@code RecordWorkflowState.workflow} is a LAZY {@code @ManyToOne} and
+     * {@code WorkflowDefinition.states} a lazy collection, so without a transaction spanning this
+     * method the repository's own transaction closes on return and the {@code wf.getStates()}
+     * below touches a detached proxy — {@code LazyInitializationException}, surfaced as a 500 on
+     * every single call to {@code GET /api/v1/records/{id}/workflow}.
+     *
+     * <p>{@code processTransitionRequest} was already annotated; this one was missed, and nothing
+     * caught it because the endpoint had no test exercising it against a real database.
+     */
+    @Transactional(readOnly = true)
     public RecordWorkflowStatusResponse getStatus(UUID recordId, UUID tenantId, Set<String> userRoles) {
         RecordWorkflowState rws = (tenantId != null
                 ? rwsRepo.findByRecordIdAndTenantId(recordId, tenantId)

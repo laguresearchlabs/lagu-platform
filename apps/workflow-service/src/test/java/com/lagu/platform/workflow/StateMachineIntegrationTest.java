@@ -119,6 +119,64 @@ class StateMachineIntegrationTest {
                 .get().satisfies(s -> assertThat(s.getCurrentState()).isEqualTo("SUBMITTED"));
     }
 
+    /**
+     * {@code GET /api/v1/records/{id}/workflow} against a real database.
+     *
+     * <p>This endpoint had no coverage at all, and it was broken for every caller: {@code
+     * getStatus} was not transactional, so with {@code open-in-view: false} the repository's
+     * transaction closed on return and reading the lazy {@code workflow.states} threw
+     * {@code LazyInitializationException} — a 500, every time. Mock-based tests cannot see this;
+     * only a real session boundary can, which is why it lives here.
+     *
+     * <p>Asserting on {@code allowedTransitions} rather than just the status code is the point:
+     * that is the field whose lazy traversal blew up, so a 200 with an empty body would still be
+     * the bug.
+     */
+    @Test
+    void workflowStatusEndpoint_returnsStateAndTransitions() {
+        String objectType = "IT_VENUE_WF_STATUS_" + UUID.randomUUID().toString().substring(0, 8);
+        String wfId = createWorkflowDefinition("it-venue-wf-status", objectType);
+        addState(wfId, "DRAFT",     false);
+        addState(wfId, "SUBMITTED", false);
+        addTransition(wfId, "DRAFT", "SUBMITTED", "SUBMIT", null);
+
+        UUID recordId = UUID.randomUUID();
+        UUID tenantId = UUID.fromString(TENANT_ID);
+
+        kafkaTemplate.send(PlatformTopics.RECORD_EVENTS, tenantId + ":" + recordId,
+                RecordEvent.builder()
+                        .eventType("STATUS_TRANSITION_REQUESTED")
+                        .recordId(recordId)
+                        .tenantId(tenantId)
+                        .objectType(objectType)
+                        .triggerName("SUBMIT")
+                        .changedBy(UUID.fromString(ADMIN_USER_ID))
+                        .occurredAt(Instant.now())
+                        .build());
+
+        await().atMost(10, TimeUnit.SECONDS)
+                .pollInterval(300, TimeUnit.MILLISECONDS)
+                .until(() -> rwsRepo.findByRecordId(recordId).isPresent());
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map> response = adminClient.get()
+                .uri("/api/v1/records/" + recordId + "/workflow")
+                .retrieve().toEntity(Map.class);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) response.getBody().get("data");
+        assertThat(data).isNotNull();
+        assertThat(data.get("currentState")).isEqualTo("SUBMITTED");
+        // Traversing workflow.states and the transition list is what needed an open session.
+        assertThat(data).containsKey("allowedTransitions");
+        // "terminal", not "isTerminal": the DTO field is `boolean isTerminal`, so Lombok emits
+        // isTerminal() and Jackson strips the prefix. Worth asserting the wire name explicitly —
+        // a client reading "isTerminal" silently gets null.
+        assertThat(data.get("terminal")).isEqualTo(false);
+    }
+
     @Test
     void processTransitionRequest_invalidTrigger_noStateCreated() {
         // Workflow DRAFT --SUBMIT--> SUBMITTED; send APPROVE (invalid from DRAFT)

@@ -61,6 +61,24 @@ public class ListingController {
     public record CoverUrlsRequest(List<UUID> recordIds, String galleryField) {}
 
     /**
+     * Every photo on one listing — the detail page's carousel.
+     *
+     * <p>Public, because a consumer browsing a listing is not signed in. record-service's gallery
+     * endpoint is gated on {@code RECORD:READ} and cannot serve them; this reads the frozen
+     * approved snapshot instead, so a vendor's unreviewed uploads never appear here.
+     *
+     * <p>Returns an empty list rather than 404 for a listing that does not exist or is not visible
+     * — the two are indistinguishable on purpose, so this cannot be used to probe for
+     * unpublished listings by id.
+     */
+    @GetMapping("/{recordId}/gallery")
+    public ResponseEntity<ApiResponse<List<ListingCoverService.Photo>>> gallery(
+            @PathVariable UUID recordId,
+            @RequestParam(required = false) String galleryField) {
+        return ResponseEntity.ok(ApiResponse.ok(coverService.photosFor(recordId, galleryField)));
+    }
+
+    /**
      * A PUBLISHED snapshot is genuinely public (that's what "consumer-facing" means for this
      * endpoint) — anyone may view it. Anything else (UNPUBLISHED/SUSPENDED/a suspended vendor's
      * data, etc) previously had no gate at all: any authenticated user of any tenant could read

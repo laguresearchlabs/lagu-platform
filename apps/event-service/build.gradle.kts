@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":libs:events"))
     implementation(project(":libs:security"))
     implementation(project(":libs:membership"))
+    implementation(project(":libs:storage"))
 
     implementation(rootProject.libs.spring.boot.web)
     implementation(rootProject.libs.spring.boot.data.jpa)
