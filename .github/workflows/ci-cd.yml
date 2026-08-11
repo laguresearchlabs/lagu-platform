@@ -27,6 +27,7 @@ jobs:
             shared: &shared
               - 'libs/common/**'
               - 'libs/events/**'
+              - 'libs/membership/**'
               - 'libs/security/**'
               - 'libs/storage/**'
               - 'build.gradle.kts'
@@ -290,7 +291,7 @@ jobs:
   deploy:
     needs: [changes, docker]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.services != '[]'
-    uses: YOUR-ORG/server-scripts/.github/workflows/gitops-bump.yml@main
+    uses: laguresearchlabs/server-scripts/.github/workflows/gitops-bump.yml@main
     with:
       # fromJson -> join turns ["record-service","vendor-service"] into the
       # space-separated list the reusable workflow expects, so all the services
