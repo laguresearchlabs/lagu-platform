@@ -281,22 +281,117 @@ jobs:
           cache-from: type=gha,scope=postgres
           cache-to: type=gha,mode=max,scope=postgres
 
-  # ─── Deploy: pin the new tag in the GitOps repo ─────────────────────────────
-  # Argo CD reconciles from server-scripts/prod/apps, so a merge to main now
-  # reaches production without anyone running `docker compose pull` on a box.
-  # Rollback is `git revert` in that repo.
+  # ─── Deploy: DISABLED ───────────────────────────────────────────────────────
+  # The GitOps deploy job is commented out so builds can go green while the
+  # GITOPS_TOKEN secret is still outstanding. Nothing below runs: no tag is
+  # pinned in server-scripts/prod/apps, so Argo CD keeps serving whatever tag is
+  # already committed there. Images are still built and pushed by the `docker`
+  # job above — only the production rollout is paused.
   #
-  # The matrix service names double as the prod/apps/<service> directory names,
-  # so no mapping table is needed — they already match.
-  deploy:
-    needs: [changes, docker]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.services != '[]'
-    uses: laguresearchlabs/server-scripts/.github/workflows/gitops-bump.yml@main
-    with:
-      # fromJson -> join turns ["record-service","vendor-service"] into the
-      # space-separated list the reusable workflow expects, so all the services
-      # this run built land in ONE commit rather than racing each other.
-      services: ${{ join(fromJson(needs.changes.outputs.services), ' ') }}
-      tag: ${{ github.sha }}
-    secrets:
-      gitops_token: ${{ secrets.GITOPS_TOKEN }}
+  # To re-enable: uncomment the block below (strip the leading '# ' from each
+  # line) and set GITOPS_TOKEN in this repo's Actions secrets.
+
+#   # ─── Deploy: pin the new tag in the GitOps repo ─────────────────────────────
+#   # Argo CD reconciles from server-scripts/prod/apps, so a merge to main now
+#   # reaches production without anyone running `docker compose pull` on a box.
+#   # Rollback is `git revert` in that repo.
+#   #
+#   # The matrix service names double as the prod/apps/<service> directory names,
+#   # so no mapping table is needed — they already match.
+#   # The steps below are inlined rather than calling server-scripts'
+#   # gitops-bump.yml reusable workflow: this repo is public and server-scripts is
+#   # private, so GitHub cannot resolve the `uses:` reference and fails the whole
+#   # file at parse time. Checking the repo out with GITOPS_TOKEN works regardless
+#   # of visibility. Keep these steps in sync with
+#   # server-scripts/.github/workflows/gitops-bump.yml.
+#   #
+#   # GITOPS_TOKEN must be a fine-grained PAT with Contents: write on the
+#   # server-scripts repo ONLY. It is the credential that can change what runs in
+#   # production — do not reuse a broadly scoped token.
+#   deploy:
+#     needs: [changes, docker]
+#     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.changes.outputs.services != '[]'
+#     runs-on: ubuntu-latest
+#     # Two runs of this pipeline finishing at once would otherwise race on the
+#     # push and one would lose its bump to a non-fast-forward rejection. Do NOT
+#     # cancel in progress — a cancelled run silently skips a deploy. This only
+#     # serialises runs of THIS repo; a race with a deploy from another service
+#     # repo is handled by the rebase-and-retry loop below.
+#     concurrency:
+#       group: gitops-bump
+#       cancel-in-progress: false
+#     env:
+#       # fromJson -> join turns ["record-service","vendor-service"] into the
+#       # space-separated list bump-tag.py expects, so all the services this run
+#       # built land in ONE commit rather than racing each other. The service
+#       # names double as the prod/apps/<service> directory names.
+#       SERVICES: ${{ join(fromJson(needs.changes.outputs.services), ' ') }}
+#       TAG: ${{ github.sha }}
+#       GITOPS_REPO: laguresearchlabs/server-scripts
+#       GITOPS_BRANCH: main
+#     steps:
+#       - name: Check out the GitOps repo
+#         uses: actions/checkout@v4
+#         with:
+#           repository: laguresearchlabs/server-scripts
+#           ref: main
+#           token: ${{ secrets.GITOPS_TOKEN }}
+#           fetch-depth: 0
+#
+#       - name: Pin the changed services to this tag
+#         run: python3 prod/bin/bump-tag.py "$TAG" $SERVICES
+#
+#       - name: Verify the chart still renders
+#         # Catches a values file that a bump has left invalid before the commit
+#         # reaches Argo. Without this the break is discovered as an OutOfSync app
+#         # minutes later, with no obvious link to the pipeline that caused it.
+#         run: |
+#           curl -sSL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar xz
+#           for svc in $SERVICES; do
+#             ./linux-amd64/helm template "$svc" prod/charts/lagu-service \
+#               -f "prod/apps/$svc/values.yaml" > /dev/null
+#           done
+#           rm -rf linux-amd64
+#
+#       - name: Commit and push
+#         run: |
+#           set -euo pipefail
+#           git config user.name  "lagu-ci[bot]"
+#           git config user.email "lagu-ci@users.noreply.github.com"
+#
+#           if git diff --quiet; then
+#             echo "No change — already deployed at this tag."
+#             exit 0
+#           fi
+#
+#           git add prod/apps
+#           git commit -m "deploy: $SERVICES @ $TAG" \
+#                      -m "From ${{ github.repository }}@${{ github.sha }} (run ${{ github.run_id }})."
+#
+#           # Another pipeline may have pushed while this job was running.
+#           # Rebase and retry rather than failing the deploy.
+#           for attempt in 1 2 3; do
+#             if git push origin "HEAD:$GITOPS_BRANCH"; then
+#               echo "pushed on attempt $attempt"
+#               exit 0
+#             fi
+#             echo "push rejected, rebasing (attempt $attempt)"
+#             git pull --rebase origin "$GITOPS_BRANCH"
+#           done
+#           echo "could not push after 3 attempts" >&2
+#           exit 1
+#
+#       - name: Summary
+#         if: always()
+#         run: |
+#           {
+#             echo "### Deploy"
+#             echo ""
+#             echo "| | |"
+#             echo "|---|---|"
+#             echo "| Services | \`$SERVICES\` |"
+#             echo "| Tag | \`$TAG\` |"
+#             echo "| Source | ${{ github.repository }}@\`${{ github.sha }}\` |"
+#             echo ""
+#             echo "Argo CD reconciles within ~3 minutes. Roll back with \`git revert\` in $GITOPS_REPO."
+#           } >> "$GITHUB_STEP_SUMMARY"
