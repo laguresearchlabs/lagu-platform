@@ -49,3 +49,4 @@ subprojects {
         systemProperty("spring.profiles.active", "loc")
     }
 }
+
