@@ -36,7 +36,7 @@ APPLY="${APPLY:-0}"
 
 # Every service that owns a key prefix in this bucket. A service missing from this list keeps
 # its abandoned uploads forever, silently — add one here when a new service starts using storage.
-DOMAINS=(record document)
+DOMAINS=(record document event)
 
 if [[ -z "$PROVIDER" || -z "$BUCKET" ]]; then
     echo "usage: $0 <gcs|s3> <bucket>" >&2
