@@ -27,6 +27,8 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -183,7 +185,31 @@ class PlatformEndToEndIT {
             // listing-service skipped the snapshot, and nothing ever reached the consumer index —
             // which surfaced much later as a bare "total: 0" from consumer search.
             List.of("--spring.cloud.discovery.client.simple.instances.record-service[0].uri=http://record-service:8080",
-                    "--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
+                    "--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080",
+                    // listing-service asks vendor-service whether the owning org has passed KYC
+                    // before it publishes a consumer-visible snapshot, and that check fails closed
+                    // (see VendorServiceClient): with nothing listening here every publish is held
+                    // at PENDING_VENDOR_ACTIVATION, no listing event is emitted, and consumer
+                    // search stays empty.
+                    "--spring.cloud.discovery.client.simple.instances.vendor-service[0].uri=http://vendor-service:8080"));
+
+    // Owns the KYC gate above. It shares the database with everything else here, but unlike the
+    // other services it does not pin itself to a named schema — left alone it would migrate into
+    // "public" and share a flyway history table with any other service that does the same, so the
+    // IT gives it one.
+    private static final GenericContainer<?> VENDOR_SERVICE = appContainer(
+            "it.vendorServiceJarDir", "vendor-service",
+            Map.of(
+                    "SPRING_DATASOURCE_URL", "jdbc:postgresql://postgres:5432/platformdb",
+                    "SPRING_DATASOURCE_USERNAME", "postgres",
+                    "SPRING_DATASOURCE_PASSWORD", "postgres",
+                    "SPRING_DATASOURCE_HIKARI_SCHEMA", "vendor",
+                    "SPRING_FLYWAY_SCHEMAS", "vendor",
+                    "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
+                    "EUREKA_CLIENT_ENABLED", "false"
+            ),
+            List.of());
 
     private static RestClient schemaRegistryClient;
     private static RestClient recordServiceClient;
@@ -195,9 +221,10 @@ class PlatformEndToEndIT {
     static void startPlatform() {
         Startables.deepStart(Stream.of(POSTGRES, REDIS, KAFKA, OPENSEARCH)).join();
         SCHEMA_REGISTRY.start();
-        // These four only talk to each other over Kafka (plus lazy HTTP schema/record fetches),
-        // so they can come up together once schema-registry is reachable.
-        Startables.deepStart(Stream.of(RECORD_SERVICE, SEARCH_SERVICE, WORKFLOW_SERVICE, LISTING_SERVICE)).join();
+        // These five only talk to each other over Kafka (plus lazy HTTP schema/record/vendor
+        // fetches), so they can come up together once schema-registry is reachable.
+        Startables.deepStart(Stream.of(RECORD_SERVICE, SEARCH_SERVICE, WORKFLOW_SERVICE, LISTING_SERVICE,
+                VENDOR_SERVICE)).join();
 
         schemaRegistryClient = restClientFor(SCHEMA_REGISTRY);
         recordServiceClient = restClientFor(RECORD_SERVICE);
@@ -208,8 +235,8 @@ class PlatformEndToEndIT {
 
     @AfterAll
     static void stopPlatform() {
-        Stream.of(LISTING_SERVICE, WORKFLOW_SERVICE, SEARCH_SERVICE, RECORD_SERVICE, SCHEMA_REGISTRY,
-                        OPENSEARCH, KAFKA, REDIS, POSTGRES)
+        Stream.of(VENDOR_SERVICE, LISTING_SERVICE, WORKFLOW_SERVICE, SEARCH_SERVICE, RECORD_SERVICE,
+                        SCHEMA_REGISTRY, OPENSEARCH, KAFKA, REDIS, POSTGRES)
                 .forEach(GenericContainer::stop);
         NETWORK.close();
     }
@@ -219,6 +246,10 @@ class PlatformEndToEndIT {
         String tenantId = UUID.randomUUID().toString();
         String userId = UUID.randomUUID().toString();
         String listingType = "IT_TEST_VENUE";
+
+        // The listing pipeline below only reaches consumer search for an org vendor-service says
+        // has passed KYC — see activateVendorOrg.
+        activateVendorOrg(tenantId);
 
         // ── 1. schema-registry: define and publish a schema ────────────────────────────────
         // FieldRequest is a Java record; this app stack runs Jackson 3, which — unlike Jackson 2 —
@@ -365,6 +396,10 @@ class PlatformEndToEndIT {
      */
     private String publishRivalListing(String rivalOrg, String listingType) {
         String rivalUser = UUID.randomUUID().toString();
+        // "Unverified" here means no verification *tier* (the search-ranking ladder), which is a
+        // separate axis from the vendor org's KYC status — this org still has to be ACTIVE to be
+        // listed at all.
+        activateVendorOrg(rivalOrg);
         JsonNode rec = postForData(recordServiceClient, rivalOrg, rivalUser, "/api/v1/records", Map.of(
                 "objectType", listingType, "data", Map.of("name", "Budget Hall"), "status", "DRAFT"));
         String rivalRecordId = rec.get("id").asText();
@@ -376,6 +411,39 @@ class PlatformEndToEndIT {
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Marks the org ACTIVE in vendor-service, which is what lets listing-service publish a
+     * consumer-visible snapshot for it. An org that is not ACTIVE gets a snapshot held at
+     * PENDING_VENDOR_ACTIVATION and no listing event at all, so nothing reaches the consumer index
+     * (see ListingSnapshotService's KYC gate).
+     *
+     * <p>Seeded straight into vendor-service's table rather than driven through
+     * {@code POST /api/v1/vendors/register}: registering creates a VENDOR record in
+     * record-service, which would need a published VENDOR schema here — and record-service isn't
+     * running at all in BookingFlowEndToEndIT, which needs the same fixture. The gate itself is
+     * still exercised for real: listing-service asks the running vendor-service over HTTP.
+     */
+    static void activateVendorOrg(PostgreSQLContainer<?> postgres, String tenantId) {
+        try (var conn = DriverManager.getConnection(
+                     postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var stmt = conn.prepareStatement(
+                     "INSERT INTO vendor.vendor_profile "
+                             + "(id, record_id, owner_user_id, business_name, status) "
+                             + "VALUES (?, ?, ?, ?, 'ACTIVE')")) {
+            stmt.setObject(1, UUID.fromString(tenantId));
+            stmt.setObject(2, UUID.randomUUID());   // the VENDOR record this org would own
+            stmt.setObject(3, UUID.randomUUID());   // owner user
+            stmt.setString(4, "IT Vendor " + tenantId);
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Could not seed an ACTIVE vendor org for " + tenantId, e);
+        }
+    }
+
+    private static void activateVendorOrg(String tenantId) {
+        activateVendorOrg(POSTGRES, tenantId);
+    }
 
     private static GenericContainer<?> appContainer(String jarDirSystemProperty, String alias,
                                                       Map<String, String> env, List<String> args) {

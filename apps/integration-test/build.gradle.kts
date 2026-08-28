@@ -19,6 +19,10 @@ dependencies {
     testImplementation(rootProject.libs.testcontainers.redis)
     testImplementation(rootProject.libs.testcontainers.kafka)
     testImplementation("org.apache.kafka:kafka-clients")
+    // The tests seed vendor-service's vendor_profile table directly over JDBC to stand an org up
+    // as ACTIVE — see PlatformEndToEndIT.activateVendorOrg for why that beats calling the
+    // registration API. testcontainers:postgresql does not bring the driver itself.
+    testImplementation(rootProject.libs.postgresql)
 
     testImplementation(rootProject.libs.awaitility)
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -36,6 +40,7 @@ tasks.named<Test>("test") {
         ":apps:workflow-service:bootJar",
         ":apps:listing-service:bootJar",
         ":apps:booking-service:bootJar",
+        ":apps:vendor-service:bootJar",
     )
     // Pointing at the libs/ dir (rather than a specific task output file) sidesteps having to
     // reach into another project's task graph — bootJar's default archive name convention is
@@ -46,6 +51,7 @@ tasks.named<Test>("test") {
     systemProperty("it.workflowServiceJarDir", jarDir(":apps:workflow-service"))
     systemProperty("it.listingServiceJarDir", jarDir(":apps:listing-service"))
     systemProperty("it.bookingServiceJarDir", jarDir(":apps:booking-service"))
+    systemProperty("it.vendorServiceJarDir", jarDir(":apps:vendor-service"))
     // The jars are consumed at runtime via the system properties above, which Gradle can't see —
     // declare them as inputs so a rebuilt service jar invalidates this task's up-to-date check
     // (otherwise the E2E silently does NOT re-run after service code changes).
@@ -55,6 +61,7 @@ tasks.named<Test>("test") {
     inputs.dir(jarDir(":apps:workflow-service")).withPropertyName("workflowServiceJars")
     inputs.dir(jarDir(":apps:listing-service")).withPropertyName("listingServiceJars")
     inputs.dir(jarDir(":apps:booking-service")).withPropertyName("bookingServiceJars")
+    inputs.dir(jarDir(":apps:vendor-service")).withPropertyName("vendorServiceJars")
     testLogging {
         showStandardStreams = true
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

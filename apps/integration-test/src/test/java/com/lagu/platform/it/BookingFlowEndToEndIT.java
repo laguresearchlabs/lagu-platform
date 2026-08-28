@@ -30,13 +30,16 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Boots real schema-registry, listing-service and booking-service processes (one container each,
+ * Boots real schema-registry, listing-service, vendor-service and booking-service processes (one container each,
  * from their actual bootJar) against real Postgres/Redis/Kafka containers, and drives the actual
  * booking-service flow — inquire, quote, confirm — purely over HTTP, with booking-service calling
  * the REAL listing-service and schema-registry rather than mocks (unlike BookingServiceIntegrationTest
  * and ListingServiceIntegrationTest, which each test one service in isolation with its peers
  * mocked). This is the only place that proves ListingServiceClient/SchemaRegistryClient's request/
  * response shapes actually match what the real services return.
+ *
+ * <p>vendor-service is here only to answer listing-service's KYC gate — publishing a listing for
+ * an org it does not report as ACTIVE holds the snapshot instead of publishing it.
  *
  * <p>record-service and workflow-service are deliberately NOT started — the listing being booked
  * is published via listing-service's manual admin endpoint (POST /{recordId}/publish), which
@@ -96,7 +99,28 @@ class BookingFlowEndToEndIT {
                     "EUREKA_CLIENT_ENABLED", "false"
             ),
             List.of("--spring.cloud.discovery.client.simple.instances.record-service[0].uri=http://record-service:8080",
-                    "--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080"));
+                    "--spring.cloud.discovery.client.simple.instances.schema-registry[0].uri=http://schema-registry:8080",
+                    // Even the manual admin publish below goes through listing-service's KYC gate,
+                    // which fails closed: with no vendor-service reachable the listing is held at
+                    // PENDING_VENDOR_ACTIVATION instead of PUBLISHED, and there is nothing to book.
+                    "--spring.cloud.discovery.client.simple.instances.vendor-service[0].uri=http://vendor-service:8080"));
+
+    // Answers that KYC check. It shares the database with everything else here, but unlike the
+    // other services it does not pin itself to a named schema — left alone it would migrate into
+    // "public" and collide with booking-service's flyway history there, so the IT gives it one.
+    private static final GenericContainer<?> VENDOR_SERVICE = appContainer(
+            "it.vendorServiceJarDir", "vendor-service",
+            Map.of(
+                    "SPRING_DATASOURCE_URL", "jdbc:postgresql://postgres:5432/platformdb",
+                    "SPRING_DATASOURCE_USERNAME", "postgres",
+                    "SPRING_DATASOURCE_PASSWORD", "postgres",
+                    "SPRING_DATASOURCE_HIKARI_SCHEMA", "vendor",
+                    "SPRING_FLYWAY_SCHEMAS", "vendor",
+                    "SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092",
+                    "PLATFORM_GATEWAY_SHARED_SECRET", GATEWAY_SECRET,
+                    "EUREKA_CLIENT_ENABLED", "false"
+            ),
+            List.of());
 
     private static final GenericContainer<?> BOOKING_SERVICE = appContainer(
             "it.bookingServiceJarDir", "booking-service",
@@ -122,7 +146,7 @@ class BookingFlowEndToEndIT {
         // listing-service resolves record-service statically too (for fetching a record when
         // snapshotting via the workflow path) but never calls it on the manual-publish path this
         // test uses, so it's fine that nothing is actually listening at that address.
-        LISTING_SERVICE.start();
+        Startables.deepStart(Stream.of(LISTING_SERVICE, VENDOR_SERVICE)).join();
         BOOKING_SERVICE.start();
 
         schemaRegistryClient = restClientFor(SCHEMA_REGISTRY);
@@ -132,7 +156,7 @@ class BookingFlowEndToEndIT {
 
     @AfterAll
     static void stopPlatform() {
-        Stream.of(BOOKING_SERVICE, LISTING_SERVICE, SCHEMA_REGISTRY, KAFKA, REDIS, POSTGRES)
+        Stream.of(BOOKING_SERVICE, VENDOR_SERVICE, LISTING_SERVICE, SCHEMA_REGISTRY, KAFKA, REDIS, POSTGRES)
                 .forEach(GenericContainer::stop);
         NETWORK.close();
     }
@@ -145,6 +169,10 @@ class BookingFlowEndToEndIT {
         String consumerUserId = UUID.randomUUID().toString();
         UUID listingRecordId = UUID.randomUUID();
         LocalDate eventDate = LocalDate.now().plusDays(45);
+
+        // listing-service refuses to publish for an org that has not passed KYC, so stand this
+        // one up as ACTIVE first — see PlatformEndToEndIT.activateVendorOrg.
+        PlatformEndToEndIT.activateVendorOrg(POSTGRES, vendorTenantId);
 
         // ── 1. schema-registry: a listing-type definition (publishable=true — this is what
         // listing-service's real SchemaRegistryClient.getFlags() checks before it will publish a
