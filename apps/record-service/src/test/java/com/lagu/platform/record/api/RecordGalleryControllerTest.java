@@ -10,6 +10,8 @@ import com.lagu.platform.record.dto.GalleryItemConfirmRequest;
 import com.lagu.platform.record.dto.GalleryItemPatchRequest;
 import com.lagu.platform.record.dto.GalleryItemResponse;
 import com.lagu.platform.record.dto.GalleryReorderRequest;
+import com.lagu.platform.common.exception.PlatformException;
+import org.springframework.http.HttpStatus;
 import com.lagu.platform.record.service.RecordService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
@@ -464,5 +466,75 @@ class RecordGalleryControllerTest {
         record.getData().put("gallery", List.of("some-old-string", "another"));
 
         assertThat(controller.list(RECORD_ID, "gallery").getBody().getData()).isEmpty();
+    }
+
+    // ── the media half of the change-approval gate ────────────────────────────
+
+    /**
+     * All four gallery mutations funnel through one private save(), so one check covers add,
+     * patch, delete and reorder. These pin that it really does cover all four — a gate that only
+     * stopped uploads would still let a vendor empty or reorder the gallery of a listing whose
+     * text is sitting under review.
+     */
+    @Test
+    void addIsRefusedWhileEditsRequireApproval() {
+        String key = storedObject("image/jpeg", REAL_JPEG);
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        GalleryItemConfirmRequest req = new GalleryItemConfirmRequest();
+        req.setKey(key);
+
+        assertThatThrownBy(() -> controller.addItem(RECORD_ID, "gallery", req))
+                .isInstanceOf(PlatformException.class)
+                .extracting(e -> ((PlatformException) e).getStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void deleteIsRefusedWhileEditsRequireApproval() {
+        List<GalleryItemResponse> items = addPhoto("keep me");
+        UUID itemId = items.get(0).getId();
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.deleteItem(RECORD_ID, "gallery", itemId))
+                .isInstanceOf(PlatformException.class);
+    }
+
+    @Test
+    void reorderIsRefusedWhileEditsRequireApproval() {
+        addPhoto("first");
+        List<GalleryItemResponse> items = addPhoto("second");
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        GalleryReorderRequest req = new GalleryReorderRequest();
+        req.setItemIds(items.stream().map(GalleryItemResponse::getId).toList());
+
+        assertThatThrownBy(() -> controller.reorder(RECORD_ID, "gallery", req))
+                .isInstanceOf(PlatformException.class);
+    }
+
+    @Test
+    void uploadUrlIsRefusedBeforeAnyBucketWorkHappens() {
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.requestUploadUrl(
+                RECORD_ID, "gallery", urlRequest("photo.jpg", "image/jpeg")))
+                .isInstanceOf(PlatformException.class);
+
+        verify(storage, never()).presignUpload(anyString(), anyString(), any());
+    }
+
+    @Test
+    void aRefusedGalleryChangeNeverWritesTheRecord() {
+        String key = storedObject("image/jpeg", REAL_JPEG);
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        GalleryItemConfirmRequest req = new GalleryItemConfirmRequest();
+        req.setKey(key);
+
+        assertThatThrownBy(() -> controller.addItem(RECORD_ID, "gallery", req))
+                .isInstanceOf(PlatformException.class);
+
+        verify(repository, never()).save(any());
     }
 }

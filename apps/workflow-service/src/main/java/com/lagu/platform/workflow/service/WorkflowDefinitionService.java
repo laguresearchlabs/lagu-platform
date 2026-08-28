@@ -61,8 +61,39 @@ public class WorkflowDefinitionService {
         state.setDescription(req.getDescription());
         state.setTerminal(req.isTerminal());
         state.setDisplayOrder(req.getDisplayOrder());
+        state.setRequiresChangeApproval(req.isRequiresChangeApproval());
         state.setColor(req.getColor());
         wf.getStates().add(state);
+        return toResponse(wfRepo.save(wf), true);
+    }
+
+    /**
+     * Updates a state that already exists. Without this the workflow API was add-only, so any
+     * attribute of a seeded state — including {@code requiresChangeApproval}, which every state on
+     * every platform workflow was seeded with as false — could never be changed. Re-posting the
+     * state to {@code addState} conflicts on the name, so there was no route to it at all.
+     *
+     * <p>Identified by name rather than id: that is how the rest of the platform refers to a state
+     * (a record's {@code status} is a state name), and it is what an admin has in hand.
+     */
+    @Transactional
+    public WorkflowDefinitionResponse updateState(UUID wfId, String stateName, WorkflowStateRequest req) {
+        WorkflowDefinition wf = findById(wfId);
+        requireWritable(wf);
+
+        WorkflowState state = wf.getStates().stream()
+                .filter(st -> st.getName().equalsIgnoreCase(stateName))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("WorkflowState", stateName));
+
+        // The name is the identity here and is referenced by every record's status, so it is not
+        // rewritten — renaming a state would orphan every record sitting in it.
+        state.setLabel(req.getLabel());
+        state.setDescription(req.getDescription());
+        state.setTerminal(req.isTerminal());
+        state.setDisplayOrder(req.getDisplayOrder());
+        state.setRequiresChangeApproval(req.isRequiresChangeApproval());
+        state.setColor(req.getColor());
         return toResponse(wfRepo.save(wf), true);
     }
 

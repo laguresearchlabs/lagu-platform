@@ -6,6 +6,8 @@ import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordRepository;
 import com.lagu.platform.record.dto.FileConfirmRequest;
 import com.lagu.platform.record.dto.FileUploadUrlRequest;
+import com.lagu.platform.common.exception.PlatformException;
+import org.springframework.http.HttpStatus;
 import com.lagu.platform.record.service.RecordService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
@@ -397,5 +399,67 @@ class RecordFileControllerTest {
             String name, String type, Map<String, Object> rules) {
         return new MetadataClient.FieldSchemaDto(
                 name, name, type, false, false, true, true, false, null, rules, null, null);
+    }
+
+    // ── the media half of the change-approval gate ────────────────────────────
+
+    /**
+     * A listing whose workflow state holds edits for review must not have its files swapped
+     * underneath that review. Before this, the gate in RecordService.update covered the record's
+     * text while these endpoints wrote straight to the record — so a vendor could leave the
+     * description under review and replace the photographs at will.
+     */
+    @Test
+    void uploadUrlIsRefusedWhileEditsRequireApproval() {
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.requestUploadUrl(
+                RECORD_ID, "logo", urlRequest("logo.png", "image/png")))
+                .isInstanceOf(PlatformException.class)
+                .extracting(e -> ((PlatformException) e).getStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void uploadUrlIsRefusedBeforeAnyBucketWorkHappens() {
+        // The whole point of checking at upload-url as well as confirm: no presigned URL, no
+        // bytes pushed, no orphaned object for the lifecycle rule to sweep.
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.requestUploadUrl(
+                RECORD_ID, "logo", urlRequest("logo.png", "image/png")))
+                .isInstanceOf(PlatformException.class);
+
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void confirmIsRefusedWhileEditsRequireApproval() {
+        // Checked again at confirm because a presigned URL outlives the check that issued it —
+        // a listing can enter a gated state between the two calls.
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.confirmUpload(RECORD_ID, "logo", confirmRequest("anything")))
+                .isInstanceOf(PlatformException.class)
+                .extracting(e -> ((PlatformException) e).getStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void refusalNamesTheStateSoTheVendorKnowsWhyAndWhatToDo() {
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.confirmUpload(RECORD_ID, "logo", confirmRequest("x")))
+                .hasMessageContaining("need admin approval");
+    }
+
+    @Test
+    void aRefusedUploadNeverWritesTheRecord() {
+        when(recordService.editsRequireApproval(any())).thenReturn(true);
+
+        assertThatThrownBy(() -> controller.confirmUpload(RECORD_ID, "logo", confirmRequest("x")))
+                .isInstanceOf(PlatformException.class);
+
+        verify(repository, never()).save(any());
     }
 }

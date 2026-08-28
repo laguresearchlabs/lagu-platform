@@ -1,6 +1,7 @@
 package com.lagu.platform.listing.service;
 
 import com.lagu.platform.listing.client.SchemaRegistryClient;
+import com.lagu.platform.listing.client.VendorServiceClient;
 import com.lagu.platform.listing.client.SchemaRegistryClient.ListingTypeFlags;
 import com.lagu.platform.listing.domain.ListingAvailabilityRepository;
 import com.lagu.platform.listing.domain.ListingSnapshot;
@@ -29,9 +30,20 @@ class ListingSnapshotServiceTest {
     private final ListingAvailabilityRepository availabilityRepo = mock(ListingAvailabilityRepository.class);
     private final ListingEventPublisher eventPublisher = mock(ListingEventPublisher.class);
     private final SchemaRegistryClient schemaRegistryClient = mock(SchemaRegistryClient.class);
+    private final VendorServiceClient vendorServiceClient = mock(VendorServiceClient.class);
 
     private final ListingSnapshotService service = new ListingSnapshotService(
-            snapshotRepo, availabilityRepo, eventPublisher, schemaRegistryClient);
+            snapshotRepo, availabilityRepo, eventPublisher, schemaRegistryClient, vendorServiceClient);
+
+    /**
+     * These tests predate the KYC publish gate and are about the listing-type flags, not the
+     * vendor. An ACTIVE org keeps that their subject; the gate itself is covered by
+     * KycPublishGateTest.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void vendorIsActive() {
+        when(vendorServiceClient.isActive(any())).thenReturn(true);
+    }
 
     private static ListingSnapshot published(UUID recordId, UUID tenantId) {
         ListingSnapshot s = new ListingSnapshot();
@@ -163,26 +175,65 @@ class ListingSnapshotServiceTest {
 
     // ---- bookSlot / releaseSlot: the atomic claim primitive booking-service depends on ----
 
+    /** A published snapshot for recordId, which bookSlot needs to resolve the owning tenant. */
+    private UUID stubSnapshot(UUID recordId) {
+        UUID tenantId = UUID.randomUUID();
+        ListingSnapshot snap = new ListingSnapshot();
+        snap.setRecordId(recordId);
+        snap.setTenantId(tenantId);
+        when(snapshotRepo.findByRecordId(recordId)).thenReturn(Optional.of(snap));
+        return tenantId;
+    }
+
     @Test
-    void bookSlotReturnsTrueWhenRowFlipped() {
+    void bookSlotReturnsTrueWhenTheDayWasClaimed() {
         UUID recordId = UUID.randomUUID();
         UUID bookingRef = UUID.randomUUID();
         LocalDate date = LocalDate.now().plusDays(1);
-        when(availabilityRepo.markBooked(recordId, date, bookingRef)).thenReturn(1);
+        UUID tenantId = stubSnapshot(recordId);
+        when(availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef)).thenReturn(1);
 
         assertThat(service.bookSlot(recordId, date, bookingRef)).isTrue();
     }
 
     @Test
     void bookSlotReturnsFalseWhenSlotAlreadyTaken() {
-        // The core race-safety property: markBooked's WHERE slotType='AVAILABLE' guard means a
-        // second caller trying to book an already-BOOKED (or BLOCKED) slot affects zero rows.
+        // claimSlot's ON CONFLICT ... WHERE slot_type='AVAILABLE' means a second caller trying to
+        // take an already-BOOKED (or vendor-BLOCKED) day affects zero rows.
         UUID recordId = UUID.randomUUID();
         UUID bookingRef = UUID.randomUUID();
         LocalDate date = LocalDate.now().plusDays(1);
-        when(availabilityRepo.markBooked(recordId, date, bookingRef)).thenReturn(0);
+        UUID tenantId = stubSnapshot(recordId);
+        when(availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef)).thenReturn(0);
 
         assertThat(service.bookSlot(recordId, date, bookingRef)).isFalse();
+    }
+
+    @Test
+    void bookSlotClaimsForTheListingsOwnTenantNotTheCaller() {
+        // booking-service calls this under its own internal-service identity and never asserts an
+        // org. Writing the row under anything but the listing's own tenant would produce
+        // availability the owning vendor cannot see or manage.
+        UUID recordId = UUID.randomUUID();
+        UUID bookingRef = UUID.randomUUID();
+        LocalDate date = LocalDate.now().plusDays(1);
+        UUID tenantId = stubSnapshot(recordId);
+        when(availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef)).thenReturn(1);
+
+        service.bookSlot(recordId, date, bookingRef);
+
+        verify(availabilityRepo).claimSlot(recordId, tenantId, date, bookingRef);
+    }
+
+    @Test
+    void bookSlotFailsClosedWhenTheListingHasNoSnapshot() {
+        // No snapshot means nothing to book against; inventing a tenant for the new row would
+        // create an orphaned slot nobody owns.
+        UUID recordId = UUID.randomUUID();
+        when(snapshotRepo.findByRecordId(recordId)).thenReturn(Optional.empty());
+
+        assertThat(service.bookSlot(recordId, LocalDate.now().plusDays(1), UUID.randomUUID())).isFalse();
+        verify(availabilityRepo, never()).claimSlot(any(), any(), any(), any());
     }
 
     @Test

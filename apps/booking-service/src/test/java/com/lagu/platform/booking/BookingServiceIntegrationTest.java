@@ -2,6 +2,7 @@ package com.lagu.platform.booking;
 
 import com.lagu.platform.booking.client.ListingServiceClient;
 import com.lagu.platform.booking.client.SchemaRegistryClient;
+import com.lagu.platform.booking.client.VendorServiceClient;
 import com.lagu.platform.events.BookingEvent;
 import com.lagu.platform.events.PlatformTopics;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -90,6 +91,9 @@ class BookingServiceIntegrationTest {
     @MockitoBean
     SchemaRegistryClient schemaRegistryClient;
 
+    @MockitoBean
+    VendorServiceClient vendorServiceClient;
+
     @Autowired
     EmbeddedKafkaBroker embeddedKafkaBroker;
 
@@ -98,6 +102,9 @@ class BookingServiceIntegrationTest {
     static final UUID CONSUMER_ID = UUID.randomUUID();
     static final UUID VENDOR_ID = UUID.randomUUID();
     static final UUID LISTING_RECORD_ID = UUID.randomUUID();
+    /** The vendor org's owner — who automation-service will address vendor-side notifications to. */
+    static final UUID VENDOR_OWNER_ID = UUID.randomUUID();
+    static final String VENDOR_OWNER_EMAIL = "bookings@venue.example";
 
     RestClient consumerClient;
     RestClient vendorClient;
@@ -109,6 +116,8 @@ class BookingServiceIntegrationTest {
                 new ListingServiceClient.ListingInfo(LISTING_RECORD_ID, VENDOR_ID, "VENUE", "PUBLISHED", "BASIC")));
         when(schemaRegistryClient.getCommissionRate(anyString(), anyString()))
                 .thenReturn(new BigDecimal("15.00"));
+        when(vendorServiceClient.findNotificationTarget(VENDOR_ID)).thenReturn(
+                Optional.of(new VendorServiceClient.NotificationTarget(VENDOR_OWNER_ID, VENDOR_OWNER_EMAIL)));
 
         consumerClient = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
@@ -180,15 +189,23 @@ class BookingServiceIntegrationTest {
         // BookingEventPublisher's Javadoc). ─────────────────────────────────────────────────
         await().atMost(Duration.ofSeconds(10)).pollInterval(Duration.ofMillis(200)).untilAsserted(() -> {
             ConsumerRecords<String, BookingEvent> records = bookingEvents.poll(Duration.ofMillis(300));
-            boolean found = false;
+            BookingEvent found = null;
             for (ConsumerRecord<String, BookingEvent> record : records) {
                 if ("CONFIRMED".equals(record.value().getEventType())
                         && id.equals(record.value().getBookingId().toString())) {
-                    found = true;
+                    found = record.value();
                 }
             }
             assertThat(found).as("BookingEvent(CONFIRMED) for %s on %s", id, PlatformTopics.BOOKING_EVENTS)
-                    .isTrue();
+                    .isNotNull();
+
+            // The two fields automation-service's vendor-side triggers are conditioned on. They
+            // have to survive JSON serialisation through the outbox and Kafka to be worth
+            // anything, which is exactly what a unit test on the publisher cannot show.
+            // The consumer confirmed, so the vendor is the party who needs telling.
+            assertThat(found.getActorSide()).isEqualTo("CONSUMER");
+            assertThat(found.getVendorRecipientUserId()).isEqualTo(VENDOR_OWNER_ID);
+            assertThat(found.getVendorRecipientEmail()).isEqualTo(VENDOR_OWNER_EMAIL);
         });
     }
 

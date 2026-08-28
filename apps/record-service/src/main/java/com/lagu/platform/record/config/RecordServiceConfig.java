@@ -3,6 +3,7 @@ package com.lagu.platform.record.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.common.cache.JacksonRedisSerializer;
 import com.lagu.platform.record.client.MetadataClient;
+import com.lagu.platform.record.client.WorkflowClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
@@ -73,7 +74,13 @@ public class RecordServiceConfig {
         return RedisCacheManager.builder(factory)
                 .cacheDefaults(defaults)
                 .withInitialCacheConfigurations(Map.of(
-                        MetadataClient.SCHEMA_CACHE, defaults.entryTtl(Duration.ofMinutes(10))
+                        MetadataClient.SCHEMA_CACHE, defaults.entryTtl(Duration.ofMinutes(10)),
+                        // Shorter than the schema cache on purpose. There is no
+                        // workflow-definition-changed event to evict on, so this TTL *is* the
+                        // staleness bound: an admin toggling requiresChangeApproval should see it
+                        // take effect while they are still looking at the screen, and the lookup
+                        // is cheap enough that two minutes costs nothing.
+                        WorkflowClient.GATED_STATES_CACHE, defaults.entryTtl(Duration.ofMinutes(2))
                 ))
                 .build();
     }

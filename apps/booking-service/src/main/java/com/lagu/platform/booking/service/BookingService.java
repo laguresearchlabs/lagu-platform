@@ -5,6 +5,7 @@ import com.lagu.platform.booking.client.SchemaRegistryClient;
 import com.lagu.platform.booking.domain.Booking;
 import com.lagu.platform.booking.domain.BookingRepository;
 import com.lagu.platform.booking.domain.BookingStatus;
+import com.lagu.platform.booking.domain.SettlementStatus;
 import com.lagu.platform.booking.dto.BookingResponse;
 import com.lagu.platform.booking.dto.CancelBookingRequest;
 import com.lagu.platform.booking.dto.CreateBookingRequest;
@@ -21,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -157,6 +159,15 @@ public class BookingService {
         String previousStatus = booking.getStatus().name();
         booking.setStatus(BookingStatus.COMPLETED);
 
+        // Completion is what makes the commission collectable. Booked at DUE rather than invoiced
+        // straight away because billing is a deliberate admin act — an invoice number that nobody
+        // issued is not an invoice. A zero-commission booking skips the queue entirely: there is
+        // nothing to collect, and leaving it DUE would clog the queue with unactionable lines.
+        boolean owed = booking.getCommissionAmount() != null
+                && booking.getCommissionAmount().compareTo(BigDecimal.ZERO) > 0;
+        booking.setSettlementStatus(owed ? SettlementStatus.DUE : SettlementStatus.PAID);
+        if (!owed) booking.setSettledAt(Instant.now());
+
         Booking saved = bookingRepo.save(booking);
         eventPublisher.publish(saved, "COMPLETED", previousStatus, actingUserId);
         log.info("Booking {} completed", saved.getId());
@@ -192,6 +203,11 @@ public class BookingService {
         booking.setStatus(BookingStatus.CANCELLED);
         booking.setCancelledByUserId(actingUserId);
         booking.setCancelReason(req.reason());
+        // A cancelled booking owes nothing. Only reset while the receivable is still open — a
+        // commission already invoiced or paid stays on the books, because it was.
+        if (booking.getSettlementStatus() != null && booking.getSettlementStatus().isOpen()) {
+            booking.setSettlementStatus(SettlementStatus.NOT_DUE);
+        }
 
         Booking saved = bookingRepo.save(booking);
         eventPublisher.publish(saved, "CANCELLED", previousStatus, actingUserId);

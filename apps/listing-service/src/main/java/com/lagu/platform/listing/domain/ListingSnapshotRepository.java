@@ -20,6 +20,9 @@ public interface ListingSnapshotRepository extends JpaRepository<ListingSnapshot
 
     List<ListingSnapshot> findByTenantIdOrderByUpdatedAtDesc(UUID tenantId);
 
+    /** Used to release snapshots held behind the KYC gate once an org reaches ACTIVE. */
+    List<ListingSnapshot> findByTenantIdAndStatus(UUID tenantId, String status);
+
     /** Consumer search — published only, boosted by searchBoost DESC. */
     @Query("SELECT s FROM ListingSnapshot s WHERE s.objectType = :objectType " +
            "AND s.status = 'PUBLISHED' ORDER BY s.searchBoost DESC, s.publishedAt DESC")

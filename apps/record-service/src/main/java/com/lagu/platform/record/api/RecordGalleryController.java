@@ -15,6 +15,7 @@ import com.lagu.platform.record.dto.GalleryItemResponse;
 import com.lagu.platform.record.dto.GalleryReorderRequest;
 import com.lagu.platform.common.media.GalleryItem;
 import com.lagu.platform.record.service.MediaFieldRules;
+import com.lagu.platform.record.service.MediaGate;
 import com.lagu.platform.record.service.RecordService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
@@ -123,6 +124,8 @@ public class RecordGalleryController {
             @Valid @RequestBody FileUploadUrlRequest request) {
 
         Record record = loadRecord(id);
+        // Fail before the client pushes bytes it will never be allowed to confirm.
+        MediaGate.requireEditable(recordService, record);
         FieldSchemaDto field = requireGalleryField(record, fieldName);
 
         requireRoomForOneMore(readGallery(record, fieldName, id), field, fieldName);
@@ -367,6 +370,11 @@ public class RecordGalleryController {
 
     /** Normalises the cover photo, writes the field, and returns what was stored. */
     private List<GalleryItem> save(Record record, String fieldName, List<GalleryItem> items) {
+        // Every gallery mutation — add, patch, delete, reorder — funnels through here, so one
+        // check covers all four. They write the record directly and so never met the
+        // change-approval gate in RecordService.update.
+        MediaGate.requireEditable(recordService, record);
+
         List<GalleryItem> normalized = GalleryItem.withSinglePrimary(items);
 
         Map<String, Object> data = new HashMap<>(record.getData());

@@ -22,7 +22,10 @@ public record FieldGroupResponse(
     public record EntryResponse(
             String fieldName,
             int displayOrder,
-            boolean required,
+            /** This placement's override: null = inherit the field definition. */
+            Boolean required,
+            /** What requiredness actually resolves to, so a client need not recompute the rule. */
+            boolean resolvedRequired,
             /** Conditional visibility rule; null = always visible. See ADR-18. */
             Map<String, Object> visibleWhen
     ) {}

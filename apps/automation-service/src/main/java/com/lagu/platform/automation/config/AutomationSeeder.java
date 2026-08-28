@@ -36,14 +36,26 @@ import java.util.Map;
  * confirmed/cancelled/completed -> notify {@code booking.consumerUserId}, via
  * {@code {{data.consumerUserId}}} rather than {@code {{changedBy}}} — booking's own actor is
  * frequently the *other* party, e.g. the vendor quotes, so notifying "changedBy" would notify the
- * vendor about their own action instead of the consumer). Vendor-side booking notifications
- * (new inquiry, consumer confirmed/cancelled) are NOT wired — "notify the vendor" isn't a single
- * userId the way "notify the consumer" is, since a vendor org can have multiple VendorMembers,
- * and automation-service has no vendor-service integration to resolve which member(s) to notify.
- * That needs either booking-service resolving a specific vendor user (a new vendor-service call
- * it doesn't make today) or a "notify all active org members" fan-out that doesn't exist
- * anywhere in notification-service (it only takes one recipientUserId) — neither is a small
- * addition, so left undone rather than guessed at.
+ * vendor about their own action instead of the consumer).
+ *
+ * <p>Vendor-side booking notifications are seeded too, taking the first of the two routes the
+ * earlier version of this comment sketched: booking-service resolves the org's owner and puts it
+ * on the event as {@code vendorRecipientUserId}, so automation-service still needs no
+ * vendor-service integration and notification-service still delivers to one recipient. Both
+ * vendor-side conditions ride on fields booking-service computes, because neither is expressible
+ * here — ConditionEvaluator compares a field to a constant, never to another field:
+ *
+ * <ul>
+ *   <li>{@code data.vendorRecipientUserId IS_NOT_NULL} — the lookup is best-effort, and a trigger
+ *       that fired without it would address a notification to nobody.</li>
+ *   <li>{@code data.actorSide EQ CONSUMER} — cancel and complete are open to both parties, so
+ *       without this a vendor cancelling would be told that their own booking was cancelled.</li>
+ * </ul>
+ *
+ * <p><b>Known limit:</b> only the owner is notified. A vendor org can have several ADMIN/MEMBER
+ * users handling bookings and none of them hear anything, because notification-service takes a
+ * single recipientUserId and has no fan-out. Widening this means fan-out there, not a change
+ * here — the event already names the org.
  */
 @Component
 @RequiredArgsConstructor
@@ -65,6 +77,7 @@ public class AutomationSeeder implements ApplicationRunner {
             seedStatusChangedNotification(objectType);
         }
         seedBookingNotifications();
+        seedVendorBookingNotifications();
         log.info("AutomationSeeder complete");
     }
 
@@ -81,6 +94,57 @@ public class AutomationSeeder implements ApplicationRunner {
         seedBookingNotification("booking_completed_notification", "Booking Completed", "COMPLETED",
                 "Booking complete",
                 "Your booking is complete — we hope it went great!");
+    }
+
+    /**
+     * The vendor half of the booking lifecycle. QUOTED is absent on purpose — the vendor is the
+     * one who quotes, and telling them what they just did is noise.
+     */
+    private void seedVendorBookingNotifications() {
+        seedVendorBookingNotification("booking_inquired_vendor_notification", "New Inquiry — Vendor", "INQUIRED",
+                "New booking inquiry",
+                "A customer is asking about your listing for {{data.eventDate}}. "
+                        + "They see nothing until you send a quote.");
+        seedVendorBookingNotification("booking_confirmed_vendor_notification", "Booking Confirmed — Vendor", "CONFIRMED",
+                "Your quote was accepted",
+                "The customer confirmed the booking for {{data.eventDate}}. The date is now held on your calendar.");
+        seedVendorBookingNotification("booking_cancelled_vendor_notification", "Booking Cancelled — Vendor", "CANCELLED",
+                "Booking cancelled by the customer",
+                "The booking for {{data.eventDate}} was cancelled and the date is free again.");
+        seedVendorBookingNotification("booking_completed_vendor_notification", "Booking Completed — Vendor", "COMPLETED",
+                "Booking marked complete",
+                "The customer marked the booking for {{data.eventDate}} as complete.");
+    }
+
+    private void seedVendorBookingNotification(String name, String label, String eventType,
+                                               String title, String message) {
+        if (triggerRepo.findByNameAndTenantIdIsNull(name).isPresent()) return;
+
+        TriggerDefinition trigger = newTrigger(name, label, eventType, null);
+        trigger.setConditions(List.of(
+                Map.of("field", "data.vendorRecipientUserId", "operator", "IS_NOT_NULL"),
+                Map.of("field", "data.actorSide", "operator", "EQ", "value", "CONSUMER")));
+        // TRANSACTIONAL for the same reason as the consumer side: a vendor must not be able to
+        // switch off being told that a customer is waiting on them.
+        ActionDefinition action = sendNotificationAction(trigger, title, message,
+                "{{data.vendorRecipientUserId}}", "TRANSACTIONAL");
+
+        // BOTH rather than the IN_APP default. A vendor who is not currently in the portal is
+        // exactly the vendor who needs telling, and an in-app row they never log in to see is
+        // indistinguishable from no notification at all.
+        //
+        // The address is best-effort: it is optional on the VENDOR schema, and a blank one makes
+        // NotificationDeliveryService log and skip the email half while still writing the in-app
+        // row — so this degrades to the old behaviour rather than failing. That is also why there
+        // is no IS_NOT_NULL condition on the email the way there is on the recipient id: no
+        // address is a reason to send less, not a reason not to fire.
+        action.getConfig().put("channel", "BOTH");
+        action.getConfig().put("recipientEmail", "{{data.vendorRecipientEmail}}");
+        action.getConfig().put("subject", title);
+
+        trigger.setActions(List.of(action));
+        triggerRepo.save(trigger);
+        log.info("Seeded trigger: {}", name);
     }
 
     private void seedBookingNotification(String name, String label, String eventType,

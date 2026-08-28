@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -184,6 +185,57 @@ class ListingServiceIntegrationTest {
     }
 
     @Test
+    void book_onAListingWithNoAvailabilityRowsAtAll_succeeds() {
+        // The regression guard for the defect this whole change exists to fix. Every other case in
+        // this class calls setAvailable() first, which is exactly why none of them caught it: no
+        // frontend has ever called PUT /availability, so in production every listing reached
+        // confirm with zero rows, the conditional UPDATE matched nothing, and booking-service
+        // reported SLOT_UNAVAILABLE for every date on every listing on the platform.
+        UUID recordId = publishListing();
+        LocalDate date = LocalDate.now().plusDays(20);
+
+        assertThat(availabilityRows(recordId, date)).isEmpty();
+        assertThat(book(recordId, date, UUID.randomUUID())).isTrue();
+    }
+
+    @Test
+    void book_onADateTheVendorBlocked_isRefused() {
+        // The other half of the new default: absence means "not blocked", but an explicit BLOCKED
+        // row must still stop a booking. Otherwise opening dates by default would silently make
+        // the vendor's own calendar meaningless.
+        UUID recordId = publishListing();
+        LocalDate date = LocalDate.now().plusDays(21);
+        setSlot(recordId, date, "BLOCKED");
+
+        assertThat(book(recordId, date, UUID.randomUUID())).isFalse();
+    }
+
+    @Test
+    void book_thenRelease_leavesTheDayOpenForSomeoneElse() {
+        // A day auto-claimed from nothing must return to claimable after a cancellation, not stay
+        // stuck as a BOOKED row nobody can displace.
+        UUID recordId = publishListing();
+        LocalDate date = LocalDate.now().plusDays(22);
+        UUID first = UUID.randomUUID();
+
+        assertThat(book(recordId, date, first)).isTrue();
+        assertThat(release(recordId, date, first)).isTrue();
+        assertThat(book(recordId, date, UUID.randomUUID())).isTrue();
+    }
+
+    @Test
+    void concurrentBookAttemptsOnAnUnrecordedDate_exactlyOneWins() {
+        // Race safety for the insert path specifically. The existing concurrency test seeds an
+        // AVAILABLE row first, so it only exercises the conditional-UPDATE branch; here every
+        // thread races to INSERT the same (record_id, slot_date) and the unique constraint is the
+        // only thing standing between them.
+        UUID recordId = publishListing();
+        LocalDate date = LocalDate.now().plusDays(23);
+
+        assertThat(raceToBook(recordId, date, 8)).isEqualTo(1);
+    }
+
+    @Test
     void internalEndpoints_rejectNonInternalCallers() {
         UUID recordId = publishListing();
         LocalDate date = LocalDate.now().plusDays(13);
@@ -200,10 +252,64 @@ class ListingServiceIntegrationTest {
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private void setAvailable(UUID recordId, LocalDate date) {
+        setSlot(recordId, date, "AVAILABLE");
+    }
+
+    private void setSlot(UUID recordId, LocalDate date, String slotType) {
         adminClient.put().uri("/api/v1/listings/{id}/availability", recordId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("from", date.toString(), "to", date.toString(), "slotType", "AVAILABLE"))
+                .body(Map.of("from", date.toString(), "to", date.toString(), "slotType", slotType))
                 .retrieve().toBodilessEntity();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> availabilityRows(UUID recordId, LocalDate date) {
+        Map<String, Object> resp = adminClient.get()
+                .uri(b -> b.path("/api/v1/listings/{id}/availability")
+                        .queryParam("from", date.toString())
+                        .queryParam("to", date.toString())
+                        .build(recordId))
+                .retrieve().body(Map.class);
+        Object data = resp == null ? null : resp.get("data");
+        return data instanceof List<?> l ? List.copyOf(l) : List.of();
+    }
+
+    /** Fires {@code attempts} simultaneous claims at one day and returns how many succeeded. */
+    private int raceToBook(UUID recordId, LocalDate date, int attempts) {
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch go = new CountDownLatch(1);
+        AtomicInteger successCount = new AtomicInteger();
+        try {
+            for (int i = 0; i < attempts; i++) {
+                pool.submit(() -> {
+                    ready.countDown();
+                    try {
+                        go.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    try {
+                        if (book(recordId, date, UUID.randomUUID())) successCount.incrementAndGet();
+                    } catch (Exception ignored) {
+                        // A loser may surface as an exception rather than claimed=false; either
+                        // way it did not win, which is the only thing being counted.
+                    }
+                });
+            }
+            ready.await(5, TimeUnit.SECONDS);
+            go.countDown();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            pool.shutdown();
+            try {
+                pool.awaitTermination(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        return successCount.get();
     }
 
     @SuppressWarnings("unchecked")

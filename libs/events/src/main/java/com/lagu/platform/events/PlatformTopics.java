@@ -12,4 +12,5 @@ public final class PlatformTopics {
     public static final String VERIFICATION_EVENTS   = "platform.verification.events";
     public static final String LISTING_EVENTS        = "platform.listing.events";
     public static final String BOOKING_EVENTS        = "platform.booking.events";
+    public static final String ANALYTICS_EVENTS      = "platform.analytics.events";
 }

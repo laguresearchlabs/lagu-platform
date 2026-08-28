@@ -1,6 +1,8 @@
 package com.lagu.platform.vendor.service;
 
 import com.lagu.platform.common.dto.PageResult;
+import com.lagu.platform.common.exception.PlatformException;
+import com.lagu.platform.vendor.client.ListingServiceClient;
 import com.lagu.platform.vendor.client.RecordServiceClient;
 import com.lagu.platform.vendor.domain.*;
 import com.lagu.platform.vendor.dto.*;
@@ -14,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -25,6 +28,7 @@ public class VendorService {
     private final VendorMemberRepository      memberRepo;
     private final VendorKycChecklistRepository kycRepo;
     private final RecordServiceClient         recordClient;
+    private final ListingServiceClient        listingClient;
 
     @Transactional
     public VendorProfileResponse register(RegisterVendorRequest req, UUID userId) {
@@ -33,10 +37,16 @@ public class VendorService {
         // Create the canonical VENDOR record in record-service. Field key is "name" per the
         // VENDOR schema (schema-registry's basic_details.name) — not "businessName"; the two
         // just happen to share a value at registration time.
-        Map<String, Object> recordResponse = recordClient.createRecord(tenantId, userId, "VENDOR", Map.of(
-            "name", req.getBusinessName(),
-            "country", req.getCountry()
-        ));
+        // HashMap rather than Map.of: contactEmail is optional and Map.of rejects a null value.
+        Map<String, Object> vendorFields = new HashMap<>();
+        vendorFields.put("name", req.getBusinessName());
+        vendorFields.put("country", req.getCountry());
+        if (req.getContactEmail() != null && !req.getContactEmail().isBlank()) {
+            vendorFields.put("email", req.getContactEmail().trim());
+        }
+
+        Map<String, Object> recordResponse =
+                recordClient.createRecord(tenantId, userId, "VENDOR", vendorFields);
         UUID recordId = recordClient.extractRecordId(recordResponse);
         if (recordId == null) {
             throw new IllegalStateException("Failed to create VENDOR record in record-service");
@@ -109,9 +119,24 @@ public class VendorService {
                 .orElseThrow(() -> new NoSuchElementException("Vendor not found: " + tenantId));
 
         validateStatusTransition(profile.getStatus(), newStatus);
-        profile.setStatus(newStatus.toUpperCase());
+        String resolved = newStatus.toUpperCase();
+        profile.setStatus(resolved);
         profileRepo.save(profile);
-        log.info("Vendor {} status changed to {} by {}", tenantId, newStatus, actorId);
+        log.info("Vendor {} status changed to {} by {}", tenantId, resolved, actorId);
+
+        // Reaching ACTIVE is what releases any listings listing-service held behind the KYC gate.
+        // Without this the gate is a one-way door: nothing else in the platform re-publishes an
+        // approved listing, so a vendor who completed KYC would stay invisible with no signal.
+        //
+        // Best-effort on purpose — see ListingServiceClient. The approval must not fail because a
+        // downstream service is restarting, and the reconcile endpoint is idempotent so re-running
+        // it is the recovery.
+        if ("ACTIVE".equals(resolved)) {
+            int released = listingClient.reconcileHeldListings(tenantId);
+            if (released > 0) {
+                log.info("Activation of vendor {} released {} held listing(s)", tenantId, released);
+            }
+        }
         return toResponse(profile, null);
     }
 
@@ -186,18 +211,41 @@ public class VendorService {
         }
     }
 
+    private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
+        "DRAFT",        Set.of("SUBMITTED"),
+        "SUBMITTED",    Set.of("UNDER_REVIEW", "DRAFT"),
+        "UNDER_REVIEW", Set.of("ACTIVE", "REJECTED"),
+        "ACTIVE",       Set.of("SUSPENDED"),
+        "SUSPENDED",    Set.of("ACTIVE", "REJECTED"),
+        "REJECTED",     Set.of("DRAFT")
+    );
+
+    /**
+     * Refusing an illegal transition is an ordinary business-rule outcome, not a server fault —
+     * two admins working the same vendor will hit it routinely, and so will a stale browser tab.
+     * It previously threw an unmapped IllegalStateException, so the caller got 500 "An unexpected
+     * error occurred" while the server knew exactly what was wrong and discarded it.
+     *
+     * <p>409 rather than 400: the request was well formed and would have been valid against a
+     * different current status. The response names both the current status and what it does allow,
+     * so an admin can act on it without reading the state machine.
+     *
+     * <p>Note this is fixed at the throw site rather than by mapping IllegalStateException in
+     * GlobalExceptionHandler. The platform uses that exception for genuine server faults too —
+     * {@code register()} above throws it when record-service fails to create the VENDOR record —
+     * and a blanket 409 would turn a real outage into a status code nothing alerts on.
+     */
     private void validateStatusTransition(String current, String next) {
-        Map<String, Set<String>> allowed = Map.of(
-            "DRAFT",        Set.of("SUBMITTED"),
-            "SUBMITTED",    Set.of("UNDER_REVIEW", "DRAFT"),
-            "UNDER_REVIEW", Set.of("ACTIVE", "REJECTED"),
-            "ACTIVE",       Set.of("SUSPENDED"),
-            "SUSPENDED",    Set.of("ACTIVE", "REJECTED"),
-            "REJECTED",     Set.of("DRAFT")
-        );
-        if (!allowed.getOrDefault(current.toUpperCase(), Set.of()).contains(next.toUpperCase())) {
-            throw new IllegalStateException(
-                    "Cannot transition vendor from " + current + " to " + next);
+        Set<String> allowed = ALLOWED_TRANSITIONS.getOrDefault(current.toUpperCase(), Set.of());
+        if (!allowed.contains(next.toUpperCase())) {
+            String options = allowed.isEmpty()
+                    ? "no further transitions are possible from there"
+                    : "allowed from " + current.toUpperCase() + ": "
+                            + allowed.stream().sorted().collect(Collectors.joining(", "));
+            throw new PlatformException("INVALID_STATUS_TRANSITION",
+                    "Cannot change vendor status from " + current.toUpperCase()
+                            + " to " + next.toUpperCase() + " — " + options,
+                    HttpStatus.CONFLICT);
         }
     }
 
@@ -225,5 +273,41 @@ public class VendorService {
                 .phoneFilled(k.isPhoneFilled())
                 .kycReady(k.isKycReady())
                 .build();
+    }
+
+    /**
+     * Who to address when another service has something to tell this vendor org, and where to
+     * email them. Used by booking-service when a customer acts on a booking.
+     *
+     * Two lookups, deliberately independent: the OWNER row is authoritative for *who*, and the
+     * org's VENDOR record supplies the business contact email. A record-service failure or a
+     * blank email field degrades to a userId with no address — the in-app notification still
+     * lands, only the email half is lost — rather than failing the whole resolution.
+     */
+    public Optional<MembershipOwnerResponse> resolveNotificationTarget(UUID tenantId) {
+        return memberRepo
+                .findFirstByTenantIdAndRoleAndStatusOrderByJoinedAtAsc(tenantId, "OWNER", "ACTIVE")
+                .map(owner -> new MembershipOwnerResponse(
+                        owner.getUserId(), owner.getRole(), contactEmail(tenantId)));
+    }
+
+    /** The `email` field of the org's VENDOR record, or null if unset/unreachable. */
+    @SuppressWarnings("unchecked")
+    private String contactEmail(UUID tenantId) {
+        try {
+            UUID recordId = profileRepo.findById(tenantId).map(VendorProfile::getRecordId).orElse(null);
+            if (recordId == null) return null;
+
+            Map<String, Object> response = recordClient.getRecord(recordId, tenantId);
+            if (response == null || !(response.get("data") instanceof Map<?, ?> record)) return null;
+            if (!(((Map<String, Object>) record).get("data") instanceof Map<?, ?> fields)) return null;
+
+            Object email = ((Map<String, Object>) fields).get("email");
+            String value = email != null ? email.toString().trim() : "";
+            return value.isEmpty() ? null : value;
+        } catch (Exception e) {
+            log.warn("Could not read contact email for org {}: {}", tenantId, e.getMessage());
+            return null;
+        }
     }
 }

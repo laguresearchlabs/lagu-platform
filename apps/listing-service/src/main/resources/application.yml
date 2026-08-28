@@ -64,6 +64,12 @@ springdoc:
     path: /v3/api-docs
 
 platform:
+  security:
+    # Recording a listing view is deliberately public: most views are by signed-out visitors, and a
+    # funnel that only counted signed-in ones would measure the wrong population. The endpoint reads
+    # the tenant and object type from the snapshot rather than the request, so an anonymous caller
+    # cannot attribute a view anywhere it does not belong.
+    public-paths: /api/v1/listings/views
   outbox:
     enabled: true
     table: listing_outbox

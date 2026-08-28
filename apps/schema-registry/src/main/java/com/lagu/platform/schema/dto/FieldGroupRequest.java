@@ -14,7 +14,14 @@ public record FieldGroupRequest(
     public record FieldGroupEntryRequest(
             String fieldName,
             int displayOrder,
-            boolean required,
+            /**
+             * This placement's opinion on requiredness, which wins over the field definition.
+             *
+             * Boxed so it carries three states: null means "no opinion, inherit the definition".
+             * It was a primitive, and resolution was {@code definition || entry}, so unchecking it
+             * on a globally-required field silently did nothing while the UI called it an override.
+             */
+            Boolean required,
             /** Conditional visibility rule; null = always visible. Applies in every listing type
              *  composing this group — see ADR-19. Validated on write. */
             Map<String, Object> visibleWhen

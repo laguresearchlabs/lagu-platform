@@ -1,5 +1,6 @@
 package com.lagu.platform.workflow.service;
 
+import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.workflow.client.RecordServiceClient;
 import com.lagu.platform.workflow.domain.ChangeSet;
@@ -150,5 +151,52 @@ class ChangeSetServiceTest {
                 .hasMessageContaining("already approved");
 
         verifyNoInteractions(recordServiceClient);
+    }
+
+    // ── withdraw: the same three failure modes review() maps, previously left as 500s ──
+
+    @Test
+    void withdrawOnAnAlreadyReviewedChangeSetIs409NotAServerError() {
+        // The race that makes this routine: a vendor hits Withdraw while an admin is approving.
+        pending.setStatus("APPROVED");
+        when(changeSetRepo.findById(CHANGE_SET)).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.withdraw(CHANGE_SET, SUBMITTER))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("already approved")
+                .extracting(e -> ((PlatformException) e).getStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        verify(changeSetRepo, never()).save(any());
+    }
+
+    @Test
+    void withdrawBySomeoneOtherThanTheSubmitterIs403NotAConflict() {
+        // Authorization, not state — a 409 would invite the client to retry something that can
+        // never succeed for this caller.
+        when(changeSetRepo.findById(CHANGE_SET)).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.withdraw(CHANGE_SET, UUID.randomUUID()))
+                .isInstanceOf(PlatformException.class)
+                .extracting(e -> ((PlatformException) e).getStatus())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        verify(changeSetRepo, never()).save(any());
+    }
+
+    @Test
+    void withdrawOfAnUnknownChangeSetIs404() {
+        when(changeSetRepo.findById(CHANGE_SET)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.withdraw(CHANGE_SET, SUBMITTER))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void withdrawBySubmitterOnAPendingChangeSetStillWorks() {
+        when(changeSetRepo.findById(CHANGE_SET)).thenReturn(Optional.of(pending));
+        when(changeSetRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.withdraw(CHANGE_SET, SUBMITTER).getStatus()).isEqualTo("WITHDRAWN");
     }
 }

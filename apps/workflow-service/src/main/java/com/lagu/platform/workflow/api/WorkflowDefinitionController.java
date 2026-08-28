@@ -46,6 +46,14 @@ public class WorkflowDefinitionController {
         return ResponseEntity.ok(ApiResponse.ok(service.addState(id, req)));
     }
 
+    @PutMapping("/{id}/states/{stateName}")
+    @RequirePermission(resource = "WORKFLOW", action = "UPDATE")
+    public ResponseEntity<ApiResponse<WorkflowDefinitionResponse>> updateState(
+            @PathVariable UUID id, @PathVariable String stateName,
+            @Valid @RequestBody WorkflowStateRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok(service.updateState(id, stateName, req)));
+    }
+
     @PostMapping("/{id}/transitions")
     @RequirePermission(resource = "WORKFLOW", action = "UPDATE")
     public ResponseEntity<ApiResponse<WorkflowDefinitionResponse>> addTransition(

@@ -48,14 +48,27 @@ public class RecordController {
     @RequirePermission(resource = "RECORD", action = "UPDATE")
     public ResponseEntity<ApiResponse<RecordResponse>> update(@PathVariable UUID id,
                                                                @Valid @RequestBody UpdateRecordRequest req) {
-        return ResponseEntity.ok(ApiResponse.ok(service.update(id, req)));
+        return respond(service.update(id, req));
     }
 
     @PatchMapping("/{id}")
     @RequirePermission(resource = "RECORD", action = "UPDATE")
     public ResponseEntity<ApiResponse<RecordResponse>> patch(@PathVariable UUID id,
                                                               @RequestBody Map<String, Object> partialData) {
-        return ResponseEntity.ok(ApiResponse.ok(service.patch(id, partialData)));
+        return respond(service.patch(id, partialData));
+    }
+
+    /**
+     * 202 when the edit was held for review rather than applied, 200 when it landed.
+     *
+     * The status code carries the distinction because the body cannot: a held response returns the
+     * record's *current* values, which are indistinguishable from a successful no-op edit. A client
+     * that treats 2xx as "saved" is now wrong in a visible way rather than a silent one.
+     */
+    private static ResponseEntity<ApiResponse<RecordResponse>> respond(RecordResponse result) {
+        return result.getPendingChangeSetId() != null
+                ? ResponseEntity.accepted().body(ApiResponse.ok(result))
+                : ResponseEntity.ok(ApiResponse.ok(result));
     }
 
     @DeleteMapping("/{id}")

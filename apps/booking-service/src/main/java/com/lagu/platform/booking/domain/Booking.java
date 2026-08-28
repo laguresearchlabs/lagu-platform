@@ -70,6 +70,29 @@ public class Booking {
     @Column(name = "availability_claimed", nullable = false)
     private boolean availabilityClaimed = false;
 
+    /**
+     * The platform's own receivable on this booking. Set to DUE when the booking completes with
+     * commission owed — see BookingService.complete.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "settlement_status", nullable = false, length = 20)
+    private SettlementStatus settlementStatus = SettlementStatus.NOT_DUE;
+
+    /** Assigned when the vendor is billed; unique across bookings. */
+    @Column(name = "invoice_number", length = 40)
+    private String invoiceNumber;
+
+    @Column(name = "invoiced_at")
+    private Instant invoicedAt;
+
+    /** When the commission was actually settled — or waived. */
+    @Column(name = "settled_at")
+    private Instant settledAt;
+
+    /** Why it was waived, which invoice run it went out on, a payment reference. */
+    @Column(name = "settlement_note", columnDefinition = "TEXT")
+    private String settlementNote;
+
     @Version
     @Column(nullable = false)
     private long version;

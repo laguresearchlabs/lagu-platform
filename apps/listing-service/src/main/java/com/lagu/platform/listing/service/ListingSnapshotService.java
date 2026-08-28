@@ -3,6 +3,7 @@ package com.lagu.platform.listing.service;
 import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.listing.client.SchemaRegistryClient;
+import com.lagu.platform.listing.client.VendorServiceClient;
 import com.lagu.platform.listing.event.ListingEventPublisher;
 import com.lagu.platform.listing.domain.ListingSnapshot;
 import com.lagu.platform.listing.domain.ListingSnapshotRepository;
@@ -29,6 +30,11 @@ public class ListingSnapshotService {
     private final ListingAvailabilityRepository availabilityRepo;
     private final ListingEventPublisher eventPublisher;
     private final SchemaRegistryClient schemaRegistryClient;
+    private final VendorServiceClient vendorServiceClient;
+
+    /** Approved by its own workflow, withheld because the vendor org has not passed KYC.
+     *  Not PUBLISHED, so consumer reads and search never see it. */
+    public static final String PENDING_VENDOR_ACTIVATION = "PENDING_VENDOR_ACTIVATION";
 
     /**
      * Called by the Kafka consumer when a record transitions to ACTIVE/APPROVED, and by the
@@ -61,16 +67,60 @@ public class ListingSnapshotService {
         snap.setTenantId(tenantId);
         snap.setObjectType(objectType.toUpperCase());
         snap.setData(recordData != null ? recordData : Map.of());
-        snap.setStatus("PUBLISHED");
         snap.setVerificationTier(tier);
         snap.setSearchBoost(boostForTier(tier));
-        snap.setPublishedAt(Instant.now());
         // version is now a real @Version column — Hibernate increments it, not us.
+
+        // The KYC gate. The record's own workflow says this listing is fit to publish; the vendor
+        // org's review status says whether the *business behind it* is. Those were two independent
+        // lifecycles and nothing compared them, so a vendor who never completed KYC could be
+        // publicly listed and take bookings.
+        //
+        // Held rather than rejected: the snapshot is still written, at a status the consumer read
+        // paths exclude (they allowlist PUBLISHED — see ListingVisibility), and no listing event is
+        // emitted so search never indexes it. That leaves a row to reconcile from when the org is
+        // activated. Refusing outright would strand the vendor instead: nothing in the platform
+        // re-publishes an approved listing after the fact, so their listing would stay invisible
+        // forever with no signal to anyone.
+        if (!vendorServiceClient.isActive(tenantId)) {
+            snap.setStatus(PENDING_VENDOR_ACTIVATION);
+            ListingSnapshot held = snapshotRepo.save(snap);
+            log.info("Holding snapshot for record {} org {} — vendor org is not ACTIVE; "
+                    + "it will publish when the org is activated", recordId, tenantId);
+            return held;
+        }
+
+        snap.setStatus("PUBLISHED");
+        snap.setPublishedAt(Instant.now());
 
         ListingSnapshot saved = snapshotRepo.save(snap);
         eventPublisher.publishPublished(saved);
         log.info("Published snapshot for record {} org {} type {}", recordId, tenantId, objectType);
         return saved;
+    }
+
+    /**
+     * Publishes everything an org had held behind the KYC gate. Called by vendor-service the
+     * moment the org reaches ACTIVE, which is what stops the gate being a one-way door.
+     *
+     * <p>Idempotent and safe to re-run: it only touches rows in the held state, so calling it for
+     * an org with nothing held, or twice in a row, does nothing the second time. That matters
+     * because vendor-service's call is best-effort — re-running this is the recovery path.
+     *
+     * @return how many snapshots went live
+     */
+    @Transactional
+    public int reconcileHeldSnapshots(UUID tenantId) {
+        List<ListingSnapshot> held = snapshotRepo.findByTenantIdAndStatus(tenantId, PENDING_VENDOR_ACTIVATION);
+        for (ListingSnapshot snap : held) {
+            snap.setStatus("PUBLISHED");
+            snap.setPublishedAt(Instant.now());
+            eventPublisher.publishPublished(snapshotRepo.save(snap));
+        }
+        if (!held.isEmpty()) {
+            log.info("Released {} held snapshot(s) for org {} after activation", held.size(), tenantId);
+        }
+        return held.size();
     }
 
     /**
@@ -100,11 +150,15 @@ public class ListingSnapshotService {
     @Transactional
     public void refreshSnapshotData(UUID recordId, Map<String, Object> recordData) {
         snapshotRepo.findByRecordId(recordId).ifPresent(snap -> {
-            if (!"PUBLISHED".equals(snap.getStatus())) return;
+            boolean live = "PUBLISHED".equals(snap.getStatus());
+            // A KYC-held snapshot is refreshed too, so that whatever the vendor edited while
+            // waiting is what goes live on release — otherwise it would publish the data frozen at
+            // the moment it was held. No event is emitted for it: it is still not public.
+            if (!live && !PENDING_VENDOR_ACTIVATION.equals(snap.getStatus())) return;
             snap.setData(recordData != null ? recordData : Map.of());
             ListingSnapshot saved = snapshotRepo.save(snap);
-            eventPublisher.publishPublished(saved);
-            log.info("Refreshed snapshot data for record {}", recordId);
+            if (live) eventPublisher.publishPublished(saved);
+            log.info("Refreshed snapshot data for record {} (status {})", recordId, saved.getStatus());
         });
     }
 
@@ -170,13 +224,34 @@ public class ListingSnapshotService {
         return saved;
     }
 
+    /**
+     * Explicitly-recorded slots in the range. A date with no row is not "unavailable" — it is
+     * simply unrecorded, and is claimable. See {@link ListingAvailabilityRepository#claimSlot}.
+     * A calendar UI should render an absent date as open, not as blocked.
+     */
     public List<ListingAvailability> getAvailability(UUID recordId, LocalDate from, LocalDate to) {
         return availabilityRepo.findByRecordIdAndSlotDateBetween(recordId, from, to);
     }
 
+    /**
+     * Claims one day for a booking. True if this call took the day, false if it was already
+     * BOOKED or the vendor had BLOCKED it.
+     *
+     * <p>The tenant comes from the listing snapshot rather than the caller: booking-service claims
+     * on the vendor's behalf under its own internal-service identity and has no business asserting
+     * whose org the slot belongs to. A listing with no snapshot cannot be booked at all, so a
+     * missing one fails closed rather than inventing a tenant for the new row.
+     */
     @Transactional
     public boolean bookSlot(UUID recordId, LocalDate date, UUID bookingRef) {
-        return availabilityRepo.markBooked(recordId, date, bookingRef) > 0;
+        UUID tenantId = snapshotRepo.findByRecordId(recordId)
+                .map(ListingSnapshot::getTenantId)
+                .orElse(null);
+        if (tenantId == null) {
+            log.warn("Refusing to claim {} on {}: no listing snapshot for that record", recordId, date);
+            return false;
+        }
+        return availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef) > 0;
     }
 
     /** Inverse of {@link #bookSlot}: only releases a slot this exact bookingRef claimed. */

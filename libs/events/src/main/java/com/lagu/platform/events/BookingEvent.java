@@ -12,9 +12,9 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * Emitted by booking-service on every lifecycle transition. No consumer is wired up yet (see
- * booking-service's README) — this exists so any future consumer (automation-service,
- * search-service "my bookings", analytics) has a stable contract to subscribe to.
+ * Emitted by booking-service on every lifecycle transition. automation-service consumes this
+ * (see its AutomationSeeder) to raise notifications for both parties; search-service "my
+ * bookings" and analytics remain possible future consumers of the same contract.
  */
 @Data
 @Builder
@@ -56,6 +56,35 @@ public class BookingEvent implements PlatformEvent {
     private BigDecimal commissionAmount;
 
     private UUID changedBy;
+
+    /**
+     * Which side of the booking {@link #changedBy} acted for — {@code CONSUMER} or {@code VENDOR}.
+     *
+     * Both parties can cancel and complete, so the actor alone does not say who needs telling.
+     * A notification rule cannot work this out for itself: automation-service's ConditionEvaluator
+     * compares a field to a constant, never one field to another, so "changedBy is not the
+     * consumer" is not expressible there. Resolving it here — where consumerUserId is already in
+     * hand — turns it into a plain {@code data.actorSide EQ CONSUMER} condition.
+     */
+    private String actorSide;
+
+    /**
+     * The vendor-org user to notify, resolved by booking-service from vendor-service at publish
+     * time. Null when that lookup failed or the org has no active OWNER; the vendor-side triggers
+     * carry an IS_NOT_NULL condition so they simply do not fire rather than addressing nobody.
+     *
+     * Deliberately one user, not the whole org: notification-service delivers to a single
+     * recipientUserId and has no fan-out. See AutomationSeeder for what that costs.
+     */
+    private UUID vendorRecipientUserId;
+
+    /**
+     * Where to email the vendor — the org's business contact address from its VENDOR record, not
+     * the owner's login address. Nullable: the field is optional on the VENDOR schema, and
+     * notification-service treats a blank address as "in-app only" rather than an error.
+     */
+    private String vendorRecipientEmail;
+
     private Instant occurredAt;
 
     /** No {@code tenantId} field on this class — {@link PlatformEvent} is satisfied via vendorTenantId. */

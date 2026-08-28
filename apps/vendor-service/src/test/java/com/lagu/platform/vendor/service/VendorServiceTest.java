@@ -1,5 +1,6 @@
 package com.lagu.platform.vendor.service;
 
+import com.lagu.platform.vendor.client.ListingServiceClient;
 import com.lagu.platform.vendor.client.RecordServiceClient;
 import com.lagu.platform.vendor.domain.VendorKycChecklistRepository;
 import com.lagu.platform.vendor.domain.VendorMember;
@@ -34,7 +35,8 @@ class VendorServiceTest {
     private final VendorMemberRepository memberRepo = mock(VendorMemberRepository.class);
     private final VendorKycChecklistRepository kycRepo = mock(VendorKycChecklistRepository.class);
     private final RecordServiceClient recordClient = mock(RecordServiceClient.class);
-    private final VendorService service = new VendorService(profileRepo, memberRepo, kycRepo, recordClient);
+    private final ListingServiceClient listingClient = mock(ListingServiceClient.class);
+    private final VendorService service = new VendorService(profileRepo, memberRepo, kycRepo, recordClient, listingClient);
 
     private final UUID tenantId = UUID.randomUUID();
     private final UUID ownerId = UUID.randomUUID();

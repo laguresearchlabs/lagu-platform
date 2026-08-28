@@ -26,6 +26,11 @@ public record BookingResponse(
         UUID cancelledByUserId,
         String cancelReason,
         boolean availabilityClaimed,
+        String settlementStatus,
+        String invoiceNumber,
+        Instant invoicedAt,
+        Instant settledAt,
+        String settlementNote,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -47,6 +52,11 @@ public record BookingResponse(
                 .cancelledByUserId(b.getCancelledByUserId())
                 .cancelReason(b.getCancelReason())
                 .availabilityClaimed(b.isAvailabilityClaimed())
+                .settlementStatus(b.getSettlementStatus() != null ? b.getSettlementStatus().name() : null)
+                .invoiceNumber(b.getInvoiceNumber())
+                .invoicedAt(b.getInvoicedAt())
+                .settledAt(b.getSettledAt())
+                .settlementNote(b.getSettlementNote())
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
                 .build();

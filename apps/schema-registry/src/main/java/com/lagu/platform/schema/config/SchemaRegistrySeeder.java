@@ -782,7 +782,10 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 entry.setFieldGroup(group);
                 entry.setField(fd);
                 entry.setDisplayOrder(spec.displayOrder());
-                entry.setRequired(spec.required());
+                // Only a `true` spec is an opinion. A false one means "no opinion here, follow the
+                // field definition" — the same reading V7's backfill takes — so it stays null
+                // rather than silently relaxing a globally-required field.
+                entry.setRequiredOverride(spec.required() ? Boolean.TRUE : null);
                 entry.setVisibleWhen(spec.visibleWhen());
                 entries.add(entry);
             });

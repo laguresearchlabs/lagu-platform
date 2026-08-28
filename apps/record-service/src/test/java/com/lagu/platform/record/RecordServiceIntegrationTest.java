@@ -3,6 +3,7 @@ package com.lagu.platform.record;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lagu.platform.events.PlatformTopics;
 import com.lagu.platform.record.client.MetadataClient;
+import com.lagu.platform.record.client.WorkflowClient;
 import com.redis.testcontainers.RedisContainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,12 @@ class RecordServiceIntegrationTest {
     @MockitoBean
     MetadataClient metadataClient;
 
+    /** No workflow-service in this test, and these cases are about record CRUD rather than
+     *  the change-approval gate — an ungated answer keeps them about their own subject.
+     *  The gate itself is covered by ChangeApprovalGateTest. */
+    @MockitoBean
+    WorkflowClient workflowClient;
+
     /** No bucket in tests; RecordFileController's flow is covered separately. */
     @MockitoBean
     StorageService storage;
@@ -101,6 +108,13 @@ class RecordServiceIntegrationTest {
             ));
 
     RestClient client;
+
+    @BeforeEach
+    void ungated() {
+        org.mockito.Mockito.when(workflowClient.gatedStates(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new WorkflowClient.GatedStates(null, java.util.Set.of()));
+    }
 
     @BeforeEach
     void setup() {
@@ -295,5 +309,116 @@ class RecordServiceIntegrationTest {
     @SuppressWarnings("unchecked")
     private String extractId(ResponseEntity<Map> resp) {
         return (String) ((Map<String, Object>) resp.getBody().get("data")).get("id");
+    }
+
+    // ── change-approval gate (defect 3) ───────────────────────────────────────
+
+    /** Puts the record's current state into the gated set for the rest of the test. */
+    private void gate(String stateName) {
+        org.mockito.Mockito.when(workflowClient.gatedStates(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new WorkflowClient.GatedStates(java.util.UUID.randomUUID(),
+                        java.util.Set.of(stateName)));
+        org.mockito.Mockito.when(workflowClient.submitChangeSet(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(CHANGE_SET_ID);
+    }
+
+    static final java.util.UUID CHANGE_SET_ID = java.util.UUID.randomUUID();
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void editInAGatedState_isHeldForReviewAndDoesNotTouchTheRecord() {
+        // The defect this closes: requiresChangeApproval had no callsite on the write path, so a
+        // vendor's edit to a gated listing applied instantly and the review queue never saw it.
+        String id = extractId(post("/api/v1/records", Map.of(
+                "objectType", "VENUE", "data", Map.of("name", "Original Name"))));
+        gate("DRAFT");
+
+        ResponseEntity<Map> resp = put("/api/v1/records/" + id, Map.of(
+                "data", Map.of("name", "Sneaky Rename", "capacity", 999)));
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        Map<String, Object> outer = (Map<String, Object>) resp.getBody().get("data");
+        assertThat(outer.get("pendingChangeSetId")).isEqualTo(CHANGE_SET_ID.toString());
+
+        // The body carries the record as it STILL is, not what was proposed — a client that
+        // ignores the 202 shows the truth rather than an edit that has not happened.
+        Map<String, Object> data = (Map<String, Object>) outer.get("data");
+        assertThat(data.get("name")).isEqualTo("Original Name");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aHeldEditIsNotPersisted_soARereadStillShowsTheOldValue() {
+        // The strongest form of the assertion: go back to the database, not the response body.
+        String id = extractId(post("/api/v1/records", Map.of(
+                "objectType", "VENUE", "data", Map.of("name", "Original Name"))));
+        gate("DRAFT");
+        put("/api/v1/records/" + id, Map.of("data", Map.of("name", "Sneaky Rename")));
+
+        ResponseEntity<Map> reread = client.get().uri("/api/v1/records/" + id)
+                .retrieve().toEntity(Map.class);
+        Map<String, Object> outer = (Map<String, Object>) reread.getBody().get("data");
+        Map<String, Object> data = (Map<String, Object>) outer.get("data");
+        assertThat(data.get("name")).isEqualTo("Original Name");
+    }
+
+    @Test
+    void patchIsGatedToo_soAPartialBodyCannotBypassReview() {
+        String id = extractId(post("/api/v1/records", Map.of(
+                "objectType", "VENUE", "data", Map.of("name", "Original Name"))));
+        gate("DRAFT");
+
+        ResponseEntity<Map> resp = patch("/api/v1/records/" + id, Map.of("name", "Sneaky Rename"));
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void editInANonGatedStateStillAppliesImmediately() {
+        // The gate must not become a blanket hold: only the states an admin actually marked.
+        String id = extractId(post("/api/v1/records", Map.of(
+                "objectType", "VENUE", "data", Map.of("name", "Original Name"))));
+        gate("PUBLISHED");   // the record is DRAFT, so this does not apply to it
+
+        ResponseEntity<Map> resp = put("/api/v1/records/" + id, Map.of(
+                "data", Map.of("name", "New Name")));
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void anInternalServiceApplyIsNeverHeld_soApprovingAChangeSetActuallyLands() {
+        // workflow-service applies an approved change set by PUTting the record as
+        // X-Internal-Service, carrying the approving admin's user id but not their roles. If the
+        // gate held that write, approving a change would silently do nothing and queue another —
+        // defect 1 all over again. Caught live, not by any mock-based test.
+        String id = extractId(post("/api/v1/records", Map.of(
+                "objectType", "VENUE", "data", Map.of("name", "Original Name"))));
+        gate("DRAFT");
+
+        RestClient internal = RestClient.builder()
+                .baseUrl("http://localhost:" + port)
+                .defaultHeader("X-User-Id", USER_ID)
+                .defaultHeader("X-Tenant-Id", TENANT_ID)
+                .defaultHeader("X-Internal-Service", "workflow-service")
+                .defaultHeader("X-Platform-Gateway-Secret", TEST_GATEWAY_SECRET)
+                .build();
+
+        ResponseEntity<Map> resp = internal.put().uri("/api/v1/records/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("data", Map.of("name", "Approved Value")))
+                .retrieve().toEntity(Map.class);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outer = (Map<String, Object>) resp.getBody().get("data");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) outer.get("data");
+        assertThat(data.get("name")).isEqualTo("Approved Value");
     }
 }

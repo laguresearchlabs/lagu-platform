@@ -27,9 +27,29 @@ public class ChangeSet {
     @Column(name = "object_type", length = 100)
     private String objectType;
 
+    /**
+     * The workflow this change set belongs to. Server-side only.
+     *
+     * <p>{@code @JsonIgnore} because ChangeSetController returns this entity directly and the
+     * association is LAZY: serializing it outside a session throws, and eagerly fetching it would
+     * drag a whole workflow definition — states, transitions and all — into every change-set
+     * response for no caller's benefit.
+     *
+     * <p>This was invisible until recently. {@code ChangeSetService.submit} looked the workflow up
+     * in the *state* repository by workflow id, found nothing, and left this null on every change
+     * set ever created — so Jackson never had a proxy to choke on. Fixing that lookup is what
+     * surfaced the serialization problem underneath it.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "workflow_id")
     private WorkflowDefinition workflow;
+
+    /** The workflow id, for callers that need it — readable without initializing the proxy. */
+    @com.fasterxml.jackson.annotation.JsonProperty("workflowId")
+    public java.util.UUID getWorkflowId() {
+        return workflow != null ? workflow.getId() : null;
+    }
 
     @Column(nullable = false, length = 30)
     private String status = "PENDING"; // PENDING | APPROVED | REJECTED | WITHDRAWN

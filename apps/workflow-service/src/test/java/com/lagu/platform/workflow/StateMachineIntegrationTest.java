@@ -346,4 +346,66 @@ class StateMachineIntegrationTest {
                 .body(body)
                 .retrieve().toBodilessEntity();
     }
+
+    // ── gated states: the read side of the change-approval gate (defect 3) ─────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void gatedStates_returnsOnlyStatesMarkedRequiresChangeApproval() {
+        // Against a real database on purpose. WorkflowDefinition.states is a LAZY @OneToMany, so
+        // this endpoint threw LazyInitializationException outside a transaction — a mock-based
+        // test cannot see that, and record-service fails closed on the resulting 500, which
+        // presented as "no vendor can edit anything" rather than as an obvious error.
+        String objectType = ("IT_GATED_" + UUID.randomUUID().toString().substring(0, 8)).toUpperCase();
+        String wfId = createWorkflowDefinition("it-gated-wf", objectType);
+        addState(wfId, "DRAFT", false);
+        addGatedState(wfId, "PUBLISHED");
+
+        Map<String, Object> data = gatedStates(objectType);
+
+        assertThat((java.util.List<String>) data.get("states")).containsExactly("PUBLISHED");
+        assertThat(data.get("workflowId")).isEqualTo(wfId);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void gatedStates_isEmptyWhenNoStateRequiresApproval() {
+        // The common case, and the one that must not accidentally hold every edit.
+        String objectType = ("IT_UNGATED_" + UUID.randomUUID().toString().substring(0, 8)).toUpperCase();
+        String wfId = createWorkflowDefinition("it-ungated-wf", objectType);
+        addState(wfId, "DRAFT", false);
+        addState(wfId, "PUBLISHED", false);
+
+        assertThat((java.util.List<String>) gatedStates(objectType).get("states")).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void gatedStates_isEmptyForAnObjectTypeWithNoWorkflowAtAll() {
+        Map<String, Object> data = gatedStates("IT_NO_WORKFLOW_" + UUID.randomUUID());
+
+        assertThat((java.util.List<String>) data.get("states")).isEmpty();
+        assertThat(data.get("workflowId")).isNull();
+    }
+
+    private void addGatedState(String wfId, String name) {
+        adminClient.post()
+                .uri("/api/v1/workflow-definitions/" + wfId + "/states")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", name, "label", name, "terminal", false,
+                             "displayOrder", 1, "requiresChangeApproval", true))
+                .retrieve().toBodilessEntity();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> gatedStates(String objectType) {
+        Map<String, Object> resp = adminClient.get()
+                .uri(b -> b.path("/internal/workflows/gated-states")
+                        .queryParam("objectType", objectType)
+                        .queryParam("tenantId", TENANT_ID)
+                        .build())
+                .header("X-Internal-Service", "record-service")
+                .retrieve().body(Map.class);
+        return (Map<String, Object>) resp.get("data");
+    }
 }

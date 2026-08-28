@@ -9,10 +9,13 @@ import com.lagu.platform.schema.domain.SchemaVersion;
 import com.lagu.platform.schema.domain.SchemaVersionRepository;
 import com.lagu.platform.schema.dto.ListingTypeSchemaDto;
 import com.lagu.platform.schema.dto.PublishSchemaRequest;
+import com.lagu.platform.schema.client.SchemaConsumerClient;
+import com.lagu.platform.schema.dto.SchemaPropagationResponse;
 import com.lagu.platform.schema.dto.SchemaVersionResponse;
 import com.lagu.platform.schema.event.SchemaEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.PageRequest;
@@ -33,6 +36,35 @@ public class SchemaVersionService {
     private final ListingTypeService listingTypeService;
     private final SchemaEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
+    private final SchemaConsumerClient schemaConsumerClient;
+
+    /** Mirrors record-service's metadata-schema cache TTL. The two must be changed together. */
+    @Value("${platform.schema.consumer-cache-ttl-seconds:600}")
+    private long consumerCacheTtlSeconds;
+
+    /**
+     * How far a published schema has actually got. See {@link SchemaPropagationResponse}.
+     *
+     * <p>The worst case quoted here is record-service's cache TTL, which is the fallback when the
+     * eviction event is missed. It is duplicated as a property rather than read from record-service
+     * because asking a service how stale it is willing to be, in order to explain how stale it
+     * might be, is a round trip that adds nothing - but the two must be changed together.
+     */
+    @Transactional(readOnly = true)
+    public SchemaPropagationResponse propagation(String listingType) {
+        ListingTypeDefinition def = listingTypeRepo.findByNameWithSectionsAndTenantIdIsNull(listingType)
+                .orElseThrow(() -> new ResourceNotFoundException("ListingTypeDefinition", listingType));
+
+        int current = def.getCurrentVersion();
+        List<SchemaConsumerClient.ConsumerState> consumers =
+                schemaConsumerClient.statesFor(listingType, current);
+
+        return new SchemaPropagationResponse(
+                listingType, current,
+                consumers.stream().allMatch(SchemaConsumerClient.ConsumerState::inSync),
+                consumerCacheTtlSeconds,
+                consumers);
+    }
 
     @Transactional
     @CacheEvict(value = ListingTypeService.CACHE_SCHEMA, key = "#listingType")

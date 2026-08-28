@@ -5,6 +5,7 @@ import com.lagu.platform.common.exception.PlatformException;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.record.client.MetadataClient;
+import com.lagu.platform.record.client.WorkflowClient;
 import com.lagu.platform.record.domain.Record;
 import com.lagu.platform.record.domain.RecordAudit;
 import com.lagu.platform.record.domain.RecordAuditRepository;
@@ -30,6 +31,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 @Transactional(readOnly = true)
 public class RecordService {
 
@@ -41,6 +43,7 @@ public class RecordService {
      *  already resolved the same schema means this does not cost another call. */
     private final MetadataClient metadataClient;
     private final RecordEventPublisher eventPublisher;
+    private final WorkflowClient workflowClient;
 
     public RecordResponse getById(UUID id) {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
@@ -114,6 +117,11 @@ public class RecordService {
                 record.getObjectType(), req.getData(), record.getData());
         validator.validate(record.getObjectType(), data);
 
+        // Gate before any mutation: the proposed data is validated by this point, so what goes into
+        // the change set is something that could actually be applied on approval.
+        UUID heldAs = holdForReviewIfGated(record, validator.stripHiddenFields(record.getObjectType(), data), ctx);
+        if (heldAs != null) return heldResponse(record, heldAs);
+
         Map<String, Object> oldData = new HashMap<>(record.getData());
         record.setData(validator.stripHiddenFields(record.getObjectType(), data));
         // Validation above ran against the live schema, so a successful save means the data now
@@ -141,6 +149,11 @@ public class RecordService {
         merged = validator.preserveServerOwnedFields(
                 record.getObjectType(), merged, record.getData());
         validator.validate(record.getObjectType(), merged);
+
+        // Same gate as update(). A PATCH is still an edit; routing only PUTs into review would let
+        // a vendor bypass it by sending a partial body.
+        UUID heldAs = holdForReviewIfGated(record, validator.stripHiddenFields(record.getObjectType(), merged), ctx);
+        if (heldAs != null) return heldResponse(record, heldAs);
 
         Map<String, Object> oldData = new HashMap<>(record.getData());
         record.setData(validator.stripHiddenFields(record.getObjectType(), merged));
@@ -274,5 +287,73 @@ public class RecordService {
         r.setUpdatedBy(audit.getChangedBy());
         r.setUpdatedAt(audit.getChangedAt());
         return r;
+    }
+
+    /**
+     * Files an edit for review instead of applying it, when the record's current workflow state is
+     * marked {@code requiresChangeApproval}.
+     *
+     * <p>This is the callsite the flag never had. {@code ChangeSetService.requiresApproval} has
+     * documented itself as "callers (record-service via HTTP) check this before applying" since it
+     * was written, and had zero callers — so a gated edit went straight to the record and the
+     * review queue only ever saw what the admin portal put there by hand.
+     *
+     * @return the change set id when the edit was held, or null when it should apply normally
+     */
+    /**
+     * Whether edits to this record are held for review rather than applied, for the media write
+     * paths that do not go through {@link #update}.
+     *
+     * <p>RecordFileController and RecordGalleryController write {@code record.setData(...)} and
+     * save directly, so the gate in update()/patch() never saw them: a vendor whose text edits
+     * were held could still swap the venue's photos, and the gallery could be reordered or emptied
+     * outright. Those paths cannot reasonably be routed into a change set — the bytes are already
+     * in the bucket and a change set carries field values, not object lifecycles — so they refuse
+     * instead. See MediaGate in the controllers.
+     */
+    public boolean editsRequireApproval(Record record) {
+        return editsRequireApproval(record, GatewayHeaderFilter.current());
+    }
+
+    private boolean editsRequireApproval(Record record, PlatformSecurityContext ctx) {
+        // Two callers are never "the reviewed":
+        //
+        //   * An admin is the reviewer. Gating their edit would deadlock the queue — the
+        //     correction an admin makes to fix a bad submission would itself need approving.
+        //   * An internal service. This one is not theoretical: workflow-service applies an
+        //     APPROVED change set by calling PUT /records/{id} as X-Internal-Service, carrying the
+        //     approving admin's user id but *not* their roles. Without this branch the apply is
+        //     itself held as a fresh change set, so approving a change silently does nothing and
+        //     leaves a new one pending — which is precisely the defect-1 symptom (an approved
+        //     edit that never lands), reintroduced through a different door.
+        if (ctx != null && (ctx.isConfigAdmin() || ctx.isInternalService())) return false;
+
+        return workflowClient.gatedStates(record.getObjectType(), record.getTenantId())
+                .holds(record.getStatus());
+    }
+
+    private UUID holdForReviewIfGated(Record record, Map<String, Object> proposedData,
+                                      PlatformSecurityContext ctx) {
+        // Admin and internal-service callers are never "the reviewed" — see editsRequireApproval.
+        if (!editsRequireApproval(record, ctx)) return null;
+
+        WorkflowClient.GatedStates gated =
+                workflowClient.gatedStates(record.getObjectType(), record.getTenantId());
+
+        UUID changeSetId = workflowClient.submitChangeSet(
+                record.getId(), record.getTenantId(), record.getObjectType(), gated.workflowId(),
+                new HashMap<>(record.getData()), proposedData,
+                ctx != null ? ctx.getUserId() : null);
+
+        log.info("Edit to record {} held for review as change set {} (state {} requires approval)",
+                record.getId(), changeSetId, record.getStatus());
+        return changeSetId;
+    }
+
+    /** The record as it still stands, tagged with the change set now awaiting review. */
+    private RecordResponse heldResponse(Record record, UUID changeSetId) {
+        RecordResponse response = toResponse(record);
+        response.setPendingChangeSetId(changeSetId);
+        return response;
     }
 }

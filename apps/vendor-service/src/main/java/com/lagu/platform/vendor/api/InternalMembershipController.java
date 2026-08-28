@@ -4,6 +4,8 @@ import com.lagu.platform.common.dto.ApiResponse;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
 import com.lagu.platform.vendor.domain.VendorMemberRepository;
+import com.lagu.platform.vendor.service.VendorService;
+import com.lagu.platform.vendor.dto.MembershipOwnerResponse;
 import com.lagu.platform.vendor.dto.MembershipRoleResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,6 +30,23 @@ import java.util.UUID;
 public class InternalMembershipController {
 
     private final VendorMemberRepository memberRepo;
+    private final VendorService vendorService;
+
+    /**
+     * The org's owner — booking-service uses this to turn a vendor org into one person it can
+     * notify about a new inquiry.
+     *
+     * The literal `owner` segment is matched ahead of the `{userId}` route below by Spring's
+     * PathPattern precedence (literals beat variables at the same position), so this does not
+     * shadow, and is not shadowed by, a lookup for a user who happens to be an owner.
+     */
+    @GetMapping("/{tenantId}/owner")
+    public ResponseEntity<ApiResponse<MembershipOwnerResponse>> getOwner(@PathVariable UUID tenantId) {
+        requireInternalCaller();
+        return vendorService.resolveNotificationTarget(tenantId)
+                .map(target -> ResponseEntity.ok(ApiResponse.ok(target)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
 
     @GetMapping("/{tenantId}/{userId}")
     public ResponseEntity<ApiResponse<MembershipRoleResponse>> getRole(@PathVariable UUID tenantId,

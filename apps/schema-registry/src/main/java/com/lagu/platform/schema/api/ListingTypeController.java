@@ -97,6 +97,24 @@ public class ListingTypeController {
         return ResponseEntity.ok(ApiResponse.ok(schemaVersionService.publish(name, req, publishedBy)));
     }
 
+    /**
+     * Whether the services that validate against this schema have picked up the published version.
+     *
+     * <p>Defect 6: publishing is fire-and-forget, so there was no way to tell "the publish failed"
+     * from "the publish worked and the reader is still on the old version for another few minutes".
+     * An admin who published and immediately tested saw the previous schema and reasonably assumed
+     * the former. This answers the question directly.
+     *
+     * <p>Cheap enough to poll: each consumer reads one entry from its own cache. It reports what is
+     * true right now rather than subscribing to anything, so a caller that wants to watch a publish
+     * land should call it a few times rather than expecting it to block.
+     */
+    @GetMapping("/{name}/propagation")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "READ")
+    public ResponseEntity<ApiResponse<SchemaPropagationResponse>> propagation(@PathVariable String name) {
+        return ResponseEntity.ok(ApiResponse.ok(schemaVersionService.propagation(name)));
+    }
+
     @DeleteMapping("/{id}")
     @RequirePermission(resource = "OBJECT_TYPE", action = "DELETE")
     public ResponseEntity<Void> deactivate(@PathVariable UUID id) {

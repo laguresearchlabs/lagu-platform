@@ -89,6 +89,53 @@ class AutomationEventParserTest {
     }
 
     @Test
+    void parseBookingEventExposesTheVendorNotificationRoutingFields() throws Exception {
+        UUID vendorRecipient = UUID.randomUUID();
+        BookingEvent event = BookingEvent.builder()
+                .eventType("INQUIRED")
+                .bookingId(UUID.randomUUID())
+                .consumerUserId(UUID.randomUUID())
+                .vendorTenantId(UUID.randomUUID())
+                .listingRecordId(UUID.randomUUID())
+                .eventDate(LocalDate.now().plusDays(10))
+                .currentStatus("INQUIRY")
+                .actorSide("CONSUMER")
+                .vendorRecipientUserId(vendorRecipient)
+                .occurredAt(Instant.now())
+                .build();
+
+        AutomationEventContext ctx = parser.parseBookingEvent(objectMapper.writeValueAsString(event));
+
+        // Both must land in `data` as strings: the seeded vendor triggers read them through
+        // ConditionEvaluator's "data." prefix and TemplateRenderer's {{data.X}} tokens, neither of
+        // which can see BookingEvent's top-level fields.
+        assertThat(ctx.getData())
+                .containsEntry("actorSide", "CONSUMER")
+                .containsEntry("vendorRecipientUserId", vendorRecipient.toString());
+    }
+
+    @Test
+    void parseBookingEventLeavesRoutingFieldsNullWhenTheOwnerLookupFailed() throws Exception {
+        BookingEvent event = BookingEvent.builder()
+                .eventType("INQUIRED")
+                .bookingId(UUID.randomUUID())
+                .consumerUserId(UUID.randomUUID())
+                .vendorTenantId(UUID.randomUUID())
+                .listingRecordId(UUID.randomUUID())
+                .eventDate(LocalDate.now().plusDays(10))
+                .currentStatus("INQUIRY")
+                .actorSide("CONSUMER")
+                // vendorRecipientUserId left null — vendor-service was unreachable
+                .build();
+
+        AutomationEventContext ctx = parser.parseBookingEvent(objectMapper.writeValueAsString(event));
+
+        // Null rather than "" or "null": the trigger's IS_NOT_NULL condition is what stops a
+        // notification being addressed to nobody, and it only works on a real null.
+        assertThat(ctx.getData().get("vendorRecipientUserId")).isNull();
+    }
+
+    @Test
     void parseBookingEventReturnsNullForMalformedJson() {
         assertThat(parser.parseBookingEvent("not valid json")).isNull();
     }

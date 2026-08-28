@@ -11,6 +11,7 @@ import com.lagu.platform.record.dto.FileUploadUrlRequest;
 import com.lagu.platform.record.dto.FileUploadUrlResponse;
 import com.lagu.platform.record.dto.RecordResponse;
 import com.lagu.platform.record.service.MediaFieldRules;
+import com.lagu.platform.record.service.MediaGate;
 import com.lagu.platform.record.service.RecordService;
 import com.lagu.platform.security.GatewayHeaderFilter;
 import com.lagu.platform.security.PlatformSecurityContext;
@@ -76,6 +77,9 @@ public class RecordFileController {
 
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         Record record = recordService.findForContext(id, ctx);
+        // Before the client uploads anything: a presigned URL it can never confirm is just wasted
+        // bandwidth and an orphaned object for the lifecycle rule to clean up.
+        MediaGate.requireEditable(recordService, record);
         FieldSchemaDto field = requireFileField(record, fieldName);
 
         String contentType = request.getContentType().toLowerCase();
@@ -108,6 +112,9 @@ public class RecordFileController {
 
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         Record record = recordService.findForContext(id, ctx);
+        // Checked again here, not only at upload-url: the presigned URL outlives the check that
+        // issued it, so a listing can enter a gated state between the two calls.
+        MediaGate.requireEditable(recordService, record);
         FieldSchemaDto field = requireFileField(record, fieldName);
 
         String pendingKey = request.getKey();

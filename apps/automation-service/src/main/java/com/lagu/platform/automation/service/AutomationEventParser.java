@@ -81,6 +81,14 @@ public class AutomationEventParser {
             data.put("quotedPrice", e.getQuotedPrice());
             data.put("commissionAmount", e.getCommissionAmount());
             data.put("eventDate", e.getEventDate() != null ? e.getEventDate().toString() : null);
+            // The two fields the vendor-side notification rules are built on: actorSide lets a
+            // trigger fire only when the *other* party acted, and vendorRecipientUserId is the
+            // single user notification-service can address. Null when booking-service could not
+            // resolve an owner — the seeded triggers require it to be present.
+            data.put("actorSide", e.getActorSide());
+            data.put("vendorRecipientUserId",
+                    e.getVendorRecipientUserId() != null ? e.getVendorRecipientUserId().toString() : null);
+            data.put("vendorRecipientEmail", e.getVendorRecipientEmail());
 
             return AutomationEventContext.builder()
                     .eventType(e.getEventType())

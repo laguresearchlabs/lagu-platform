@@ -187,7 +187,7 @@ public class ListingTypeService {
                                         f.getName(),
                                         f.getLabel(),
                                         f.getFieldType(),
-                                        f.isRequired() || entry.isRequired(),
+                                        entry.resolveRequired(f.isRequired()),
                                         f.isPromoted(),
                                         f.isSearchable(),
                                         f.isFilterable(),
@@ -258,7 +258,10 @@ public class ListingTypeService {
     static List<FieldGroupResponse.EntryResponse> toEntryResponses(List<FieldGroupEntry> ordered) {
         return ordered.stream()
                 .map(e -> new FieldGroupResponse.EntryResponse(
-                        e.getField().getName(), e.getDisplayOrder(), e.isRequired(), e.getVisibleWhen()))
+                        e.getField().getName(), e.getDisplayOrder(),
+                        e.getRequiredOverride(),
+                        e.resolveRequired(e.getField().isRequired()),
+                        e.getVisibleWhen()))
                 .toList();
     }
 

@@ -47,7 +47,18 @@ spring:
 opensearch:
   host: ${OPENSEARCH_HOST}
   port: ${OPENSEARCH_PORT}
+  # Both were supplied by the production deployment and read by nothing until now. The cluster runs
+  # the security plugin with generated TLS, so plain HTTP with no credentials cannot reach it.
+  scheme: ${OPENSEARCH_SCHEME:http}
+  username: ${OPENSEARCH_USERNAME:}
+  password: ${OPENSEARCH_PASSWORD:}
   index-prefix: ${OPENSEARCH_INDEX_PREFIX:platform}
+
+  analytics:
+    # Listing views are the highest-volume thing the platform writes and nothing user-facing reads
+    # them back, so they are the one index family that would grow without bound. Indexed monthly so
+    # expiry is a matter of dropping an index rather than a delete-by-query across everything.
+    retention-days: ${OPENSEARCH_ANALYTICS_RETENTION_DAYS:180}
 
 server:
   port: ${SERVER_PORT:8080}
