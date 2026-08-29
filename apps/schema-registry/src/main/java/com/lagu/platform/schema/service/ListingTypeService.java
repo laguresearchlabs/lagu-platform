@@ -206,7 +206,8 @@ public class ListingTypeService {
                             sec.getLabel() != null ? sec.getLabel() : sec.getFieldGroup().getLabel(),
                             sec.getDisplayOrder(),
                             fields,
-                            sec.getVisibleWhen()
+                            sec.getVisibleWhen(),
+                            sec.getAudience()
                     );
                 })
                 .toList();

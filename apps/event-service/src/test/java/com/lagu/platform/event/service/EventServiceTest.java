@@ -36,7 +36,9 @@ class EventServiceTest {
     private final EventRepository eventRepo = mock(EventRepository.class);
     private final EventMemberRepository memberRepo = mock(EventMemberRepository.class);
     private final RecordServiceClient recordClient = mock(RecordServiceClient.class);
-    private final EventService service = new EventService(eventRepo, memberRepo, recordClient);
+    private final EventShareLinkService shareLinkService = mock(EventShareLinkService.class);
+    private final EventService service =
+            new EventService(eventRepo, memberRepo, recordClient, shareLinkService);
 
     private final UUID eventId = UUID.randomUUID();
     private final UUID recordId = UUID.randomUUID();
@@ -170,29 +172,34 @@ class EventServiceTest {
     }
 
     @Test
-    void getSucceedsForNonMemberWhenEventIsPublic() {
+    void getStillRefusesANonMemberOfAnEventMarkedPublic() {
+        // This used to succeed, and that is exactly what made share links unrevocable: access
+        // came from the record's own visibility field, so the link was never the gate and closing
+        // it changed nothing. A non-member now gets in by redeeming a live link — which makes
+        // them a member — and by no other route.
         UUID strangerId = UUID.randomUUID();
         when(memberRepo.findByTenantIdAndUserId(eventId, strangerId)).thenReturn(Optional.empty());
         when(recordClient.getRecord(recordId, eventId))
                 .thenReturn(Map.of("data", Map.of("data", Map.of("visibility", "PUBLIC"))));
 
-        var response = service.get(eventId, strangerId);
-
-        assertThat(response.getMyRole()).isNull();
-        assertThat(response.getData()).containsEntry("visibility", "PUBLIC");
+        assertThatThrownBy(() -> service.get(eventId, strangerId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
     }
 
     @Test
-    void sharePreviewReturnsCardFieldsForPublicEvent() {
+    void sharePreviewReturnsCardFieldsForALiveToken() {
+        stubToken("live-token");
         when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
-                "visibility", "PUBLIC",
+                "visibility", "UNLISTED",
                 "name", "Aarav's 5th Birthday",
                 "description", "Cake at 4pm",
                 "cover_image", "https://cdn.example.com/cover.jpg",
                 "city", "Bengaluru",
                 "is_virtual", true))));
 
-        var preview = service.getSharePreview(eventId);
+        var preview = service.getSharePreview("live-token");
 
         assertThat(preview.getTitle()).isEqualTo("Aarav's 5th Birthday");
         assertThat(preview.getDescription()).isEqualTo("Cake at 4pm");
@@ -204,23 +211,34 @@ class EventServiceTest {
     }
 
     @Test
-    void sharePreviewIsNotFoundForNonPublicEvent() {
-        // 404 rather than 403: an unauthenticated caller shouldn't be able to tell a private
-        // event apart from an id that was never issued.
-        when(recordClient.getRecord(recordId, eventId))
-                .thenReturn(Map.of("data", Map.of("data", Map.of("visibility", "PRIVATE", "name", "Secret"))));
+    void sharePreviewIsNotFoundForADeadToken() {
+        // The token is the authorization now, so there is no visibility test here at all —
+        // whoever minted the link decided this much could be shown. Resolution is what 404s, and
+        // it makes revoked, expired, exhausted and never-issued indistinguishable.
+        when(shareLinkService.resolve("dead-token"))
+                .thenThrow(new ResourceNotFoundException("ShareLink", "token"));
 
-        assertThatThrownBy(() -> service.getSharePreview(eventId))
+        assertThatThrownBy(() -> service.getSharePreview("dead-token"))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
-    void sharePreviewIsNotFoundWhenVisibilityIsAbsent() {
-        // Matches get()'s check exactly — a missing field is not PUBLIC.
-        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of());
+    void sharePreviewShowsAPrivateEventToAValidToken() {
+        // The point of the change: a host can now show a private event to someone they invited,
+        // instead of the recipient meeting a blank wall and a request queue.
+        stubToken("private-token");
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "visibility", "PRIVATE", "name", "Secret"))));
 
-        assertThatThrownBy(() -> service.getSharePreview(eventId))
-                .isInstanceOf(ResourceNotFoundException.class);
+        assertThat(service.getSharePreview("private-token").getTitle()).isEqualTo("Secret");
+    }
+
+    /** Points a token at this test's event, the way the anonymous preview path resolves one. */
+    private void stubToken(String token) {
+        var link = new com.lagu.platform.event.domain.EventShareLink();
+        link.setId(UUID.randomUUID());
+        link.setEventId(eventId);
+        when(shareLinkService.resolve(token)).thenReturn(link);
     }
 
     @Test

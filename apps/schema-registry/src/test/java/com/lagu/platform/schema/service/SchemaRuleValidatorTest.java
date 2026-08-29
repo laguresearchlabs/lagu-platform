@@ -29,7 +29,7 @@ class SchemaRuleValidatorTest {
 
     private static SectionSchemaDto section(String key, Map<String, Object> visibleWhen,
                                             FieldSchemaDto... fields) {
-        return new SectionSchemaDto(key, key, 0, List.of(fields), visibleWhen);
+        return new SectionSchemaDto(key, key, 0, List.of(fields), visibleWhen, "GUEST");
     }
 
     private static Map<String, Object> whenTruthy(String field) {

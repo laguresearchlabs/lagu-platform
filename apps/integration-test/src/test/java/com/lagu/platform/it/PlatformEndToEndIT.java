@@ -92,7 +92,12 @@ class PlatformEndToEndIT {
             new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"))
                     .withNetwork(NETWORK)
                     .withNetworkAliases("kafka")
-                    .withListener("kafka:19092");
+                    .withListener("kafka:19092")
+                    // Testcontainers defaults to 60s, which every other container here already
+                    // overrides. Kafka was the one left on the default and the one that timed
+                    // out: a KRaft broker takes 60-90s to reach "RECOVERY to RUNNING" on a
+                    // developer machine that is also running the local stack.
+                    .withStartupTimeout(Duration.ofMinutes(3));
 
     private static final GenericContainer<?> OPENSEARCH =
             new GenericContainer<>(DockerImageName.parse("opensearchproject/opensearch:2.19.0"))

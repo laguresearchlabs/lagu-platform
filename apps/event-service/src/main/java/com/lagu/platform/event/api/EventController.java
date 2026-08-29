@@ -59,14 +59,19 @@ public class EventController {
     }
 
     /**
-     * Unauthenticated link preview for a PUBLIC event — note the absence of requireUserId().
+     * Unauthenticated link preview for a share token — note the absence of requireUserId().
      * Opened up in application.yml's platform.security.public-paths because Open Graph
      * crawlers can't log in; the two-segment path keeps it clear of /{eventId} above, and
      * gateway-service already routes /api/v1/events/share/** without a JWT.
+     *
+     * <p>The segment is a share token, not an event id. It used to be the id, which is why
+     * revoking a link was impossible — there was no link, only a pointer at an event whose
+     * access was decided elsewhere. Redeeming the token is a separate, authenticated call that
+     * deliberately does not live under this prefix: see EventShareLinkController.
      */
-    @GetMapping("/share/{eventId}")
-    public ResponseEntity<ApiResponse<SharePreviewResponse>> sharePreview(@PathVariable UUID eventId) {
-        return ResponseEntity.ok(ApiResponse.ok(eventService.getSharePreview(eventId)));
+    @GetMapping("/share/{token}")
+    public ResponseEntity<ApiResponse<SharePreviewResponse>> sharePreview(@PathVariable String token) {
+        return ResponseEntity.ok(ApiResponse.ok(eventService.getSharePreview(token)));
     }
 
     @PutMapping("/{eventId}")

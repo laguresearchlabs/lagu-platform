@@ -37,7 +37,7 @@ class SchemaChangeClassifierTest {
 
     private static ListingTypeSchemaDto schema(FieldSchemaDto... fields) {
         return new ListingTypeSchemaDto("WEDDING_EVENT", 1,
-                List.of(new SectionSchemaDto("s", "S", 0, List.of(fields), null)));
+                List.of(new SectionSchemaDto("s", "S", 0, List.of(fields), null, "GUEST")));
     }
 
     /** Round-trips through Jackson the way publish stores it. */

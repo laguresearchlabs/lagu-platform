@@ -53,6 +53,14 @@ public class EventMember implements MembershipRecord {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    /**
+     * Which share link admitted this member, when one did. Null for an invitation, an approved
+     * join request, or the owner. Kept so "revoke that link and remove everyone it let in" is
+     * answerable — see EventShareLinkService.revoke().
+     */
+    @Column(name = "joined_via_share_link_id")
+    private UUID joinedViaShareLinkId;
+
     public boolean canManage() {
         return "ADMIN".equals(role) || "MAINTAINER".equals(role);
     }

@@ -45,4 +45,17 @@ public class ListingTypeSection {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "visible_when", columnDefinition = "jsonb")
     private Map<String, Object> visibleWhen;
+
+    /**
+     * Who this section is for: PUBLIC, GUEST or HOST.
+     *
+     * <p>Distinct from {@link #visibleWhen}, which is a rule about the record's other values. This
+     * is a rule about the reader, and it had no home at all before — so "the budget section is
+     * for hosts" could only be expressed as a hard-coded check inside whichever client remembered
+     * to write one.
+     *
+     * <p>Defaults to GUEST, which is what every section seeded before this column existed meant.
+     */
+    @Column(length = 20, nullable = false)
+    private String audience = "GUEST";
 }

@@ -16,7 +16,12 @@ public record ListingTypeSchemaDto(
             int displayOrder,
             List<FieldSchemaDto> fields,
             /** Conditional visibility rule; null = always visible. See ADR-18. */
-            Map<String, Object> visibleWhen
+            Map<String, Object> visibleWhen,
+            /**
+             * PUBLIC | GUEST | HOST — who may read this section. A rule about the reader, where
+             * visibleWhen is a rule about the record. Defaults to GUEST.
+             */
+            String audience
     ) {}
 
     public record FieldSchemaDto(

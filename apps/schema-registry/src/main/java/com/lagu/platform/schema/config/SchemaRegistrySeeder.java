@@ -43,6 +43,8 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         seedArrayFields();
         seedFieldGroups();
         seedListingTypes();
+        // After the types exist, because that is when their sections do.
+        applySectionAudiences();
         seedTierConfigurations();
         seedDocumentRequirements();
         seedTierEligibilityRules();
@@ -184,8 +186,14 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             field("start_datetime",    "Start",             FieldType.DATETIME,    true,  true,  null),
             field("end_datetime",      "End",               FieldType.DATETIME,    true,  false, null),
             field("timezone",          "Timezone",          FieldType.TEXT,        false, false, null),
+            // PUBLIC is deliberately absent. It meant "any authenticated caller holding the
+            // event id may read it" — nothing discovers events (search-service indexes
+            // listings, not events), so it bought no feature and was the one value that made a
+            // share link bypassable. UNLISTED is now implemented as what it always claimed to
+            // be: reachable by a live share link, and closed the moment that link is revoked.
+            // Add PUBLIC back alongside a real discovery feature, not before.
             field("visibility",        "Visibility",        FieldType.ENUM,        false, false,
-                List.of("PRIVATE","UNLISTED","PUBLIC")),
+                List.of("PRIVATE","UNLISTED")),
             field("is_virtual",        "Virtual Event",     FieldType.BOOLEAN,     false, false, null),
             field("virtual_meeting_provider","Meeting Platform",FieldType.ENUM,    false, false,
                 List.of("ZOOM","GOOGLE_MEET","MICROSOFT_TEAMS","OTHER")),
@@ -255,7 +263,78 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             }
         }
         if (seeded > 0) log.info("Seeded {} platform field definitions", seeded);
+
+        applyPromotedFlags();
     }
+
+    /**
+     * Sections only a host may read.
+     *
+     * <p>Deliberately short. {@code event_planning_tools} is tasks, budget lines and the internal
+     * run sheet — the working surface of running an event, and nobody else's business.
+     *
+     * <p>{@code event_visibility} looks like a candidate and is not: it carries
+     * {@code virtual_meeting_url}, which is how a guest actually attends. Hiding the section to
+     * hide its settings would take the joining link with it.
+     */
+    private static final Set<String> HOST_ONLY_SECTIONS = Set.of("event_planning_tools");
+
+    /**
+     * Fields a consumer UI should surface above the fold rather than leave in the body of the
+     * form. {@code promoted} has existed on FieldDefinition since the beginning and nothing ever
+     * set it, so every field was equal and clients had no choice but to hard-code their own list
+     * of "important" keys — which then had to be edited by hand for every new listing type.
+     *
+     * <p>Applied as its own pass rather than inside the seeding loop above, because that loop
+     * only creates: an installation seeded before this existed would otherwise never pick the
+     * flags up.
+     */
+    /**
+     * Applied as its own pass for the same reason as the promoted flags: ensureListingType() is a
+     * no-op once a listing type exists, so an installation seeded before this column would
+     * otherwise never pick the audiences up.
+     */
+    private void applySectionAudiences() {
+        int updated = 0;
+        // Sections have no repository of their own — they are owned by the listing type and
+        // cascade from it, so the definition is what gets saved.
+        for (ListingTypeDefinition def : listingTypeRepo.findAll()) {
+            boolean dirty = false;
+            for (ListingTypeSection sec : def.getSections()) {
+                String want = HOST_ONLY_SECTIONS.contains(sec.getSectionKey()) ? "HOST" : "GUEST";
+                if (!want.equals(sec.getAudience())) {
+                    sec.setAudience(want);
+                    dirty = true;
+                    updated++;
+                }
+            }
+            if (dirty) listingTypeRepo.save(def);
+        }
+        if (updated > 0) log.info("Set audience on {} listing type sections", updated);
+    }
+
+    private void applyPromotedFlags() {
+        int updated = 0;
+        for (String name : PROMOTED_FIELDS) {
+            var existing = fieldRepo.findByNameAndTenantIdIsNull(name);
+            if (existing.isPresent() && !existing.get().isPromoted()) {
+                existing.get().setPromoted(true);
+                fieldRepo.save(existing.get());
+                updated++;
+            }
+        }
+        if (updated > 0) log.info("Promoted {} platform field definitions", updated);
+    }
+
+    /**
+     * When and where an event happens — the facts a guest opens the page to find.
+     *
+     * <p>Deliberately not {@code name} or {@code cover_image}: those identify the event rather
+     * than describe it, and a consumer UI renders them as its title and its hero image, not as
+     * entries in a list of facts.
+     */
+    private static final List<String> PROMOTED_FIELDS = List.of(
+            "start_datetime", "end_datetime", "city", "state", "is_virtual");
 
     // ── 1b. Array (repeating structure) field definitions ────────────────────
     // itemSchema entries use the keys "name" (String), "type" (FieldType name), "required"

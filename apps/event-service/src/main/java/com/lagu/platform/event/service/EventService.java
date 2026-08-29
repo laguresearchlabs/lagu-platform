@@ -8,6 +8,7 @@ import com.lagu.platform.event.domain.Event;
 import com.lagu.platform.event.domain.EventMember;
 import com.lagu.platform.event.domain.EventMemberRepository;
 import com.lagu.platform.event.domain.EventRepository;
+import com.lagu.platform.event.domain.EventShareLink;
 import com.lagu.platform.event.dto.CreateEventRequest;
 import com.lagu.platform.event.dto.EventResponse;
 import com.lagu.platform.event.dto.EventSummaryResponse;
@@ -47,6 +48,7 @@ public class EventService {
     private final EventRepository       eventRepo;
     private final EventMemberRepository memberRepo;
     private final RecordServiceClient   recordClient;
+    private final EventShareLinkService shareLinkService;
 
     /**
      * Fans out listMine()'s per-event record fetches. Blocking IO, so it is deliberately not the
@@ -108,13 +110,15 @@ public class EventService {
 
         Optional<EventMember> member = memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId);
         if (member.isEmpty()) {
-            // Non-members may view a PUBLIC event read-only, well enough to send a join
-            // request (mirrors event-nest's old share-link preview). A PLATFORM_ADMIN may view
-            // any event regardless of visibility, mirroring record-service's findForContext —
-            // everyone else who isn't a member and the event isn't PUBLIC gets 403.
+            // Membership, or nothing. This used to admit any authenticated caller holding the id
+            // when the record said visibility == "PUBLIC", which is what made share links
+            // unrevocable: the link was never the gate, so closing it changed nothing. A
+            // non-member now reaches an event by redeeming a live share link (which makes them a
+            // member) — see EventShareLinkService.claim() — or through the anonymous preview.
+            // A PLATFORM_ADMIN still reads anything, mirroring record-service's findForContext.
             PlatformSecurityContext ctx = GatewayHeaderFilter.current();
             boolean isPlatformAdmin = ctx != null && ctx.isPlatformAdmin();
-            if (!isPlatformAdmin && !"PUBLIC".equals(data.get("visibility"))) {
+            if (!isPlatformAdmin) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event");
             }
             return toResponse(event, null, data);
@@ -123,19 +127,22 @@ public class EventService {
     }
 
     /**
-     * Link-preview projection for GET /share/{id} — the one event endpoint reachable without
+     * Link-preview projection for GET /share/{token} — the one event endpoint reachable without
      * an identity, because the crawlers that render Open Graph cards (WhatsApp, Twitterbot,
-     * Facebook) can't authenticate. Anything not explicitly PUBLIC 404s rather than 403s, so
-     * an unauthenticated caller can't use this to confirm a private event even exists; and
-     * PUBLIC events expose only the handful of fields the share page already shows every
-     * logged-in visitor (see SharePreviewResponse).
+     * Facebook) can't authenticate.
+     *
+     * <p>The token is the authorization, so there is no visibility test here: whoever minted the
+     * link decided this much could be shown. What replaces it is EventShareLinkService.resolve(),
+     * which 404s a token that is unknown, revoked, expired or used up — all four identically, so
+     * a dead link cannot be used to confirm the event exists.
+     *
+     * <p>The projection stays exactly as narrow as it was. It is a hand-picked subset rather than
+     * the schema-driven data map, so a field a listing type adds later stays private by default.
      */
-    public SharePreviewResponse getSharePreview(UUID eventId) {
-        Event event = requireEvent(eventId);
+    public SharePreviewResponse getSharePreview(String token) {
+        EventShareLink link = shareLinkService.resolve(token);
+        Event event = requireEvent(link.getEventId());
         Map<String, Object> data = fetchData(event);
-        if (!"PUBLIC".equals(data.get("visibility"))) {
-            throw new ResourceNotFoundException("Event", eventId.toString());
-        }
         return SharePreviewResponse.builder()
                 .objectType(event.getObjectType())
                 .title(str(data.get("name")))

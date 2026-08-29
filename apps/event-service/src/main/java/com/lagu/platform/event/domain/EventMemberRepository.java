@@ -13,4 +13,7 @@ public interface EventMemberRepository extends JpaRepository<EventMember, UUID> 
     Optional<EventMember> findByTenantIdAndUserIdAndStatusNot(UUID tenantId, UUID userId, String excludedStatus);
     boolean existsByTenantIdAndUserId(UUID tenantId, UUID userId);
     List<EventMember> findByUserId(UUID userId);
+
+    /** Everyone a given share link admitted — the basis of "revoke and remove". */
+    List<EventMember> findByJoinedViaShareLinkId(UUID shareLinkId);
 }
