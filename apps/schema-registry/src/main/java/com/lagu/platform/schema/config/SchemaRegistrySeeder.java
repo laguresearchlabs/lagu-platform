@@ -43,7 +43,10 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         seedArrayFields();
         seedFieldGroups();
         seedListingTypes();
-        // After the types exist, because that is when their sections do.
+        // After the types exist, because that is when their sections do. Order matters between
+        // these two: the split creates the `event_settings` section, and the audience pass is
+        // what makes it HOST — run the other way round it would sit GUEST until the next boot.
+        applyEventSectionSplit();
         applySectionAudiences();
         seedTierConfigurations();
         seedDocumentRequirements();
@@ -273,11 +276,14 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
      * <p>Deliberately short. {@code event_planning_tools} is tasks, budget lines and the internal
      * run sheet — the working surface of running an event, and nobody else's business.
      *
-     * <p>{@code event_visibility} looks like a candidate and is not: it carries
-     * {@code virtual_meeting_url}, which is how a guest actually attends. Hiding the section to
-     * hide its settings would take the joining link with it.
+     * <p>{@code event_settings} is the event's own policy — who may find it, whether posts are
+     * held for approval. It used to be unlistable here: those fields lived in a combined
+     * {@code event_visibility} group alongside {@code virtual_meeting_url}, which is how a guest
+     * actually attends, so hiding the section would have taken the joining link with it. The
+     * group is split now ({@code event_joining} carries the link), and the settings can finally
+     * be host-only.
      */
-    private static final Set<String> HOST_ONLY_SECTIONS = Set.of("event_planning_tools");
+    private static final Set<String> HOST_ONLY_SECTIONS = Set.of("event_planning_tools", "event_settings");
 
     /**
      * Fields a consumer UI should surface above the fold rather than leave in the body of the
@@ -294,6 +300,61 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
      * no-op once a listing type exists, so an installation seeded before this column would
      * otherwise never pick the audiences up.
      */
+    /**
+     * Repoints an already-seeded installation at the split {@code event_visibility} group.
+     *
+     * <p>{@code ensureFieldGroup} and {@code ensureListingType} are both no-ops once their row
+     * exists, so the split above only reaches a database seeded from empty. Every environment
+     * that predates it keeps one combined "Visibility" section — mixing host policy with the
+     * joining link — until something reconciles it. That is this, in the same shape as
+     * {@code applySectionAudiences} and {@code applyPromotedFlags} for the same reason.
+     *
+     * <p>Records are unaffected. A record's {@code data} is a flat map keyed by field name, so
+     * moving {@code visibility} into another group does not move its value; nothing is migrated
+     * and nothing is lost. The orphaned {@code event_visibility} field group is left in place —
+     * deleting it would cascade to entries a tenant-specific type might still point at.
+     */
+    private void applyEventSectionSplit() {
+        var joining = fieldGroupRepo.findByNameAndTenantIdIsNull("event_joining");
+        var settings = fieldGroupRepo.findByNameAndTenantIdIsNull("event_settings");
+        if (joining.isEmpty() || settings.isEmpty()) return;
+
+        int updated = 0;
+        for (ListingTypeDefinition def : listingTypeRepo.findAll()) {
+            ListingTypeSection legacy = def.getSections().stream()
+                    .filter(sec -> "event_visibility".equals(sec.getSectionKey()))
+                    .findFirst()
+                    .orElse(null);
+            if (legacy == null) continue;
+
+            // The old section becomes the joining one, keeping its display order so the type's
+            // running order does not shuffle under anyone mid-upgrade.
+            legacy.setFieldGroup(joining.get());
+            legacy.setSectionKey("event_joining");
+            legacy.setLabel("Joining");
+
+            boolean hasSettings = def.getSections().stream()
+                    .anyMatch(sec -> "event_settings".equals(sec.getSectionKey()));
+            if (!hasSettings) {
+                int last = def.getSections().stream()
+                        .mapToInt(ListingTypeSection::getDisplayOrder)
+                        .max()
+                        .orElse(0);
+                ListingTypeSection sec = new ListingTypeSection();
+                sec.setListingType(def);
+                sec.setFieldGroup(settings.get());
+                sec.setSectionKey("event_settings");
+                sec.setLabel("Event Settings");
+                sec.setDisplayOrder(last + 1);
+                def.getSections().add(sec);
+            }
+
+            listingTypeRepo.save(def);
+            updated++;
+        }
+        if (updated > 0) log.info("Split event_visibility into event_joining/event_settings on {} listing type(s)", updated);
+    }
+
     private void applySectionAudiences() {
         int updated = 0;
         // Sections have no repository of their own — they are owned by the listing type and
@@ -466,14 +527,23 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         ensureFieldGroup("event_schedule",      "Schedule",
             List.of(fge("start_datetime",0,true), fge("end_datetime",1,true), fge("timezone",2,false)));
 
+        // Split out of the old `event_visibility` group, which mixed two audiences and so could
+        // be given neither. `visibility` and `post_approval_required` are host policy — nobody
+        // else's business — while is_virtual/provider/url are how a guest actually attends. Held
+        // together, the section could not be made HOST-only without taking the joining link with
+        // it (the objection HOST_ONLY_SECTIONS used to record), so it stayed GUEST and every
+        // invitee read "Visibility: UNLISTED" as though it were a fact about the party.
+        //
         // The two virtual_meeting_* fields are meaningless for an in-person event, so they only
         // appear once is_virtual is set. This group is shared by WEDDING_EVENT and BIRTHDAY_EVENT
         // and the rule applies in both, which is the intent — see ADR-19 on rule placement.
-        ensureFieldGroup("event_visibility",    "Visibility",
-            List.of(fge("visibility",0,false), fge("is_virtual",1,false),
-                    fge("virtual_meeting_provider",2,false, visibleWhenTruthy("is_virtual")),
-                    fge("virtual_meeting_url",3,false, visibleWhenTruthy("is_virtual")),
-                    fge("post_approval_required",4,false)));
+        ensureFieldGroup("event_joining",       "Joining",
+            List.of(fge("is_virtual",0,false),
+                    fge("virtual_meeting_provider",1,false, visibleWhenTruthy("is_virtual")),
+                    fge("virtual_meeting_url",2,false, visibleWhenTruthy("is_virtual"))));
+
+        ensureFieldGroup("event_settings",      "Event Settings",
+            List.of(fge("visibility",0,false), fge("post_approval_required",1,false)));
 
         ensureFieldGroup("event_style_preferences","Style & Preferences",
             List.of(fge("event_theme",0,false), fge("dresscode",1,false),
@@ -576,12 +646,14 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("event_schedule",          "Schedule",         1),
                 sec("wedding_party_details",   "Wedding Party",    2),
                 sec("wedding_details",         "Event Details",    3),
-                sec("event_visibility",        "Visibility",       4),
+                sec("event_joining",           "Joining",          4),
                 sec("event_style_preferences", "Style",            5),
                 sec("event_planning_tools",    "Planning Tools",   6),
                 sec("contact_details",         "Contact",          7),
                 sec("address",                 "Address",          8),
-                sec("media",                   "Media",            9)
+                sec("media",                   "Media",            9),
+                // Last: policy is not what anyone opens an event to read.
+                sec("event_settings",          "Event Settings",  10)
             ), false, false, ListingTypeKind.EVENT, "💍", "rose");
 
         ensureListingType("CORPORATE_EVENT","Corporate Event","Corporate and business event management",
@@ -597,12 +669,14 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("basic_details",           "Event Overview",   0),
                 sec("event_schedule",          "Schedule",         1),
                 sec("birthday_details",        "Birthday Details", 2),
-                sec("event_visibility",        "Visibility",       3),
+                sec("event_joining",           "Joining",          3),
                 sec("event_style_preferences", "Style",            4),
                 sec("wish_list",               "Wish List",        5),
                 sec("event_planning_tools",    "Planning Tools",   6),
                 sec("address",                 "Address",          7),
-                sec("media",                   "Media",            8)
+                sec("media",                   "Media",            8),
+                // Last: policy is not what anyone opens an event to read.
+                sec("event_settings",          "Event Settings",   9)
             ), false, false, ListingTypeKind.EVENT, "🎂", "amber");
 
         // Originally authored through the admin portal rather than seeded, which left it with only
