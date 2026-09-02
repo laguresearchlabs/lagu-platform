@@ -34,6 +34,17 @@ import java.util.UUID;
 public class EventMemberService {
 
     private static final List<String> VALID_ROLES = List.of("ADMIN", "MAINTAINER", "INVITEE");
+    /**
+     * What a stranger may ask to be, which is narrower than what a manager may hand out.
+     *
+     * <p>ADMIN is absent deliberately. requestedRole arrives from whoever is asking to join, and
+     * approve() wrote it onto the membership verbatim, so a request naming ADMIN turned the
+     * organizer's single click into a transfer of their own event — and the portal displayed
+     * every non-MAINTAINER value as "Guest", so it didn't even look like one. Ownership is not
+     * the applicant's to choose; a host who really means to promote someone does it afterwards
+     * through updateRole(), where requireManagerRemainsAfterMutation() applies.
+     */
+    private static final Set<String> REQUESTABLE_ROLES = Set.of("MAINTAINER", "INVITEE");
     /** Narrower than canManage()'s {ADMIN, MAINTAINER} authorization gate — see
      *  EventMembershipPermissionEvaluator.gateRoles() for that set. A MAINTAINER doesn't count
      *  toward "is there still someone who can manage this event" for this guard. */
@@ -188,7 +199,7 @@ public class EventMemberService {
         EventJoinRequest jr = existing.orElseGet(EventJoinRequest::new);
         jr.setTenantId(event.getTenantId());
         jr.setUserId(userId);
-        jr.setRequestedRole(req.getRequestedRole() != null ? req.getRequestedRole().toUpperCase() : "INVITEE");
+        jr.setRequestedRole(validateRequestedRole(req.getRequestedRole()));
         jr.setMessage(req.getMessage());
         jr.setStatus("PENDING");
         jr.setReviewedByUserId(null);
@@ -224,6 +235,18 @@ public class EventMemberService {
             joinRequestRepo.save(jr);
             throw new ValidationException(
                     "User is already a member of this event; join request rejected due to conflict");
+        }
+
+        // Checked again on the way out, not only on the way in: requestToJoin() has only been
+        // validating this since the escalation was found, so rows predating it can still name
+        // ADMIN, and raiseJoinRequest() writes requestedRole from a share link rather than
+        // through requestToJoin() at all. Refused outright rather than quietly downgraded — the
+        // host is looking at a row that says ADMIN, and silently granting something else would
+        // make the queue lie in the opposite direction. Decline it and invite them instead.
+        if (!REQUESTABLE_ROLES.contains(jr.getRequestedRole())) {
+            throw new ValidationException(
+                    "This request asks for role " + jr.getRequestedRole()
+                            + ", which cannot be granted by approving. Decline it and invite the user instead.");
         }
 
         jr.setStatus("APPROVED");
@@ -267,6 +290,18 @@ public class EventMemberService {
         if (role != null && !VALID_ROLES.contains(role.toUpperCase())) {
             throw new ValidationException("Invalid role: " + role);
         }
+    }
+
+    /**
+     * Normalizes and checks the role on an incoming join request. Separate from validateRole()
+     * because the sets differ: that one guards a manager's choice, this one an applicant's.
+     */
+    private String validateRequestedRole(String role) {
+        String normalized = role != null ? role.trim().toUpperCase() : "INVITEE";
+        if (!REQUESTABLE_ROLES.contains(normalized)) {
+            throw new ValidationException("Cannot request role: " + role);
+        }
+        return normalized;
     }
 
     private Event requireEvent(UUID eventId) {

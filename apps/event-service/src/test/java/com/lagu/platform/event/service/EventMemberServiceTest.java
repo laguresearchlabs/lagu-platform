@@ -373,6 +373,56 @@ class EventMemberServiceTest {
     }
 
     @Test
+    void requestToJoinRefusesAdminRole() {
+        UUID requester = UUID.randomUUID();
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+        when(joinRequestRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+
+        CreateJoinRequestRequest req = new CreateJoinRequestRequest();
+        req.setRequestedRole("ADMIN");
+
+        // The applicant does not get to name themselves owner; approve() used to grant this
+        // verbatim, so the request itself is where it has to stop.
+        assertThatThrownBy(() -> service.requestToJoin(eventId, requester, req))
+                .isInstanceOf(ValidationException.class);
+        verify(joinRequestRepo, never()).save(any());
+    }
+
+    @Test
+    void requestToJoinNormalizesRequestedRole() {
+        UUID requester = UUID.randomUUID();
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+        when(joinRequestRepo.findByTenantIdAndUserId(tenantId, requester)).thenReturn(Optional.empty());
+
+        CreateJoinRequestRequest req = new CreateJoinRequestRequest();
+        req.setRequestedRole(" maintainer ");
+
+        var response = service.requestToJoin(eventId, requester, req);
+
+        assertThat(response.getRequestedRole()).isEqualTo("MAINTAINER");
+    }
+
+    @Test
+    void approveRefusesRequestNamingAdmin() {
+        stubManager(ownerId, "ADMIN");
+
+        UUID requesterUserId = UUID.randomUUID();
+        EventJoinRequest jr = new EventJoinRequest();
+        jr.setId(UUID.randomUUID());
+        jr.setTenantId(tenantId);
+        jr.setUserId(requesterUserId);
+        // Predates the check in requestToJoin() — the row is already in the table.
+        jr.setRequestedRole("ADMIN");
+        when(joinRequestRepo.findById(jr.getId())).thenReturn(Optional.of(jr));
+        when(memberRepo.findByTenantIdAndUserId(tenantId, requesterUserId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.approve(eventId, ownerId, jr.getId()))
+                .isInstanceOf(ValidationException.class);
+        // Refused, not downgraded: no membership is written at all.
+        verify(memberRepo, never()).save(any());
+    }
+
+    @Test
     void approveRejectsJoinRequestFromAnotherEvent() {
         stubManager(ownerId, "ADMIN");
 

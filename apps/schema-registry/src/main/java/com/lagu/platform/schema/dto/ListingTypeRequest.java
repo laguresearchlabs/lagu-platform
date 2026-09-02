@@ -27,6 +27,16 @@ public record ListingTypeRequest(
             int displayOrder,
             boolean collapsible,
             /** Conditional visibility rule; null = always visible. Validated on write. */
-            Map<String, Object> visibleWhen
+            Map<String, Object> visibleWhen,
+            /**
+             * Who this section is for: PUBLIC, GUEST or HOST. Null leaves the entity default
+             * (GUEST), which is what every section seeded before the column existed meant.
+             *
+             * <p>Distinct from {@link #visibleWhen}: that is a rule about the record's other
+             * values, this is a rule about the reader. It has been readable by consumers since
+             * the column was added, but writable by nobody — so the only way to mark a section
+             * PUBLIC was an UPDATE against the database, which is not a thing an admin can do.
+             */
+            String audience
     ) {}
 }

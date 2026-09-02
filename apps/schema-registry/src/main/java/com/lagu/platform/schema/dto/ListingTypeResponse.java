@@ -34,6 +34,10 @@ public record ListingTypeResponse(
             String label,
             int displayOrder,
             boolean collapsible,
-            FieldGroupResponse fieldGroup
+            FieldGroupResponse fieldGroup,
+            /** PUBLIC, GUEST or HOST — see ListingTypeRequest.SectionRequest.audience. */
+            String audience,
+            /** Conditional visibility rule, echoed so an editor can round-trip it. */
+            Map<String, Object> visibleWhen
     ) {}
 }

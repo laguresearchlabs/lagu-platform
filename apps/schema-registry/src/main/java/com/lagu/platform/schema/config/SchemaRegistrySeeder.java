@@ -355,6 +355,25 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         if (updated > 0) log.info("Split event_visibility into event_joining/event_settings on {} listing type(s)", updated);
     }
 
+    /**
+     * Backfills the audience on host-only sections, and <strong>only</strong> those.
+     *
+     * <p>This ran on every boot and wrote the full answer — HOST for the host-only keys, GUEST for
+     * everything else — which made it a reset rather than a backfill. Once an audience became
+     * something an admin could choose, that was a bug with teeth: marking a section PUBLIC so a
+     * share link could show it survived exactly until the next restart of this service, and then
+     * reverted with nothing in the log to say why.
+     *
+     * <p>So it now only ever narrows, and only from the column default. A section already carrying
+     * a deliberate audience — anything that is not the default GUEST — is left alone, because the
+     * seeder cannot tell a considered choice from an accident and the considered choice is the one
+     * worth keeping. Writing GUEST is dropped entirely: it is the column default, so it was never
+     * a migration, only an overwrite.
+     *
+     * <p>The one case this still overrides is a host-only section an admin deliberately widened
+     * back to GUEST, which is re-narrowed on the next boot. That is the safe direction to be wrong
+     * in, and marking it PUBLIC — a value this never writes — is the way to say you meant it.
+     */
     private void applySectionAudiences() {
         int updated = 0;
         // Sections have no repository of their own — they are owned by the listing type and
@@ -362,16 +381,15 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         for (ListingTypeDefinition def : listingTypeRepo.findAll()) {
             boolean dirty = false;
             for (ListingTypeSection sec : def.getSections()) {
-                String want = HOST_ONLY_SECTIONS.contains(sec.getSectionKey()) ? "HOST" : "GUEST";
-                if (!want.equals(sec.getAudience())) {
-                    sec.setAudience(want);
-                    dirty = true;
-                    updated++;
-                }
+                if (!HOST_ONLY_SECTIONS.contains(sec.getSectionKey())) continue;
+                if (!"GUEST".equals(sec.getAudience())) continue;
+                sec.setAudience("HOST");
+                dirty = true;
+                updated++;
             }
             if (dirty) listingTypeRepo.save(def);
         }
-        if (updated > 0) log.info("Set audience on {} listing type sections", updated);
+        if (updated > 0) log.info("Backfilled HOST audience on {} listing type sections", updated);
     }
 
     private void applyPromotedFlags() {

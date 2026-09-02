@@ -85,6 +85,24 @@ public class ListingTypeController {
         return ResponseEntity.ok(ApiResponse.ok(listingTypeService.addSection(name, req)));
     }
 
+    /**
+     * Edits one section in place, keyed by its section key rather than its id — the key is what
+     * every client already holds and what the schema is rendered by.
+     *
+     * <p>Added because {@code update} deliberately never touches sections, which left an existing
+     * section's audience reachable by nothing but a hand-written SQL UPDATE. That mattered once
+     * event-service began allow-listing share-preview data on {@code audience == PUBLIC}: the one
+     * switch deciding what a shared link may show was the one nobody could reach.
+     */
+    @PutMapping("/{name}/sections/{sectionKey}")
+    @RequirePermission(resource = "OBJECT_TYPE", action = "UPDATE")
+    public ResponseEntity<ApiResponse<ListingTypeResponse>> updateSection(
+            @PathVariable String name,
+            @PathVariable String sectionKey,
+            @Valid @RequestBody ListingTypeRequest.SectionRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok(listingTypeService.updateSection(name, sectionKey, req)));
+    }
+
     @PostMapping("/{name}/publish")
     @RequirePermission(resource = "OBJECT_TYPE", action = "UPDATE")
     public ResponseEntity<ApiResponse<SchemaVersionResponse>> publish(

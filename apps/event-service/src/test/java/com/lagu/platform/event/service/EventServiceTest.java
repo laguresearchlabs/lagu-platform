@@ -2,6 +2,7 @@ package com.lagu.platform.event.service;
 
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.event.client.RecordServiceClient;
+import com.lagu.platform.event.client.SchemaRegistryClient;
 import com.lagu.platform.event.domain.Event;
 import com.lagu.platform.event.domain.EventMember;
 import com.lagu.platform.event.domain.EventMemberRepository;
@@ -17,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,9 +38,10 @@ class EventServiceTest {
     private final EventRepository eventRepo = mock(EventRepository.class);
     private final EventMemberRepository memberRepo = mock(EventMemberRepository.class);
     private final RecordServiceClient recordClient = mock(RecordServiceClient.class);
+    private final SchemaRegistryClient schemaClient = mock(SchemaRegistryClient.class);
     private final EventShareLinkService shareLinkService = mock(EventShareLinkService.class);
     private final EventService service =
-            new EventService(eventRepo, memberRepo, recordClient, shareLinkService);
+            new EventService(eventRepo, memberRepo, recordClient, schemaClient, shareLinkService);
 
     private final UUID eventId = UUID.randomUUID();
     private final UUID recordId = UUID.randomUUID();
@@ -56,6 +59,8 @@ class EventServiceTest {
         when(eventRepo.findById(eventId)).thenReturn(Optional.of(event));
         // listMine() batch-loads its events rather than one findById per membership row.
         when(eventRepo.findAllById(any())).thenReturn(java.util.List.of(event));
+        // Where every listing type starts: no section marked PUBLIC, so no data is shareable.
+        when(schemaClient.publicFields(any())).thenReturn(new SchemaRegistryClient.PublicFields(Set.of(), null));
     }
 
     private EventMember memberWithRole(UUID userId, String role, String status) {
@@ -231,6 +236,59 @@ class EventServiceTest {
                 "visibility", "PRIVATE", "name", "Secret"))));
 
         assertThat(service.getSharePreview("private-token").getTitle()).isEqualTo("Secret");
+    }
+
+
+    @Test
+    void sharePreviewCarriesOnlyThePublicSectionsFields() {
+        // The allow-list is built from the schema and nothing else, so what a stranger holding a
+        // forwarded link can read is a decision an admin made in the Admin Portal — not one this
+        // service, or the shape of a record, made for them.
+        stubToken("live-token");
+        when(schemaClient.publicFields("BIRTHDAY_EVENT"))
+                .thenReturn(new SchemaRegistryClient.PublicFields(Set.of("name", "cake_preference"), 3));
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "name", "Aarav's 5th Birthday",
+                "cake_preference", "Chocolate truffle",
+                "total_budget", 250000,
+                "guest_phone_numbers", "…"))));
+
+        var preview = service.getSharePreview("live-token");
+
+        assertThat(preview.getData()).containsOnlyKeys("name", "cake_preference");
+        assertThat(preview.getSchemaVersion()).isEqualTo(3);
+    }
+
+    @Test
+    void sharePreviewCarriesNoDataWhenTheSchemaCannotBeResolved() {
+        // publicFields fails closed and hands back an empty set. The preview must degrade to the
+        // hand-picked card scalars rather than publishing the record: the opposite default would
+        // leak an entire event the first time a deploy raced a schema-registry restart.
+        stubToken("live-token");
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "name", "Aarav's 5th Birthday",
+                "total_budget", 250000))));
+
+        var preview = service.getSharePreview("live-token");
+
+        assertThat(preview.getData()).isEmpty();
+        assertThat(preview.getSchemaVersion()).isNull();
+        // The card a crawler needs still renders.
+        assertThat(preview.getTitle()).isEqualTo("Aarav's 5th Birthday");
+    }
+
+    @Test
+    void sharePreviewSkipsAPublicFieldTheRecordDoesNotCarry() {
+        // Walking the allowed keys rather than filtering the record's entries means a key the
+        // schema declares but the host never filled in is simply absent, not a null the client
+        // has to render around.
+        stubToken("live-token");
+        when(schemaClient.publicFields("BIRTHDAY_EVENT"))
+                .thenReturn(new SchemaRegistryClient.PublicFields(Set.of("name", "dresscode"), 1));
+        when(recordClient.getRecord(recordId, eventId))
+                .thenReturn(Map.of("data", Map.of("data", Map.of("name", "Aarav's 5th Birthday"))));
+
+        assertThat(service.getSharePreview("live-token").getData()).containsOnlyKeys("name");
     }
 
     /** Points a token at this test's event, the way the anonymous preview path resolves one. */

@@ -4,6 +4,7 @@ import com.lagu.platform.common.dto.PageResult;
 import com.lagu.platform.common.exception.ResourceNotFoundException;
 import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.event.client.RecordServiceClient;
+import com.lagu.platform.event.client.SchemaRegistryClient;
 import com.lagu.platform.event.domain.Event;
 import com.lagu.platform.event.domain.EventMember;
 import com.lagu.platform.event.domain.EventMemberRepository;
@@ -29,10 +30,12 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -48,6 +51,7 @@ public class EventService {
     private final EventRepository       eventRepo;
     private final EventMemberRepository memberRepo;
     private final RecordServiceClient   recordClient;
+    private final SchemaRegistryClient  schemaClient;
     private final EventShareLinkService shareLinkService;
 
     /**
@@ -136,13 +140,24 @@ public class EventService {
      * which 404s a token that is unknown, revoked, expired or used up — all four identically, so
      * a dead link cannot be used to confirm the event exists.
      *
-     * <p>The projection stays exactly as narrow as it was. It is a hand-picked subset rather than
-     * the schema-driven data map, so a field a listing type adds later stays private by default.
+     * <p>The scalars stay exactly as narrow as they were. What is new is {@code data}: the
+     * record's values filtered to the fields of sections the listing type marked
+     * {@code audience: PUBLIC}, so a share link can render the event as the invitation a member
+     * sees rather than as a title and a blurb.
+     *
+     * <p>The filter is an allow-list built from the schema and nothing else — never the record's
+     * own keys, and never a deny-list — so a field a type adds later is private until an admin
+     * puts it in a PUBLIC section. {@link SchemaRegistryClient#publicFields} fails closed, so a
+     * schema-registry that is down or slow costs this endpoint its {@code data} rather than
+     * publishing a host's budget to everyone holding a forwarded link.
      */
     public SharePreviewResponse getSharePreview(String token) {
         EventShareLink link = shareLinkService.resolve(token);
         Event event = requireEvent(link.getEventId());
         Map<String, Object> data = fetchData(event);
+
+        SchemaRegistryClient.PublicFields publicFields = schemaClient.publicFields(event.getObjectType());
+
         return SharePreviewResponse.builder()
                 .objectType(event.getObjectType())
                 .title(str(data.get("name")))
@@ -151,7 +166,27 @@ public class EventService {
                 .startDatetime(str(data.get("start_datetime")))
                 .city(str(data.get("city")))
                 .state(str(data.get("state")))
+                .data(publicSubset(data, publicFields.keys()))
+                .schemaVersion(publicFields.version())
                 .build();
+    }
+
+    /**
+     * The record, reduced to the keys the schema says are public.
+     *
+     * <p>Built by walking the allowed keys rather than by filtering the record's entries: the
+     * two produce the same map today, but only this direction stays correct if a record ever
+     * carries a key the schema has since dropped — an unmapped leftover is exactly the kind of
+     * value nobody has decided the audience of. See events-ui's recordAudit for the other half
+     * of that story.
+     */
+    private Map<String, Object> publicSubset(Map<String, Object> data, Set<String> allowed) {
+        Map<String, Object> subset = new LinkedHashMap<>();
+        for (String key : allowed) {
+            Object value = data.get(key);
+            if (value != null) subset.put(key, value);
+        }
+        return subset;
     }
 
     /** Schema-driven values arrive as loosely-typed JSON — anything non-textual is dropped
