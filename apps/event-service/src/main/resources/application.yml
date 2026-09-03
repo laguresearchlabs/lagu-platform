@@ -70,6 +70,16 @@ platform:
       port: ${CLAMAV_PORT:3310}
       timeout: 30s
 
+  outbox:
+    enabled: true
+    table: event_outbox
+
+  # Where a link in an email should point. Emails are read outside the app, so nothing in the
+  # request can supply this — an invitation to somebody with no account has no session to infer
+  # it from.
+  app:
+    base-url: ${APP_BASE_URL:http://localhost:3000}
+
   security:
     # GET /api/v1/events/share/{id} only — Open Graph crawlers rendering a share link's
     # preview card can't authenticate. The handler itself serves PUBLIC events only and

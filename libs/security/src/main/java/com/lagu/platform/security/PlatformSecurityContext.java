@@ -15,6 +15,8 @@ public class PlatformSecurityContext {
     private UUID        tenantId;
     private Set<String> roles;
     private String      userEmail;
+    /** Present only when the gateway resolved a phone claim marked verified on the caller's JWT. */
+    private String      userPhone;
 
     public boolean hasRole(String role) {
         return roles != null && roles.contains(role);

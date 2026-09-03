@@ -45,6 +45,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
     static final String HEADER_TENANT_ID           = "X-Tenant-Id";
     static final String HEADER_USER_ROLES       = "X-User-Roles";
     static final String HEADER_USER_EMAIL       = "X-User-Email";
+    static final String HEADER_USER_PHONE       = "X-User-Phone";
     static final String HEADER_GATEWAY_SECRET   = "X-Platform-Gateway-Secret";
     static final String HEADER_INTERNAL_SERVICE = "X-Internal-Service";
 
@@ -106,6 +107,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
                 .tenantId(tenantIdHeader != null ? UUID.fromString(tenantIdHeader) : null)
                 .roles(roles)
                 .userEmail(req.getHeader(HEADER_USER_EMAIL))
+                .userPhone(req.getHeader(HEADER_USER_PHONE))
                 .build();
     }
 

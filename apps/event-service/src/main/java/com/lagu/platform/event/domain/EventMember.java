@@ -61,6 +61,14 @@ public class EventMember implements MembershipRecord {
     @Column(name = "joined_via_share_link_id")
     private UUID joinedViaShareLinkId;
 
+    /**
+     * Which invitation this membership was claimed from, when it came from one — an invitation
+     * addressed to an email before the person had an account. Null for everyone else. Answers
+     * "did they come from the list I sent" long after the invitation itself is spent.
+     */
+    @Column(name = "joined_via_invitation_id")
+    private UUID joinedViaInvitationId;
+
     public boolean canManage() {
         return "ADMIN".equals(role) || "MAINTAINER".equals(role);
     }

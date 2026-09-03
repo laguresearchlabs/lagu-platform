@@ -121,6 +121,7 @@ class GatewayHeaderFilterTest {
         req.addHeader("X-Tenant-Id", TENANT);
         req.addHeader("X-User-Roles", "ORG_OWNER,USER");
         req.addHeader("X-User-Email", "someone@example.com");
+        req.addHeader("X-User-Phone", "+15551234567");
         req.addHeader("X-Platform-Gateway-Secret", SECRET);
 
         run(filter(), req);
@@ -130,6 +131,23 @@ class GatewayHeaderFilterTest {
         assertThat(seen.getTenantId()).isEqualTo(UUID.fromString(TENANT));
         assertThat(seen.getRoles()).containsExactlyInAnyOrder("ORG_OWNER", "USER");
         assertThat(seen.getUserEmail()).isEqualTo("someone@example.com");
+        assertThat(seen.getUserPhone()).isEqualTo("+15551234567");
+    }
+
+    /**
+     * The gateway only forwards X-User-Phone when the JWT's phone claim was verified — this just
+     * confirms the header is optional here too, mirroring email, rather than assuming presence.
+     */
+    @Test
+    void aRequestWithNoPhoneHeaderLeavesUserPhoneNull() throws Exception {
+        MockHttpServletRequest req = request();
+        req.addHeader("X-User-Id", USER);
+        req.addHeader("X-Platform-Gateway-Secret", SECRET);
+
+        run(filter(), req);
+
+        assertThat(seen).isNotNull();
+        assertThat(seen.getUserPhone()).isNull();
     }
 
     // ── privilege escalation in both directions ───────────────────────────────
