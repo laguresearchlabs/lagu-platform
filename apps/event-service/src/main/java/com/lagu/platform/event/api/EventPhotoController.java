@@ -37,13 +37,24 @@ public class EventPhotoController {
     private final EventPhotoService photoService;
     private final EventMembershipGuard membership;
 
-    /** Step 1 — a presigned PUT. Managers only: the album is curated, not a member free-for-all. */
+    /**
+     * Step 1 — a presigned PUT.
+     *
+     * <p>Any accepted member, not just a manager. The album used to be manager-only on the
+     * argument that it is curated — but the people at an event are the people holding the
+     * cameras, and a guest's photographs could only reach the event as a post, which put the
+     * pictures of the day in two places with two different permissions and no link between them.
+     * What a guest cannot do is choose where it lands: see confirm.
+     *
+     * <p>No row is created here, so an unfinished upload leaves only a pending object for the
+     * bucket lifecycle rule to sweep.
+     */
     @PostMapping("/upload-url")
     public ResponseEntity<ApiResponse<Map<String, Object>>> requestUploadUrl(
             @PathVariable UUID eventId,
             @Valid @RequestBody FileUploadUrlRequest request) {
         Event event = membership.requireEvent(eventId);
-        membership.requireManager(event, EventController.requireUserId());
+        membership.requireMember(event, EventController.requireUserId());
 
         PresignedUpload upload = photoService.requestUploadUrl(
                 eventId, request.getFileName(), request.getContentType(), request.getSizeBytes());
@@ -55,18 +66,24 @@ public class EventPhotoController {
                 "expiresAt", upload.expiresAt())));
     }
 
-    /** Step 3 — verify the uploaded object and add it to the album. */
+    /**
+     * Step 3 — verify the uploaded object and add it to the album.
+     *
+     * <p>The requested visibility is only honoured for a manager. A member's contribution is
+     * PUBLIC whatever they ask for, because PRIVATE is the host's own shelf — the same asymmetry
+     * the listing endpoint below already applies when reading.
+     */
     @PostMapping
     public ResponseEntity<ApiResponse<EventPhotoResponse>> confirm(
             @PathVariable UUID eventId,
             @Valid @RequestBody ConfirmEventPhotoRequest request) {
         Event event = membership.requireEvent(eventId);
         UUID userId = EventController.requireUserId();
-        membership.requireManager(event, userId);
+        boolean canManage = membership.requireMember(event, userId).canManage();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
                 photoService.confirmUpload(eventId, userId, request.getKey(),
-                        request.getVisibility(), request.getCaption())));
+                        request.getVisibility(), request.getCaption(), canManage)));
     }
 
     /**
@@ -88,12 +105,14 @@ public class EventPhotoController {
         return ResponseEntity.ok(ApiResponse.ok(photoService.list(eventId, effective)));
     }
 
+    /** The uploader's own, or a manager's anything — enforced in the service, as posts do. */
     @DeleteMapping("/{photoId}")
     public ResponseEntity<Void> delete(@PathVariable UUID eventId, @PathVariable UUID photoId) {
         Event event = membership.requireEvent(eventId);
-        membership.requireManager(event, EventController.requireUserId());
+        UUID userId = EventController.requireUserId();
+        boolean canManage = membership.requireMember(event, userId).canManage();
 
-        photoService.delete(eventId, photoId);
+        photoService.delete(eventId, photoId, userId, canManage);
         return ResponseEntity.noContent().build();
     }
 }

@@ -62,6 +62,21 @@ public class EventMemberService {
                 .map(this::toResponse).toList();
     }
 
+    /**
+     * One user's membership, or 404 if they have none.
+     *
+     * <p>No requester check: the controller restricts this to internal callers, and the caller's
+     * own authorization is the thing it is asking in order to perform. A REMOVED row counts as no
+     * membership — the same reading every other path here takes.
+     */
+    public EventMemberResponse membershipOf(UUID eventId, UUID userId) {
+        Event event = requireEvent(eventId);
+        return memberRepo.findByTenantIdAndUserId(event.getTenantId(), userId)
+                .filter(m -> !"REMOVED".equals(m.getStatus()))
+                .map(this::toResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("EventMember", userId.toString()));
+    }
+
     @Transactional
     public EventMemberResponse invite(UUID eventId, UUID requesterId, InviteMemberRequest req) {
         Event event = requireEvent(eventId);

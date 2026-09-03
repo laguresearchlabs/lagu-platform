@@ -14,8 +14,10 @@ import com.lagu.platform.storage.StorageProperties;
 import com.lagu.platform.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -65,10 +67,18 @@ public class EventPhotoService {
                 storageProperties.getUploadUrlTtl());
     }
 
-    /** Step 3 — verify the uploaded object and add it to the album. */
+    /**
+     * Step 3 — verify the uploaded object and add it to the album.
+     *
+     * @param canManage whether the uploader runs the event. A member who does not may still
+     *                  contribute — they are the people holding the cameras — but only to the
+     *                  album every member can see. PRIVATE is the host's own shelf, and letting a
+     *                  guest write to it by passing a string would make it a shelf anyone can
+     *                  reach into.
+     */
     @Transactional
     public EventPhotoResponse confirmUpload(UUID eventId, UUID uploaderId, String pendingKey,
-                                             String visibility, String caption) {
+                                             String visibility, String caption, boolean canManage) {
         // Keys are scoped to the event, so a member of one event cannot adopt another's object.
         if (!StorageKeys.isOwnedBy(pendingKey, storageProperties.getDomain(), eventId)) {
             throw new ValidationException("Key does not belong to event " + eventId);
@@ -89,7 +99,7 @@ public class EventPhotoService {
         photo.setStorageKey(ingested.key());
         photo.setCardKey(ingested.variantKeys().get(MediaIngest.CARD_VARIANT));
         photo.setFullKey(ingested.variantKeys().get(MediaIngest.FULL_VARIANT));
-        photo.setVisibility(normalizeVisibility(visibility));
+        photo.setVisibility(canManage ? normalizeVisibility(visibility) : EventPhoto.PUBLIC);
         photo.setCaption(caption);
         photo.setUploadedBy(uploaderId);
 
@@ -115,13 +125,21 @@ public class EventPhotoService {
     /**
      * Removes a photo and the object behind it.
      *
+     * <p>Whoever put it there, or whoever runs the event — the same rule posts use for their own
+     * author-or-manager delete. A member who can add a photo and never remove it has been handed
+     * a one-way door onto somebody else's album.
+     *
      * <p>Row first, object second: a failed storage delete leaves an orphan, which is recoverable,
      * where the other order would leave a row pointing at bytes that are already gone.
      */
     @Transactional
-    public void delete(UUID eventId, UUID photoId) {
+    public void delete(UUID eventId, UUID photoId, UUID requesterId, boolean canManage) {
         EventPhoto photo = repository.findByIdAndEventId(photoId, eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("EventPhoto", photoId.toString()));
+
+        if (!canManage && !requesterId.equals(photo.getUploadedBy())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the uploader or a manager may remove this photo");
+        }
 
         repository.delete(photo);
         deleteObjects(photo);

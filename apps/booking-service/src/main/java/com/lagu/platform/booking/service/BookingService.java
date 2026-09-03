@@ -1,5 +1,6 @@
 package com.lagu.platform.booking.service;
 
+import com.lagu.platform.booking.client.EventServiceClient;
 import com.lagu.platform.booking.client.ListingServiceClient;
 import com.lagu.platform.booking.client.SchemaRegistryClient;
 import com.lagu.platform.booking.domain.Booking;
@@ -47,6 +48,7 @@ public class BookingService {
 
     private final BookingRepository bookingRepo;
     private final ListingServiceClient listingClient;
+    private final EventServiceClient eventClient;
     private final SchemaRegistryClient schemaRegistryClient;
     private final BookingEventPublisher eventPublisher;
 
@@ -86,6 +88,34 @@ public class BookingService {
                 ? bookingRepo.findByConsumerUserIdAndEventIdOrderByCreatedAtDesc(consumerUserId, eventIdFilter)
                 : bookingRepo.findByConsumerUserIdOrderByCreatedAtDesc(consumerUserId);
         return bookings.stream().map(BookingResponse::from).toList();
+    }
+
+    /**
+     * Every inquiry raised for one event, whoever raised it.
+     *
+     * <p>The counterpart to {@link #listMine}, and the reason it exists: `/mine` filters by
+     * consumer, so two co-hosts planning one event each saw only their own inquiries and had no
+     * way to tell that the other had already asked the same caterer for a quote. The event's
+     * Vendors tab said as much out loud — "inquiries sent by other hosts aren't listed here" —
+     * which was honest about a hole rather than a design.
+     *
+     * <p>Authorised on the event's own membership ladder, which booking-service does not model:
+     * it asks event-service and enforces the answer here. A co-host or the organizer may read;
+     * anybody else, including a guest of that event, may not — a guest cannot raise an inquiry,
+     * so there is nothing here that is theirs.
+     */
+    public List<BookingResponse> listForEvent(UUID eventId, UUID requesterId) {
+        boolean canManage = eventClient.membershipOf(eventId, requesterId)
+                .map(EventServiceClient.Membership::canManage)
+                .orElse(false);
+
+        if (!canManage) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only a host of this event may list its inquiries");
+        }
+
+        return bookingRepo.findByEventIdOrderByCreatedAtDesc(eventId).stream()
+                .map(BookingResponse::from).toList();
     }
 
     public List<BookingResponse> listVendor(UUID vendorId) {

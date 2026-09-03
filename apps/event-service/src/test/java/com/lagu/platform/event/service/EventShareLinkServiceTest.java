@@ -137,11 +137,32 @@ class EventShareLinkServiceTest {
                 .isInstanceOf(ValidationException.class);
     }
 
+    /**
+     * A guest may bring a friend — the event URL they could paste instead 403s for anyone not
+     * already invited, so without this they had no way at all.
+     *
+     * <p>What they cannot mint is a door that opens itself. `autoAdmit` is forced false whatever
+     * they ask for, so the link files a join request and the host approves it.
+     */
     @Test
-    void refusesToMintForAGuest() {
+    void aGuestMintsAnApprovalOnlyLinkWhateverTheyAskFor() {
         stubMember(guestId, "INVITEE", "ACCEPTED");
-        assertThatThrownBy(() -> service.create(eventId, guestId, new CreateShareLinkRequest()))
-                .isInstanceOf(ResponseStatusException.class);
+        CreateShareLinkRequest req = new CreateShareLinkRequest();
+        req.setAutoAdmit(true);
+
+        service.create(eventId, guestId, req);
+
+        assertThat(captureSaved().isAutoAdmit()).isFalse();
+    }
+
+    @Test
+    void aManagerKeepsTheChoiceOfAutoAdmit() {
+        CreateShareLinkRequest req = new CreateShareLinkRequest();
+        req.setAutoAdmit(true);
+
+        service.create(eventId, hostId, req);
+
+        assertThat(captureSaved().isAutoAdmit()).isTrue();
     }
 
     // ── resolution: every dead link looks the same ───────────────────────────
@@ -333,10 +354,36 @@ class EventShareLinkServiceTest {
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
+    /** Your own door to close — but not anyone else's, and not the host's. */
     @Test
-    void refusesToRevokeForAGuest() {
+    void aGuestMayRevokeOnlyTheLinkTheyMinted() {
         stubMember(guestId, "INVITEE", "ACCEPTED");
-        assertThatThrownBy(() -> service.revoke(eventId, guestId, UUID.randomUUID(), false))
+
+        EventShareLink theirs = liveLink(false);
+        theirs.setCreatedBy(guestId);
+        when(linkRepo.findByIdAndEventId(theirs.getId(), eventId)).thenReturn(Optional.of(theirs));
+        service.revoke(eventId, guestId, theirs.getId(), false);
+        assertThat(theirs.isRevoked()).isTrue();
+
+        EventShareLink hosts = liveLink(true);
+        hosts.setCreatedBy(hostId);
+        when(linkRepo.findByIdAndEventId(hosts.getId(), eventId)).thenReturn(Optional.of(hosts));
+        assertThatThrownBy(() -> service.revoke(eventId, guestId, hosts.getId(), false))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    /**
+     * Closing a door is not the same as emptying the room, and emptying it is a host's act even
+     * when the door was a guest's — the people it admitted are the event's members, not theirs.
+     */
+    @Test
+    void aGuestCannotSweepOutTheMembersTheirLinkAdmitted() {
+        stubMember(guestId, "INVITEE", "ACCEPTED");
+        EventShareLink theirs = liveLink(false);
+        theirs.setCreatedBy(guestId);
+        when(linkRepo.findByIdAndEventId(theirs.getId(), eventId)).thenReturn(Optional.of(theirs));
+
+        assertThatThrownBy(() -> service.revoke(eventId, guestId, theirs.getId(), true))
                 .isInstanceOf(ResponseStatusException.class);
     }
 

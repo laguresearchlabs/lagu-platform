@@ -1,5 +1,6 @@
 package com.lagu.platform.booking.service;
 
+import com.lagu.platform.booking.client.EventServiceClient;
 import com.lagu.platform.booking.client.ListingServiceClient;
 import com.lagu.platform.booking.client.ListingServiceClient.ListingInfo;
 import com.lagu.platform.booking.client.SchemaRegistryClient;
@@ -19,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,11 +33,12 @@ class BookingServiceTest {
 
     private final BookingRepository bookingRepo = mock(BookingRepository.class);
     private final ListingServiceClient listingClient = mock(ListingServiceClient.class);
+    private final EventServiceClient eventClient = mock(EventServiceClient.class);
     private final SchemaRegistryClient schemaRegistryClient = mock(SchemaRegistryClient.class);
     private final BookingEventPublisher eventPublisher = mock(BookingEventPublisher.class);
 
     private final BookingService service = new BookingService(
-            bookingRepo, listingClient, schemaRegistryClient, eventPublisher);
+            bookingRepo, listingClient, eventClient, schemaRegistryClient, eventPublisher);
 
     private final UUID consumerUserId = UUID.randomUUID();
     private final UUID vendorId = UUID.randomUUID();
@@ -329,6 +332,59 @@ class BookingServiceTest {
 
         assertThatThrownBy(() -> service.cancel(bookingId, new CancelBookingRequest(null),
                 UUID.randomUUID(), UUID.randomUUID()))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    // ── listing an event's inquiries ─────────────────────────────────────────
+
+    /**
+     * `/mine` filters by consumer, so two co-hosts each saw only their own inquiries and could
+     * not tell that the other had already asked the same vendor. booking-service does not model
+     * event membership, so it asks event-service and enforces the answer here.
+     */
+    @Test
+    void aHostSeesEveryInquiryRaisedForTheirEvent() {
+        UUID eventId = UUID.randomUUID();
+        when(eventClient.membershipOf(eventId, consumerUserId))
+                .thenReturn(Optional.of(new EventServiceClient.Membership("MAINTAINER", "ACCEPTED")));
+        when(bookingRepo.findByEventIdOrderByCreatedAtDesc(eventId)).thenReturn(List.of());
+
+        assertThat(service.listForEvent(eventId, consumerUserId)).isEmpty();
+        verify(bookingRepo).findByEventIdOrderByCreatedAtDesc(eventId);
+    }
+
+    @Test
+    void aGuestOfThatEventIsRefused() {
+        UUID eventId = UUID.randomUUID();
+        when(eventClient.membershipOf(eventId, consumerUserId))
+                .thenReturn(Optional.of(new EventServiceClient.Membership("INVITEE", "ACCEPTED")));
+
+        assertThatThrownBy(() -> service.listForEvent(eventId, consumerUserId))
+                .isInstanceOf(ResponseStatusException.class);
+        verify(bookingRepo, never()).findByEventIdOrderByCreatedAtDesc(any());
+    }
+
+    /**
+     * An invitation is not a membership: someone who has been asked but has not accepted cannot
+     * read the event, so they certainly cannot read what it has ordered.
+     */
+    @Test
+    void anUnacceptedInvitationIsNotEnough() {
+        UUID eventId = UUID.randomUUID();
+        when(eventClient.membershipOf(eventId, consumerUserId))
+                .thenReturn(Optional.of(new EventServiceClient.Membership("MAINTAINER", "INVITED")));
+
+        assertThatThrownBy(() -> service.listForEvent(eventId, consumerUserId))
+                .isInstanceOf(ResponseStatusException.class);
+    }
+
+    /** Fails closed: an event-service outage must not become a way to read another host's list. */
+    @Test
+    void anUnreachableEventServiceRefusesRatherThanAllows() {
+        UUID eventId = UUID.randomUUID();
+        when(eventClient.membershipOf(eventId, consumerUserId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listForEvent(eventId, consumerUserId))
                 .isInstanceOf(ResponseStatusException.class);
     }
 }

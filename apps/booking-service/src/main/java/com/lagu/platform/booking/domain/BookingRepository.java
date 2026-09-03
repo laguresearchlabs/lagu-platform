@@ -11,6 +11,9 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     List<Booking> findByConsumerUserIdAndEventIdOrderByCreatedAtDesc(UUID consumerUserId, UUID eventId);
 
+    /** Every inquiry raised for one event, whoever raised it — see BookingService.listForEvent. */
+    List<Booking> findByEventIdOrderByCreatedAtDesc(UUID eventId);
+
     List<Booking> findByVendorIdOrderByCreatedAtDesc(UUID vendorId);
 
     /** The admin settlement queue — oldest event first, since that is what has been owed longest. */

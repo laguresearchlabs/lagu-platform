@@ -69,7 +69,7 @@ class EventPhotoServiceTest {
         String promoted = StorageKeys.promote(pending);
         stubIngest(pending, promoted + "__card");
 
-        var response = service.confirmUpload(eventId, uploaderId, pending, "PUBLIC", "Front lawn");
+        var response = service.confirmUpload(eventId, uploaderId, pending, "PUBLIC", "Front lawn", true);
 
         assertThat(response.getCaption()).isEqualTo("Front lawn");
         assertThat(response.getUrl()).startsWith("https://bucket/signed/");
@@ -86,7 +86,7 @@ class EventPhotoServiceTest {
     void rejectsAKeyBelongingToAnotherEvent() {
         String foreign = StorageKeys.buildPending("event", UUID.randomUUID(), "photo.jpg");
 
-        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, foreign, "PUBLIC", null))
+        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, foreign, "PUBLIC", null, true))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("does not belong to event");
         verifyNoInteractions(mediaIngest);
@@ -97,7 +97,7 @@ class EventPhotoServiceTest {
     void rejectsAKeyThatIsNotAwaitingConfirmation() {
         String durable = "event/" + eventId + "/abc_photo.jpg";
 
-        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, durable, "PUBLIC", null))
+        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, durable, "PUBLIC", null, true))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("awaiting confirmation");
     }
@@ -107,10 +107,10 @@ class EventPhotoServiceTest {
         String pending = pendingKey();
         stubIngest(pending, null);
 
-        assertThat(service.confirmUpload(eventId, uploaderId, pending, null, null).getVisibility())
+        assertThat(service.confirmUpload(eventId, uploaderId, pending, null, null, true).getVisibility())
                 .isEqualTo("PUBLIC");
 
-        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, pending, "SECRET", null))
+        assertThatThrownBy(() -> service.confirmUpload(eventId, uploaderId, pending, "SECRET", null, true))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("must be PUBLIC or PRIVATE");
     }
@@ -122,9 +122,64 @@ class EventPhotoServiceTest {
         String promoted = StorageKeys.promote(pending);
         stubIngest(pending, null);
 
-        var response = service.confirmUpload(eventId, uploaderId, pending, "PUBLIC", null);
+        var response = service.confirmUpload(eventId, uploaderId, pending, "PUBLIC", null, true);
 
         assertThat(response.getThumbnailUrl()).isEqualTo("https://bucket/signed/" + promoted);
+    }
+
+    /**
+     * The album is every member's now, not the manager's alone — the people at an event are the
+     * people holding the cameras, and a guest's photographs could otherwise only reach it as a
+     * post. What a member cannot do is choose where it lands.
+     */
+    @Test
+    void aMemberWhoCannotManageContributesToThePublicAlbumWhateverTheyAskFor() {
+        String pending = "event/" + eventId + "/pending/1_a.jpg";
+        String promoted = "event/" + eventId + "/1_a.jpg";
+        stubIngest(pending, promoted);
+
+        var response = service.confirmUpload(eventId, uploaderId, pending, "PRIVATE", null, false);
+
+        // PRIVATE is the host's own shelf. Asking for it as a guest does not reach it.
+        assertThat(response.getVisibility()).isEqualTo("PUBLIC");
+    }
+
+    @Test
+    void aManagerKeepsTheChoiceOfWhereAPhotoLands() {
+        String pending = "event/" + eventId + "/pending/1_a.jpg";
+        stubIngest(pending, "event/" + eventId + "/1_a.jpg");
+
+        assertThat(service.confirmUpload(eventId, uploaderId, pending, "PRIVATE", null, true)
+                .getVisibility()).isEqualTo("PRIVATE");
+    }
+
+    /** A member who can add a photo and never remove it has a one-way door onto the album. */
+    @Test
+    void theUploaderMayRemoveTheirOwnPhotoWithoutManagingTheEvent() {
+        EventPhoto photo = new EventPhoto();
+        photo.setId(UUID.randomUUID());
+        photo.setEventId(eventId);
+        photo.setStorageKey("event/" + eventId + "/1_a.jpg");
+        photo.setUploadedBy(uploaderId);
+        when(repository.findByIdAndEventId(photo.getId(), eventId)).thenReturn(Optional.of(photo));
+
+        service.delete(eventId, photo.getId(), uploaderId, false);
+
+        verify(repository).delete(photo);
+    }
+
+    @Test
+    void somebodyElsesPhotoIsNotAMembersToRemove() {
+        EventPhoto photo = new EventPhoto();
+        photo.setId(UUID.randomUUID());
+        photo.setEventId(eventId);
+        photo.setStorageKey("event/" + eventId + "/1_a.jpg");
+        photo.setUploadedBy(UUID.randomUUID());
+        when(repository.findByIdAndEventId(photo.getId(), eventId)).thenReturn(Optional.of(photo));
+
+        assertThatThrownBy(() -> service.delete(eventId, photo.getId(), uploaderId, false))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verify(repository, never()).delete(photo);
     }
 
     @Test
@@ -136,7 +191,7 @@ class EventPhotoServiceTest {
         photo.setCardKey("event/" + eventId + "/1_a__card.jpg");
         when(repository.findByIdAndEventId(photo.getId(), eventId)).thenReturn(Optional.of(photo));
 
-        service.delete(eventId, photo.getId());
+        service.delete(eventId, photo.getId(), uploaderId, true);
 
         verify(repository).delete(photo);
         verify(storage).delete("event/" + eventId + "/1_a.jpg");
@@ -159,7 +214,7 @@ class EventPhotoServiceTest {
         doThrow(new com.lagu.platform.storage.StorageException("bucket down"))
                 .when(storage).delete(anyString());
 
-        service.delete(eventId, photo.getId());   // must not throw
+        service.delete(eventId, photo.getId(), uploaderId, true);   // must not throw
 
         verify(repository).delete(photo);
     }

@@ -12,6 +12,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.lagu.platform.security.GatewayHeaderFilter;
+import com.lagu.platform.security.PlatformSecurityContext;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -25,6 +29,29 @@ public class EventMemberController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<EventMemberResponse>>> list(@PathVariable UUID eventId) {
         return ResponseEntity.ok(ApiResponse.ok(memberService.list(eventId, EventController.requireUserId())));
+    }
+
+    /**
+     * One user's standing on one event, for another service to authorise against.
+     *
+     * <p>booking-service is the first caller: a booking carries an `eventId`, but booking-service
+     * has no idea what an event membership is, so a co-host asking to see the event's inquiries
+     * could not be told apart from a stranger passing the same id. Rather than teach it the
+     * membership model, it asks this and enforces the answer itself — the same shape every other
+     * cross-service authorization here takes.
+     *
+     * <p>Internal callers only. It answers a question about a third party, which is exactly what
+     * a user-facing endpoint must not do: `GET /members` already exists for a member reading
+     * their own event, and it requires being in that event to call.
+     */
+    @GetMapping("/{targetUserId}/membership")
+    public ResponseEntity<ApiResponse<EventMemberResponse>> membership(@PathVariable UUID eventId,
+                                                                      @PathVariable UUID targetUserId) {
+        PlatformSecurityContext ctx = GatewayHeaderFilter.current();
+        if (ctx == null || !ctx.isInternalService()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Internal callers only");
+        }
+        return ResponseEntity.ok(ApiResponse.ok(memberService.membershipOf(eventId, targetUserId)));
     }
 
     @RequirePermission(resource = "EVENT_MEMBER", action = "CREATE")

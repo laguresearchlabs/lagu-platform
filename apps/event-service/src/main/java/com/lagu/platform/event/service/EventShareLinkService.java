@@ -65,10 +65,22 @@ public class EventShareLinkService {
 
     // ── host-facing ──────────────────────────────────────────────────────────
 
+    /**
+     * Mints a link.
+     *
+     * <p>Any member may, which is a widening: a guest who wants to bring a friend had no way to
+     * do it, and the event URL they could paste instead 403s for anybody not already invited.
+     *
+     * <p>What a guest cannot mint is an <em>auto-admitting</em> link. `autoAdmit` is forced false
+     * for a non-manager, so their link files a join request and the host approves it — the queue
+     * on the People tab already exists for exactly that. Letting a guest hand out a link that
+     * walks strangers straight into a private event would make every member an owner of the
+     * guest list.
+     */
     @Transactional
     public ShareLinkResponse create(UUID eventId, UUID requesterId, CreateShareLinkRequest req) {
         Event event = requireEvent(eventId);
-        requireManager(event, requesterId);
+        boolean canManage = requireMember(event, requesterId).canManage();
 
         Instant now = Instant.now();
         if (req.getExpiresAt() != null && !req.getExpiresAt().isAfter(now)) {
@@ -81,7 +93,7 @@ public class EventShareLinkService {
         link.setEventId(event.getId());
         link.setTokenHash(hash(token));
         link.setLabel(req.getLabel());
-        link.setAutoAdmit(req.getAutoAdmit() == null || req.getAutoAdmit());
+        link.setAutoAdmit(canManage && (req.getAutoAdmit() == null || req.getAutoAdmit()));
         link.setExpiresAt(req.getExpiresAt());
         link.setMaxUses(req.getMaxUses());
         link.setCreatedBy(requesterId);
@@ -97,11 +109,18 @@ public class EventShareLinkService {
         return response;
     }
 
+    /**
+     * A manager sees the event's links; anybody else sees only the ones they minted.
+     *
+     * <p>Not a filter for tidiness — the host's inventory of open doors is theirs, and a guest
+     * who can mint a link needs to see their own in order to revoke it.
+     */
     public List<ShareLinkResponse> list(UUID eventId, UUID requesterId) {
         Event event = requireEvent(eventId);
-        requireManager(event, requesterId);
+        boolean canManage = requireMember(event, requesterId).canManage();
         Instant now = Instant.now();
         return linkRepo.findByEventIdOrderByCreatedAtDesc(event.getId()).stream()
+                .filter(l -> canManage || requesterId.equals(l.getCreatedBy()))
                 .map(l -> toResponse(l, now))
                 .toList();
     }
@@ -117,10 +136,20 @@ public class EventShareLinkService {
     @Transactional
     public void revoke(UUID eventId, UUID requesterId, UUID linkId, boolean removeJoined) {
         Event event = requireEvent(eventId);
-        requireManager(event, requesterId);
+        boolean canManage = requireMember(event, requesterId).canManage();
 
         EventShareLink link = linkRepo.findByIdAndEventId(linkId, event.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("EventShareLink", linkId.toString()));
+
+        // Your own door to close, or any of them if you run the event.
+        if (!canManage && !requesterId.equals(link.getCreatedBy())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the link's creator or a manager may revoke it");
+        }
+        // Sweeping out the people a link admitted is a host's act even on a guest's link: the
+        // members it let in are the event's, not the inviter's.
+        if (removeJoined && !canManage) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ADMIN or MAINTAINER role required to remove joined members");
+        }
 
         if (!link.isRevoked()) {
             link.setRevokedAt(Instant.now());
@@ -301,12 +330,15 @@ public class EventShareLinkService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event", eventId.toString()));
     }
 
-    private void requireManager(Event event, UUID userId) {
-        EventMember member = memberRepo
+    /**
+     * Any member who has not been removed.
+     *
+     * <p>Minting is no longer a manager's alone — a guest may bring a friend. What differs is
+     * what the link can do: see {@link #create}.
+     */
+    private EventMember requireMember(Event event, UUID userId) {
+        return memberRepo
                 .findByTenantIdAndUserIdAndStatusNot(event.getTenantId(), userId, "REMOVED")
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event"));
-        if (!member.canManage()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "ADMIN or MAINTAINER role required");
-        }
     }
 }

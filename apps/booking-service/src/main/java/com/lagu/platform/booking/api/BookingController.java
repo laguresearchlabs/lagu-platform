@@ -43,6 +43,17 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.listMine(requireUserId(), eventId)));
     }
 
+    /**
+     * Every inquiry for one event — a host's view, as opposed to {@code /mine}'s consumer view.
+     *
+     * <p>Authorised on event membership, which this service asks event-service about; see
+     * BookingService.listForEvent.
+     */
+    @GetMapping("/event/{eventId}")
+    public ResponseEntity<ApiResponse<List<BookingResponse>>> listForEvent(@PathVariable UUID eventId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listForEvent(eventId, requireUserId())));
+    }
+
     /** Bookings against the caller's vendor org (X-Tenant-Id resolved by the gateway). */
     @GetMapping("/vendor")
     public ResponseEntity<ApiResponse<List<BookingResponse>>> listVendor() {
