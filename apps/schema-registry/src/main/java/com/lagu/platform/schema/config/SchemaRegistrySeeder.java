@@ -1150,45 +1150,67 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     // ── 11. Vendor categories (which suppliers an event type needs) ────────────
 
     /**
-     * Seeds each event type's {@code config.vendorCategories} from
-     * {@code resources/seed/vendor-categories.json}.
+     * Derives each event type's {@code config.vendorCategories} from its own relationship
+     * definitions.
      *
      * <p>It is the denominator behind an event's "still to find" list and its "1 of 5 booked"
-     * meter. A type declaring nothing falls back, client-side, to every listing type with a landing
-     * page — which is correct today only because every seeded vertical happens to suit a wedding,
-     * and becomes wrong the moment a sixth is published that does not. Declaring it pins the list
-     * instead of letting it widen with the marketplace.
+     * meter — events-ui reads it through {@code lib/schema-form/vendorCategories.ts}, and a type
+     * declaring nothing falls back client-side to every listing type with a landing page.
      *
-     * <p>Order is preserved, because it is the order the categories are offered in.
+     * <p><b>Derived rather than authored, and that is the whole point.</b> This first shipped as a
+     * hand-written {@code seed/vendor-categories.json}, which made the platform state the same
+     * fact twice: that a wedding involves a venue, a caterer and a photographer was already said
+     * by {@link #seedRelationshipDefinitions()} — EVENT_VENUE, EVENT_CATERERS, EVENT_PHOTOGRAPHERS
+     * and the rest — and nothing kept the two in step. Add a sixth vertical and its relationship,
+     * forget the JSON, and the checklist silently under-counts for as long as nobody notices.
+     * There is one list now, and adding a relationship is what grows it.
      *
-     * <p>Same shape as {@link #seedCardPresentation()} and for the same reasons: held as JSON
-     * because that is how it is stored and served, layered onto a type an earlier step created,
-     * and skipped for any type that already carries the key — so an admin's edit in the portal
-     * survives a restart.
+     * <p>Only LISTING-kind targets count: an event type also relates to its own social sub-objects
+     * (EVENT_POST and friends), and nobody is shopping for one of those.
+     *
+     * <p>An event type with no relationships at all — CORPORATE_EVENT, ANNIVERSARY_EVENT today —
+     * is deliberately left <em>absent</em> rather than written as an empty list. Empty means "this
+     * type has no vendor side" to the client and would show such an event no categories whatever;
+     * absent means "nothing declared", which falls back to offering all of them. Over-suggesting
+     * is a thing a host can ignore. Showing them nothing is not.
+     *
+     * <p>Order is the order the types themselves were seeded in, which is the same order the
+     * client's own fallback uses — so a curated list and an uncurated one read alike, and the
+     * venue leads either way.
+     *
+     * <p>Skipped for any type already carrying the key, so an admin's edit in the portal survives
+     * a restart — same rule as {@link #seedCardPresentation()}.
      */
-    @SuppressWarnings("unchecked")
     private void seedVendorCategories() {
-        Map<String, Map<String, Object>> byType;
-        try (InputStream in = new ClassPathResource("seed/vendor-categories.json").getInputStream()) {
-            byType = new ObjectMapper().readValue(in, new TypeReference<>() {});
-        } catch (Exception e) {
-            log.warn("Could not read seed/vendor-categories.json — event types will fall back to "
-                    + "every landing-capable vendor type: {}", e.getMessage());
-            return;
+        // The vendor-facing types, in their own seeded order. Used both to filter relationship
+        // targets down to things somebody could actually shop for, and to order the result.
+        List<String> listingTypeOrder = listingTypeRepo.findByTenantIdIsNullAndActiveTrue().stream()
+                .filter(t -> t.getKind() == ListingTypeKind.LISTING)
+                .map(ListingTypeDefinition::getName)
+                .toList();
+
+        Map<String, Set<String>> targetsByEventType = new LinkedHashMap<>();
+        for (RelationshipDefinition rel : relDefRepo.findAllPlatformLevel()) {
+            if (!rel.isActive()) continue;
+            if (!listingTypeOrder.contains(rel.getTargetListingType())) continue;
+            targetsByEventType
+                    .computeIfAbsent(rel.getSourceListingType(), k -> new HashSet<>())
+                    .add(rel.getTargetListingType());
         }
 
         int seeded = 0;
-        for (var entry : byType.entrySet()) {
-            // The file carries a leading `_comment` block; it names no listing type, so the
-            // lookup below simply finds nothing and it is skipped like any unknown key.
+        for (var entry : targetsByEventType.entrySet()) {
             var existing = listingTypeRepo.findByNameAndTenantIdIsNull(entry.getKey());
             if (existing.isEmpty()) continue;
 
             ListingTypeDefinition def = existing.get();
+            if (def.getKind() != ListingTypeKind.EVENT) continue;
             if (def.getConfig() != null && def.getConfig().containsKey("vendorCategories")) continue;
 
-            Object categories = entry.getValue().get("vendorCategories");
-            if (!(categories instanceof List<?> list) || list.isEmpty()) continue;
+            List<String> categories = listingTypeOrder.stream()
+                    .filter(entry.getValue()::contains)
+                    .toList();
+            if (categories.isEmpty()) continue;
 
             Map<String, Object> config = def.getConfig() == null
                     ? new LinkedHashMap<>() : new LinkedHashMap<>(def.getConfig());
@@ -1197,7 +1219,8 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
 
             listingTypeRepo.save(def);
             seeded++;
+            log.debug("Vendor categories for {}: {}", def.getName(), categories);
         }
-        if (seeded > 0) log.info("Seeded vendor categories for {} listing type(s)", seeded);
+        if (seeded > 0) log.info("Seeded vendor categories for {} event type(s)", seeded);
     }
 }
