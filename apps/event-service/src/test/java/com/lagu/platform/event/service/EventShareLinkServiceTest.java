@@ -119,8 +119,11 @@ class EventShareLinkServiceTest {
         String b = EventShareLinkService.newToken();
         assertThat(a).isNotEqualTo(b);
         // 160 bits base64url. A UUID would be 122 bits and, worse, would look like an id — the
-        // very thing this change stops the token from being.
-        assertThat(a).hasSize(27).doesNotContain("-");
+        // very thing this change stops the token from being. Assert the UUID *shape*, not the
+        // absence of a hyphen: '-' is in the base64url alphabet, so a plain doesNotContain("-")
+        // failed on roughly a third of runs.
+        assertThat(a).hasSize(27);
+        assertThat(a).doesNotMatch("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     }
 
     @Test
