@@ -93,6 +93,10 @@ public class IndexMappingBuilder {
                 // simply absent on an unreviewed listing rather than zero — see ListingEventConsumer.
                 props.put("ratingAverage",    Property.of(p -> p.double_(d -> d)));
                 props.put("reviewCount",      Property.of(p -> p.integer(i -> i)));
+                // Keyword, not date: these are matched by exact equality against one requested
+                // day, never ranged or bucketed, and a keyword term query is the cheapest way to
+                // ask "is this day in the list".
+                props.put("unavailableDates", Property.of(p -> p.keyword(k -> k)));
                 props.put("publishedAt",      Property.of(p -> p.date(d ->
                         d.format("strict_date_time||epoch_millis"))));
             }

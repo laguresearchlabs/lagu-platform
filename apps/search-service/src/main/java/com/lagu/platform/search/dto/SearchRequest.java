@@ -29,6 +29,20 @@ public class SearchRequest {
     private String query;
 
     /**
+     * Only listings that can take this day, as an ISO date.
+     *
+     * <p>Meaningful for consumer search, where availability is indexed. Harmless on an org-scoped
+     * search: the field is unmapped there, so the exclusion matches nothing and narrows nothing.
+     *
+     * <p>A field of its own rather than an entry in {@link #filters}, because the filter map
+     * expresses equality and ranges and this is a negation — "not among the days this listing has
+     * taken". Bending the map to carry a `not` would make every other filter's meaning less
+     * obvious to serve one case, and "available on" is a first-class thing to ask a marketplace
+     * anyway.
+     */
+    private String availableOn;
+
+    /**
      * Field filters. Values are either:
      * - A plain string/number for exact match
      * - A Map with "gte"/"lte"/"gt"/"lt" for range queries

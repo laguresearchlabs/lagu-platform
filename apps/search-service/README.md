@@ -34,6 +34,13 @@ directly.
   range-filter on them. `ratingAverage` is **absent** for an unreviewed listing rather than zero —
   a sort by rating would otherwise bury every new vendor beneath every reviewed one, and a card
   cannot tell "no reviews" from "terrible" once that distinction has been flattened into a number.
+- **Availability on consumer documents**: `unavailableDates` is the days a listing cannot take —
+  BOOKED or vendor-BLOCKED, from today to an 18-month horizon — indexed as keywords. A consumer
+  search may pass `availableOn`, which becomes a `must_not` term against that array. Sparse by
+  nature: a listing has an availability row only for a date somebody actually booked or blocked,
+  so most documents carry an empty list and match every date, which is correct. Written on **every**
+  publish rather than patched — the consumer writes whole documents, so a republish that omitted it
+  would silently free up every date the listing had taken.
 - **Index name validation**: org/objectType segments are validated against
   `^[a-zA-Z0-9_-]+$` before being concatenated into an index name — OpenSearch treats `,` as a
   multi-index separator and `*` as a wildcard, so an unvalidated segment could let a caller query

@@ -145,6 +145,15 @@ public class SearchService {
             bool.must(m -> m.matchAll(ma -> ma));
         }
 
+        // The days a listing has taken are indexed on it, so "free on the 14th" is the absence of
+        // that day rather than the presence of anything. A listing with no availability rows at
+        // all — most of them — matches every date, which is correct: nothing has been booked.
+        if (req.getAvailableOn() != null && !req.getAvailableOn().isBlank()) {
+            String day = req.getAvailableOn().trim();
+            bool.mustNot(m -> m.term(t -> t.field("unavailableDates")
+                    .value(v -> v.stringValue(day))));
+        }
+
         if (req.getFilters() != null) {
             for (Map.Entry<String, Object> entry : req.getFilters().entrySet()) {
                 String field = entry.getKey();

@@ -284,12 +284,38 @@ public class ListingSnapshotService {
             log.warn("Refusing to claim {} on {}: no listing snapshot for that record", recordId, date);
             return false;
         }
-        return availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef) > 0;
+        boolean claimed = availabilityRepo.claimSlot(recordId, tenantId, date, bookingRef) > 0;
+        if (claimed) republishAvailability(recordId);
+        return claimed;
     }
 
     /** Inverse of {@link #bookSlot}: only releases a slot this exact bookingRef claimed. */
     @Transactional
     public boolean releaseSlot(UUID recordId, LocalDate date, UUID bookingRef) {
-        return availabilityRepo.releaseBooked(recordId, date, bookingRef) > 0;
+        boolean released = availabilityRepo.releaseBooked(recordId, date, bookingRef) > 0;
+        if (released) republishAvailability(recordId);
+        return released;
+    }
+
+    /**
+     * Puts a listing back on the wire because the days it can take have changed.
+     *
+     * <p>Without this the marketplace keeps offering a hall for a date it took an hour ago: the
+     * consumer index is only ever written from a `ListingEvent`, and until now nothing published
+     * one when availability moved. Only for a live listing — an unpublished snapshot has nothing
+     * in the index to correct.
+     *
+     * <p>Best-effort against the claim itself, which has already committed. A booking must not
+     * fail because a search document is briefly stale; the next publish or reconcile catches it.
+     */
+    private void republishAvailability(UUID recordId) {
+        try {
+            snapshotRepo.findByRecordId(recordId)
+                    .filter(snap -> "PUBLISHED".equals(snap.getStatus()))
+                    .ifPresent(eventPublisher::publishPublished);
+        } catch (Exception e) {
+            log.warn("Could not republish {} after an availability change — the marketplace may "
+                    + "offer a taken date until the next publish: {}", recordId, e.getMessage());
+        }
     }
 }

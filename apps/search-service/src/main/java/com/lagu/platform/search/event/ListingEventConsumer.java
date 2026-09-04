@@ -74,6 +74,10 @@ public class ListingEventConsumer {
             doc.put("ratingAverage", event.getRatingAverage());
         }
         doc.put("reviewCount",      event.getReviewCount() != null ? event.getReviewCount() : 0);
+        // The days this listing cannot take. Written on every publish rather than patched, so an
+        // empty list genuinely means "free" — see ListingEvent.unavailableDates.
+        doc.put("unavailableDates", event.getUnavailableDates() != null
+                ? event.getUnavailableDates() : java.util.List.of());
         doc.put("publishedAt",      event.getPublishedAt() != null ? event.getPublishedAt().toString() : null);
         doc.put("updatedAt",        Instant.now().toString());
 

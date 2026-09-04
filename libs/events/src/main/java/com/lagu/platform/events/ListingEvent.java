@@ -43,6 +43,21 @@ public class ListingEvent implements PlatformEvent {
     /** How many verified reviews that average came from. */
     private Integer reviewCount;
 
+    /**
+     * The days this listing cannot take, as ISO dates — BOOKED or vendor-BLOCKED, from today
+     * forward.
+     *
+     * <p>Sparse on purpose: a listing has an availability row only for a date somebody has
+     * actually booked or blocked, so this is usually empty and never a 365-element calendar. That
+     * is what makes it cheap enough to carry on every listing document and to filter a marketplace
+     * by.
+     *
+     * <p>Always populated, never null-for-unchanged. search-service indexes a whole document
+     * rather than patching one, so a republish that left this off would silently free up every
+     * date the listing had taken.
+     */
+    private java.util.List<String> unavailableDates;
+
     private Instant publishedAt;
     private Instant occurredAt;
 }

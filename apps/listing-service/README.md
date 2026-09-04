@@ -240,3 +240,25 @@ marketplace on the strength of somebody leaving a review.
 `rating_average` is nullable and the check constraints keep the pair coherent: an average with
 nothing behind it, or a count with no average, is a bug in whatever wrote them rather than a state
 the marketplace should try to render.
+
+## Availability reaches the marketplace
+
+`listing_availability` has always modelled `AVAILABLE | BLOCKED | BOOKED` per date — a vendor
+blocking a day and a consumer booking one are the same fact to a shopper. What was missing is that
+search-service never heard about it, so the marketplace went on offering a hall for a date it had
+taken an hour ago.
+
+`ListingEventPublisher` now puts the unavailable days on every `ListingEvent`, and `bookSlot` /
+`releaseSlot` republish the snapshot so the change actually lands. Three rules worth keeping:
+
+- **The publisher computes the list itself**, rather than accepting it as an argument. search-service
+  indexes a whole document instead of patching one, so any publish that left the field off — a
+  rating push, a plain publish — would quietly mark every booked date free again. One code path,
+  no "unchanged" case to get wrong.
+- **`AVAILABLE` rows are not unavailability.** Releasing a booking leaves the row behind with that
+  status; treating its presence as "taken" would keep a cancelled date off the marketplace forever.
+- **Only from today, to an 18-month horizon.** Nobody searches for a venue for last Tuesday, and
+  carrying the history would grow the array without bound for a listing that sells well.
+
+The republish is best-effort: the slot claim has already committed, and a booking must not fail
+because a search document is briefly stale.
