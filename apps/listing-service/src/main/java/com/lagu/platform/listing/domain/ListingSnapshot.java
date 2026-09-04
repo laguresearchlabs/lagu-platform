@@ -41,6 +41,19 @@ public class ListingSnapshot {
     @Column(name = "search_boost", nullable = false, precision = 5, scale = 2)
     private BigDecimal searchBoost = BigDecimal.ONE;
 
+    /**
+     * The average of this listing's VERIFIED reviews, or null when it has none. Null rather than
+     * zero on purpose: "unrated" and "rated badly" are different claims and render differently.
+     * The reviews themselves live in booking-service; only the aggregate is here, because the
+     * snapshot is what becomes a ListingEvent and therefore what search-service indexes.
+     */
+    @Column(name = "rating_average", precision = 2, scale = 1)
+    private BigDecimal ratingAverage;
+
+    /** How many verified reviews the average was computed from. */
+    @Column(name = "review_count", nullable = false)
+    private int reviewCount = 0;
+
     @Column(name = "published_at", nullable = false)
     private Instant publishedAt = Instant.now();
 

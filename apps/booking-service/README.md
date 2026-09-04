@@ -52,6 +52,53 @@ driven by workflow-service. Two reasons, both in `V1__booking_schema.sql`:
 keeps them apart. Before it existed the number could only travel inside `inquiry_message`, where
 nothing could read it as a quantity.
 
+## Reviews — `/api/v1/reviews`
+
+Reviews live here, not in record-service where `EVENT_POST` and `EVENT_COMMENT` do, because the
+thing that makes a marketplace rating worth trusting is that the reviewer actually bought
+something — and whether they did is this service's own knowledge. A review as a record would have
+to ask across a service boundary for the one fact that matters about it.
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| POST | `/` | any signed-in user | Verified automatically if a COMPLETED booking backs it |
+| GET | `/listing/{id}` | **public** | A listing's reviews, newest first |
+| GET | `/listing/{id}/rating` | **public** | The aggregate behind a card's "4.8 (62)" |
+| GET | `/vendor` | vendor org | Everything said about the caller, for their reply queue |
+| POST | `/{id}/reply` | the vendor the review is *about* | Right of reply, editable |
+
+Three rules carry the weight, and each is enforced in a place that cannot be bypassed:
+
+- **Verification is decided, never claimed.** `CreateReviewRequest` carries no booking id at all.
+  The service looks for the author's own COMPLETED booking on that listing and links it. That makes
+  verified the default rather than something a consumer opts into by quoting an identifier they
+  have never seen, and removes a claim a client could get wrong or lie about. `verified` is then
+  **frozen**: a booking cancelled later does not retroactively un-verify a review that was true
+  when it was written.
+- **Only verified reviews move the average.** Unverified ones are shown — they are somebody's real
+  experience — but an opinion the platform cannot stand behind must not shift the figure a shopper
+  is trusting. `aggregateVerified` filters on the column, and the partial index backs it.
+- **One review per person per listing** (`uq_review_author_listing`). Without it a single account
+  can push a listing's average anywhere by writing the same opinion twenty times, which is the
+  cheapest possible attack on the one number a shopper relies on.
+
+`rating` comes back with a **null** average for a listing nothing verified has been said about.
+Null, not zero: "unrated" is a new vendor and "1.0" is a bad one, and a marketplace that conflates
+them buries everybody who has just joined. A real zero cannot occur — the rating floor is 1.
+
+### How a rating reaches a marketplace card
+
+booking-service owns the reviews; listing-service owns what the marketplace indexes. So a verified
+review triggers `POST /internal/listings/{id}/rating`, listing-service puts the two numbers on the
+snapshot and republishes, and search-service reindexes them onto the consumer document. That is the
+only route: without it a results grid would fetch a rating per tile, twenty round trips for one page.
+
+The push is **best-effort** — deliberately unlike the availability claims beside it, which are
+fail-loud. The review is already saved and durable by the time it runs; the aggregate is a derived
+read model, and losing one push costs a card showing a slightly stale average until the next review.
+Failing a consumer's review because a downstream service blipped would trade a real write for a
+cosmetic one.
+
 ## API — `/api/v1/bookings`
 
 | Method | Path | Who | Notes |

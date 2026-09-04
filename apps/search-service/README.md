@@ -29,6 +29,11 @@ directly.
   type. Sorts get `unmapped_type` so a field present in one index and absent from another does not
   fail the whole query. A wildcard matching no index returns an empty page, so it is safe on a cold
   platform; the `index_not_found_exception` catch is what covers the single-type path.
+- **Rating on consumer documents**: `ratingAverage` / `reviewCount` arrive on the `ListingEvent`
+  from listing-service's snapshot and are mapped numerically, so the marketplace can sort and
+  range-filter on them. `ratingAverage` is **absent** for an unreviewed listing rather than zero —
+  a sort by rating would otherwise bury every new vendor beneath every reviewed one, and a card
+  cannot tell "no reviews" from "terrible" once that distinction has been flattened into a number.
 - **Index name validation**: org/objectType segments are validated against
   `^[a-zA-Z0-9_-]+$` before being concatenated into an index name — OpenSearch treats `,` as a
   multi-index separator and `*` as a wildcard, so an unvalidated segment could let a caller query

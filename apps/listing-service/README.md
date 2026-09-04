@@ -219,3 +219,24 @@ This module appears to be a **partial migration** from the legacy `listing-servi
   module. (This matches the pattern seen in sibling services like `record-service`, which also
   only ships `application.yml` + `application-loc.yml` — so this may be a platform-wide
   convention rather than something specific to this migration.)
+
+## Review aggregate on the snapshot
+
+`rating_average` / `review_count` (V4) are what consumers scored this listing, and they live on the
+snapshot for one reason: the snapshot is what becomes a `ListingEvent` and therefore what
+search-service indexes. A rating that never reaches the snapshot cannot appear on a marketplace card
+without the results grid fetching one per tile.
+
+The reviews themselves are booking-service's — it is the only service that knows whether a reviewer
+actually bought anything. It hands the aggregate over through `POST /internal/listings/{id}/rating`,
+which is internal for the same reason the availability claims are: this writes a *vendor's* snapshot,
+and booking-service must do it under its own service identity rather than by impersonating the
+vendor's org. It is also why a consumer cannot post a rating straight onto a listing.
+
+`applyRating` republishes **only for a live listing**. An unpublished snapshot has nothing in the
+consumer index to correct, and pushing a `PUBLISHED` event for one would put it back on the
+marketplace on the strength of somebody leaving a review.
+
+`rating_average` is nullable and the check constraints keep the pair coherent: an average with
+nothing behind it, or a count with no average, is a bug in whatever wrote them rather than a state
+the marketplace should try to render.

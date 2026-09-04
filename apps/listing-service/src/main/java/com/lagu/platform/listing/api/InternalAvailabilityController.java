@@ -52,12 +52,32 @@ public class InternalAvailabilityController {
         return ResponseEntity.ok(ApiResponse.ok(new ReleaseResult(released)));
     }
 
+    /**
+     * Records a listing's review aggregate on behalf of booking-service, which owns the reviews.
+     *
+     * <p>Internal-only for the same reason the availability claims above are: this writes a
+     * vendor's own snapshot, and booking-service must do it under its own service identity rather
+     * than by impersonating the vendor's org. It is also the reason a consumer cannot post their
+     * own rating straight onto a listing.
+     */
+    @PostMapping("/{recordId}/rating")
+    public ResponseEntity<ApiResponse<RatingResult>> applyRating(
+            @PathVariable UUID recordId, @RequestBody RatingRequest req) {
+        requireInternalCaller();
+        boolean applied = snapshotService.applyRating(recordId, req.average(), req.reviewCount());
+        return ResponseEntity.ok(ApiResponse.ok(new RatingResult(applied)));
+    }
+
     private void requireInternalCaller() {
         PlatformSecurityContext ctx = GatewayHeaderFilter.current();
         if (ctx == null || !ctx.isInternalService()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Internal callers only");
         }
     }
+
+    /** `average` is null when nothing verified has been said — not zero. See ListingSnapshot. */
+    record RatingRequest(java.math.BigDecimal average, int reviewCount) {}
+    record RatingResult(boolean applied) {}
 
     record ClaimRequest(UUID bookingRef) {}
     record ClaimResult(boolean claimed) {}

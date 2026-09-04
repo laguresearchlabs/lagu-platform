@@ -37,6 +37,12 @@ public class ListingEvent implements PlatformEvent {
     /** Tier-derived ranking multiplier, applied at query time via function_score. */
     private Double searchBoost;
 
+    /** Average of the listing's verified reviews, or null when it has none — see ListingSnapshot. */
+    private Double ratingAverage;
+
+    /** How many verified reviews that average came from. */
+    private Integer reviewCount;
+
     private Instant publishedAt;
     private Instant occurredAt;
 }

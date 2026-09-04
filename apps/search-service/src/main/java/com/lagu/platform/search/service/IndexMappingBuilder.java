@@ -89,6 +89,10 @@ public class IndexMappingBuilder {
             if (consumer) {
                 props.put("searchBoost",      Property.of(p -> p.double_(d -> d)));
                 props.put("verificationTier", Property.of(p -> p.keyword(k -> k)));
+                // Numeric so the marketplace can sort and range-filter on them. `ratingAverage` is
+                // simply absent on an unreviewed listing rather than zero — see ListingEventConsumer.
+                props.put("ratingAverage",    Property.of(p -> p.double_(d -> d)));
+                props.put("reviewCount",      Property.of(p -> p.integer(i -> i)));
                 props.put("publishedAt",      Property.of(p -> p.date(d ->
                         d.format("strict_date_time||epoch_millis"))));
             }

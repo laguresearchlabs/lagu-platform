@@ -32,6 +32,9 @@ public class ListingEventPublisher {
                 .data(snap.getData())
                 .verificationTier(snap.getVerificationTier())
                 .searchBoost(snap.getSearchBoost() != null ? snap.getSearchBoost().doubleValue() : 1.0)
+                .ratingAverage(snap.getRatingAverage() != null
+                        ? snap.getRatingAverage().doubleValue() : null)
+                .reviewCount(snap.getReviewCount())
                 .publishedAt(snap.getPublishedAt())
                 .occurredAt(Instant.now())
                 .build());

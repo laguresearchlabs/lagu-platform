@@ -67,6 +67,13 @@ public class ListingEventConsumer {
         doc.put("data",             event.getData() != null ? event.getData() : Map.of());
         doc.put("verificationTier", event.getVerificationTier());
         doc.put("searchBoost",      event.getSearchBoost() != null ? event.getSearchBoost() : 1.0);
+        // Absent rather than zero for an unreviewed listing: a `sort by rating` would otherwise
+        // bury every new vendor beneath every reviewed one, and a card cannot tell "no reviews"
+        // from "terrible" once the distinction has been flattened into a number.
+        if (event.getRatingAverage() != null) {
+            doc.put("ratingAverage", event.getRatingAverage());
+        }
+        doc.put("reviewCount",      event.getReviewCount() != null ? event.getReviewCount() : 0);
         doc.put("publishedAt",      event.getPublishedAt() != null ? event.getPublishedAt().toString() : null);
         doc.put("updatedAt",        Instant.now().toString());
 

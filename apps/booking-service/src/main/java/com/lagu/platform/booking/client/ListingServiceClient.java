@@ -78,6 +78,35 @@ public class ListingServiceClient {
     }
 
     /**
+     * Hands a listing's review aggregate to listing-service, which puts it on the snapshot and
+     * republishes so search-service reindexes it. That is the only route a rating has onto a
+     * marketplace card: the alternative is the results grid fetching one per tile.
+     *
+     * <p><b>Best-effort, unlike the slot claims below.</b> A review is already saved and durable by
+     * the time this runs; the aggregate is a derived read model, and losing one push costs a card
+     * showing a slightly stale average until the next review or reconcile. Failing the consumer's
+     * review because a downstream service was briefly unavailable would trade a real write for a
+     * cosmetic one.
+     *
+     * @param average null when nothing verified has been said, which is not the same as zero
+     */
+    public void applyRating(UUID recordId, java.math.BigDecimal average, long reviewCount) {
+        try {
+            Map<String, Object> body = new java.util.HashMap<>();
+            body.put("average", average);          // HashMap, because Map.of rejects a null value
+            body.put("reviewCount", reviewCount);
+            restClient.post()
+                    .uri("/internal/listings/{recordId}/rating", recordId)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            log.warn("Could not push rating for listing {} — the card will show a stale average "
+                    + "until the next review: {}", recordId, e.getMessage());
+        }
+    }
+
+    /**
      * Inverse of {@link #bookSlot} — same fail-loud rationale: a Cancel of a CONFIRMED booking
      * must not silently report success while the vendor's slot stays wrongly marked BOOKED.
      */

@@ -234,6 +234,39 @@ public class ListingSnapshotService {
     }
 
     /**
+     * Records what consumers have said about a listing, and republishes it so the marketplace sees.
+     *
+     * <p>booking-service owns the reviews — it is the only service that knows whether a reviewer
+     * actually bought anything — and hands the aggregate here because the snapshot is what becomes
+     * a {@code ListingEvent} and therefore what search-service indexes. A rating that never
+     * reaches the snapshot cannot appear on a card without the results grid fetching it per tile,
+     * which is twenty round trips for one page.
+     *
+     * <p>Republished only for a live listing: an unpublished snapshot has nothing in the consumer
+     * index to correct, and pushing a PUBLISHED event for one would put it back on the marketplace
+     * on the strength of somebody leaving a review.
+     *
+     * @param average null when nothing verified has been said, which is distinct from a low score
+     * @return false when there is no snapshot to update, so the caller can tell "no such listing"
+     *     from "nothing to do"
+     */
+    @Transactional
+    public boolean applyRating(UUID recordId, BigDecimal average, int reviewCount) {
+        var found = snapshotRepo.findByRecordId(recordId);
+        if (found.isEmpty()) return false;
+
+        ListingSnapshot snap = found.get();
+        snap.setRatingAverage(average);
+        snap.setReviewCount(reviewCount);
+        ListingSnapshot saved = snapshotRepo.save(snap);
+
+        if ("PUBLISHED".equals(saved.getStatus())) {
+            eventPublisher.publishPublished(saved);
+        }
+        return true;
+    }
+
+    /**
      * Claims one day for a booking. True if this call took the day, false if it was already
      * BOOKED or the vendor had BLOCKED it.
      *
