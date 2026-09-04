@@ -23,6 +23,12 @@ directly.
   cross-org index per objectType for published marketplace listings
   (`platform-consumer-<objectType>`, `IndexMappingBuilder.consumerIndexName`). The
   `opensearch.index-prefix` property controls the `platform` prefix (default `platform`).
+- **Cross-type consumer search**: a blank `objectType` on `/consumer` searches
+  `platform-consumer-*` rather than one index. `objectType` never appears in the query body — it
+  only ever selected the index — so this changes nothing else, and each hit still carries its own
+  type. Sorts get `unmapped_type` so a field present in one index and absent from another does not
+  fail the whole query. A wildcard matching no index returns an empty page, so it is safe on a cold
+  platform; the `index_not_found_exception` catch is what covers the single-type path.
 - **Index name validation**: org/objectType segments are validated against
   `^[a-zA-Z0-9_-]+$` before being concatenated into an index name — OpenSearch treats `,` as a
   multi-index separator and `*` as a wildcard, so an unvalidated segment could let a caller query
@@ -65,8 +71,8 @@ this module.
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
-| `POST` | `/api/v1/search` | Full-text query + filters + sort + facets over the caller's org's index for a given `objectType` (`SearchRequest.objectType` is required). Requires `RECORD:READ` permission. Org is taken from the gateway-supplied `X-Tenant-Id`. | `@RequirePermission(resource="RECORD", action="READ")` |
-| `POST` | `/api/v1/search/consumer` | Public marketplace search across all vendors' `PUBLISHED` listings for an `objectType`, tier-boosted by `searchBoost`. | Public (listed in `platform.security.public-paths`) |
+| `POST` | `/api/v1/search` | Full-text query + filters + sort + facets over the caller's org's index for a given `objectType` (required — enforced in `SearchService.search`, not by a DTO annotation, since the same shape serves consumer search where it is optional). Requires `RECORD:READ` permission. Org is taken from the gateway-supplied `X-Tenant-Id`. | `@RequirePermission(resource="RECORD", action="READ")` |
+| `POST` | `/api/v1/search/consumer` | Public marketplace search across all vendors' `PUBLISHED` listings, tier-boosted by `searchBoost`. `objectType` is **optional** here: omit it to search every published listing type at once (`platform-consumer-*`). | Public (listed in `platform.security.public-paths`) |
 | `GET` | `/api/v1/search/suggest?objectType=&field=&prefix=` | Typeahead: prefix-filter + terms aggregation on `field`, returns up to 10 distinct values, for the caller's org. Requires `RECORD:READ`. | `@RequirePermission(resource="RECORD", action="READ")` |
 | `POST` | `/admin/reindex/{objectType}` | Kicks off an async full reindex of every record of `objectType` for the caller's org by paginating `record-service`. Returns `202 Accepted` immediately with `{status, objectType, tenantId}`. | `@RequirePermission(resource="*", action="UPDATE")` |
 

@@ -45,6 +45,19 @@ public class IndexMappingBuilder {
         return indexPrefix + "-consumer-" + objectType.toLowerCase();
     }
 
+    /**
+     * Every consumer index at once — one listing type per index, so the marketplace's own
+     * "search everything" is a wildcard over them.
+     *
+     * <p>The wildcard is a literal suffix on a prefix this service owns, never anything a caller
+     * supplied: {@link #validateSegment} exists because an objectType arriving from outside could
+     * otherwise smuggle its own pattern into an index name, and that argument does not stop
+     * applying just because this method takes no argument.
+     */
+    public String consumerIndexPattern() {
+        return indexPrefix + "-consumer-*";
+    }
+
     private void validateSegment(String label, String value) {
         if (value == null || !SAFE_INDEX_SEGMENT.matcher(value).matches()) {
             throw new ValidationException("Invalid " + label + ": " + value);
