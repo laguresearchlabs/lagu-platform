@@ -76,6 +76,25 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.complete(id, currentUserId(), currentTenantId())));
     }
 
+    /**
+     * Sends a shortlisted booking — the first moment the vendor learns of it. Separate from
+     * create because that is where the notification happens; see BookingStatus.SHORTLISTED.
+     */
+    @PostMapping("/{id}/inquire")
+    public ResponseEntity<ApiResponse<BookingResponse>> inquire(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.inquire(id, requireUserId())));
+    }
+
+    /**
+     * Removes a shortlisted listing. A delete rather than a cancel: nothing was ever sent, so
+     * there is no exchange to record having ended and no vendor to tell.
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> removeShortlisted(@PathVariable UUID id) {
+        bookingService.removeShortlisted(id, requireUserId());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<BookingResponse>> cancel(@PathVariable UUID id,
                                                                 @RequestBody(required = false) CancelBookingRequest req) {

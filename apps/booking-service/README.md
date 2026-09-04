@@ -13,10 +13,28 @@ calendar. Implemented, built, routed through the gateway and deployed.
 ## State machine
 
 ```
-INQUIRY ──quote──> QUOTED ──confirm──> CONFIRMED ──complete──> COMPLETED
-   │                  │                    │
-   └──────────────────┴────────────────────┴──cancel──> CANCELLED
+SHORTLISTED ──inquire──┐
+   │                   ▼
+ (delete)          INQUIRY ──quote──> QUOTED ──confirm──> CONFIRMED ──complete──> COMPLETED
+                      │                  │                    │
+                      └──────────────────┴────────────────────┴──cancel──> CANCELLED
 ```
+
+`SHORTLISTED` is a booking that has **not been sent**: the consumer is comparing listings and the
+vendor has not been told. Choosing a venue is a compare-three-then-decide task, and making it a
+status costs no new store while putting the candidates on the event's own Vendors tab beside the
+real inquiries.
+
+**The vendor must never learn of one**, and three things enforce it — change any of them and the
+guarantee goes:
+
+- `create` stages **nothing** in the outbox when `shortlist` is set, so automation-service has
+  nothing to notify on. `inquire` is the transition that publishes `INQUIRED`.
+- `listVendor` queries `findByVendorIdAndStatusNotOrderByCreatedAtDesc(..., SHORTLISTED)` — excluded
+  at the query, not filtered after.
+- Removing one is `DELETE`, not `cancel`. Cancelling would stage a `CANCELLED` event for a
+  conversation that never happened and leave a tombstone recording that somebody was considered and
+  dropped. `cancel` therefore refuses `SHORTLISTED`, and `DELETE` refuses everything else.
 
 Deliberately booking-service's own small, fixed state machine rather than a record-service Record
 driven by workflow-service. Two reasons, both in `V1__booking_schema.sql`:
@@ -29,11 +47,18 @@ driven by workflow-service. Two reasons, both in `V1__booking_schema.sql`:
 
 `complete` is additionally refused before the event date (409 `EVENT_NOT_YET_OCCURRED`).
 
+`guest_count` (V4) is how many people the event expects, and is nullable on purpose: null means
+*not stated*, which is not zero — a vendor reading 0 covers would quote nothing. A check constraint
+keeps them apart. Before it existed the number could only travel inside `inquiry_message`, where
+nothing could read it as a quantity.
+
 ## API — `/api/v1/bookings`
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| POST | `/` | consumer | Listing must be `PUBLISHED`, else 409 `LISTING_NOT_BOOKABLE` |
+| POST | `/` | consumer | Listing must be `PUBLISHED`, else 409 `LISTING_NOT_BOOKABLE`. `shortlist: true` creates it `SHORTLISTED` and notifies nobody |
+| POST | `/{id}/inquire` | consumer only | From `SHORTLISTED` only — the first moment the vendor hears of it |
+| DELETE | `/{id}` | consumer only | `SHORTLISTED` only; anything else must be cancelled |
 | GET | `/{id}` | either party | |
 | GET | `/mine` | consumer | Optional `?eventId=` filter |
 | GET | `/vendor` | vendor org | Scoped by `X-Tenant-Id`; 403 without one |

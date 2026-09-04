@@ -2,7 +2,6 @@ package com.lagu.platform.search.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -12,7 +11,18 @@ import java.util.Map;
 @Data
 public class SearchRequest {
 
-    @NotBlank
+    /**
+     * Which listing type to search.
+     *
+     * <p>Required for org-scoped search, where it selects the org's index — {@code SearchService
+     * .search} rejects a blank one, because there is no such thing as "every index in this org"
+     * that a caller should get by accident.
+     *
+     * <p><b>Optional for consumer search</b>, where blank means every published listing type at
+     * once. That is the difference between a marketplace with a search box and one where a
+     * shopper must first decide whether the thing they want is a venue or a caterer — a question
+     * they often cannot answer, and never before typing.
+     */
     private String objectType;
 
     /** Full-text query string; null = match all. */

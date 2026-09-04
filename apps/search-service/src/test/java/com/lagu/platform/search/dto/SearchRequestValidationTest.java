@@ -40,6 +40,18 @@ class SearchRequestValidationTest {
         assertThat(validator.validate(baseRequest())).isEmpty();
     }
 
+    /**
+     * objectType lost its @NotBlank so that consumer search can mean "every published listing
+     * type" — see ConsumerSearchScopeTest. The rule did not disappear, it moved: SearchService
+     * .search rejects a blank one on the org-scoped path, where it selects the org's index.
+     */
+    @Test
+    void aRequestWithNoObjectTypeIsValidHere() {
+        SearchRequest req = new SearchRequest();
+
+        assertThat(validator.validate(req)).isEmpty();
+    }
+
     @Test
     void rejectsSizeAboveCap() {
         SearchRequest req = baseRequest();

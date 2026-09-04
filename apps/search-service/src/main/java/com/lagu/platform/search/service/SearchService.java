@@ -1,5 +1,6 @@
 package com.lagu.platform.search.service;
 
+import com.lagu.platform.common.exception.ValidationException;
 import com.lagu.platform.search.dto.SearchRequest;
 import com.lagu.platform.search.dto.SearchResponse;
 import com.lagu.platform.search.dto.SortCriteria;
@@ -7,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.opensearch.client.opensearch._types.FieldSort;
+import org.opensearch.client.opensearch._types.mapping.FieldType;
 import org.opensearch.client.opensearch._types.SortOptions;
 import org.opensearch.client.opensearch._types.SortOrder;
 import org.opensearch.client.opensearch._types.aggregations.Aggregation;
@@ -28,7 +30,19 @@ public class SearchService {
     private final OpenSearchClient    osClient;
     private final IndexMappingBuilder mappingBuilder;
 
+    /**
+     * Org-scoped search of one object type.
+     *
+     * <p>The objectType is checked here rather than by a bean-validation annotation on the DTO:
+     * the same request shape serves consumer search, where a blank type deliberately means "every
+     * published listing type". Leaving @NotBlank on the field would have made the marketplace's
+     * own search box impossible to express; dropping it without this guard would have let an
+     * org-scoped caller reach {@code indexName(tenant, null)} and get whatever that produced.
+     */
     public SearchResponse search(SearchRequest req, String tenantId) throws IOException {
+        if (req.getObjectType() == null || req.getObjectType().isBlank()) {
+            throw new ValidationException("objectType is required for org-scoped search");
+        }
         String index = mappingBuilder.indexName(tenantId, req.getObjectType());
         return execute(index, buildQuery(req, tenantId), req);
     }
@@ -37,9 +51,17 @@ public class SearchService {
      * Cross-org marketplace search over published listing snapshots. The consumer index only
      * ever contains PUBLISHED snapshots (visibility decided at publish time), so no org or
      * status filter applies; relevance is multiplied by the tier-derived {@code searchBoost}.
+     *
+     * <p>A blank objectType searches every published listing type at once. There is one index per
+     * type, so that is a wildcard across them and nothing else changes: the query body never
+     * mentioned objectType — it only ever picked the index — and every hit still carries its own
+     * type, so a mixed result set stays sortable into categories by the caller.
      */
     public SearchResponse searchConsumer(SearchRequest req) throws IOException {
-        String index = mappingBuilder.consumerIndexName(req.getObjectType());
+        boolean everyType = req.getObjectType() == null || req.getObjectType().isBlank();
+        String index = everyType
+                ? mappingBuilder.consumerIndexPattern()
+                : mappingBuilder.consumerIndexName(req.getObjectType());
 
         Query boosted = Query.of(q -> q.functionScore(fs -> fs
                 .query(buildQuery(req, null))
@@ -51,7 +73,9 @@ public class SearchService {
             return execute(index, boosted, req);
         } catch (org.opensearch.client.opensearch._types.OpenSearchException e) {
             // No listing of this type has ever been published → the index doesn't exist yet.
-            // An empty result page is the correct answer, not a 500.
+            // An empty result page is the correct answer, not a 500. A wildcard over zero indices
+            // resolves to an empty result rather than this error, so it is the single-type path
+            // that needs it — which is also why the wildcard is safe on a cold platform.
             if ("index_not_found_exception".equals(e.error().type())) {
                 return SearchResponse.builder()
                         .total(0).page(req.getPage()).size(req.getSize())
@@ -74,7 +98,14 @@ public class SearchService {
         if (req.getSort() != null) {
             for (SortCriteria s : req.getSort()) {
                 SortOrder order = "desc".equalsIgnoreCase(s.getOrder()) ? SortOrder.Desc : SortOrder.Asc;
-                searchBuilder.sort(SortOptions.of(so -> so.field(FieldSort.of(f -> f.field(s.getField()).order(order)))));
+                // `unmappedType` is what makes sorting survive a search that spans indices: sort a
+                // mixed marketplace page by `data.price` and the photographers' index has no such
+                // field, which without this fails the entire query rather than the one index.
+                // Documents missing the field sort last instead.
+                searchBuilder.sort(SortOptions.of(so -> so.field(FieldSort.of(f -> f
+                        .field(s.getField())
+                        .order(order)
+                        .unmappedType(FieldType.Keyword)))));
             }
         }
 
