@@ -48,6 +48,14 @@ platform:
   outbox:
     enabled: true
     table: booking_outbox
+  security:
+    # A listing's reviews and its rating are read by people who have not booked anything and are
+    # usually not signed in — a shopper comparing three venues before creating an account. Without
+    # this they 401, which is the one audience they exist for.
+    #
+    # Prefix match, and deliberately narrow: `/api/v1/reviews` itself stays authenticated, so
+    # writing a review still needs an identity. Only the two reads under `/listing` are open.
+    public-paths: /api/v1/reviews/listing
 
 management:
   endpoints.web.exposure.include: health,info,prometheus

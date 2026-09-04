@@ -82,6 +82,12 @@ Three rules carry the weight, and each is enforced in a place that cannot be byp
   can push a listing's average anywhere by writing the same opinion twenty times, which is the
   cheapest possible attack on the one number a shopper relies on.
 
+The two **public** reads are declared in `application.yml` as
+`platform.security.public-paths: /api/v1/reviews/listing`, and the narrowness is the point: a
+shopper comparing three venues has usually not signed in yet, so those reads must work without an
+identity — while `/api/v1/reviews` itself stays authenticated, so *writing* one still needs one.
+Removing that line does not break a test; it 401s the one audience the endpoints exist for.
+
 `rating` comes back with a **null** average for a listing nothing verified has been said about.
 Null, not zero: "unrated" is a new vendor and "1.0" is a bad one, and a marketplace that conflates
 them buries everybody who has just joined. A real zero cannot occur — the rating floor is 1.
