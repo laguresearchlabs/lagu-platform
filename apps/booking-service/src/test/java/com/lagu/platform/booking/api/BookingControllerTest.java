@@ -53,7 +53,7 @@ class BookingControllerTest {
     @Test
     void createRequiresAuthentication() {
         asCaller(null);
-        CreateBookingRequest req = new CreateBookingRequest(UUID.randomUUID(), LocalDate.now().plusDays(1), null, null);
+        CreateBookingRequest req = new CreateBookingRequest(UUID.randomUUID(), LocalDate.now().plusDays(1), null, null, null, null);
 
         assertThatThrownBy(() -> controller.create(req)).isInstanceOf(ResponseStatusException.class);
     }
@@ -62,7 +62,7 @@ class BookingControllerTest {
     void createSucceedsForAuthenticatedConsumer() {
         UUID userId = UUID.randomUUID();
         asCaller(consumerCtx(userId));
-        CreateBookingRequest req = new CreateBookingRequest(UUID.randomUUID(), LocalDate.now().plusDays(1), null, null);
+        CreateBookingRequest req = new CreateBookingRequest(UUID.randomUUID(), LocalDate.now().plusDays(1), null, null, null, null);
         when(bookingService.create(req, userId)).thenReturn(sampleResponse());
 
         var resp = controller.create(req);

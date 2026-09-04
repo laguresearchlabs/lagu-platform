@@ -67,13 +67,24 @@ public class BookingService {
         booking.setListingRecordId(req.listingRecordId());
         booking.setEventId(req.eventId());
         booking.setEventDate(req.eventDate());
+        booking.setGuestCount(req.guestCount());
         booking.setInquiryMessage(req.inquiryMessage());
-        booking.setStatus(BookingStatus.INQUIRY);
+
+        boolean shortlisting = Boolean.TRUE.equals(req.shortlist());
+        booking.setStatus(shortlisting ? BookingStatus.SHORTLISTED : BookingStatus.INQUIRY);
 
         Booking saved = bookingRepo.save(booking);
-        eventPublisher.publish(saved, "INQUIRED", null, consumerUserId);
-        log.info("Booking {} inquired: consumer={} listing={} date={}",
-                saved.getId(), consumerUserId, req.listingRecordId(), req.eventDate());
+
+        // Nothing is staged for a shortlist. The outbox is what automation-service turns into a
+        // vendor notification, so publishing here would tell a vendor they had been asked about a
+        // date by someone who has only bookmarked them — see BookingStatus.SHORTLISTED.
+        if (!shortlisting) {
+            eventPublisher.publish(saved, "INQUIRED", null, consumerUserId);
+        }
+
+        log.info("Booking {} {}: consumer={} listing={} date={} guests={}",
+                saved.getId(), shortlisting ? "shortlisted" : "inquired", consumerUserId,
+                req.listingRecordId(), req.eventDate(), req.guestCount());
         return BookingResponse.from(saved);
     }
 
@@ -118,12 +129,68 @@ public class BookingService {
                 .map(BookingResponse::from).toList();
     }
 
+    /**
+     * Sends a shortlisted booking, which is the first moment the vendor learns of it.
+     *
+     * <p>Separate from {@link #create} rather than a status argument on it: this is the point the
+     * outbox event is staged and a notification goes out, and that transition deserves its own
+     * name and its own authorisation check rather than being a branch inside a constructor.
+     */
+    @Transactional
+    public BookingResponse inquire(UUID bookingId, UUID actingUserId) {
+        Booking booking = requireBooking(bookingId);
+        // The consumer's own, and only theirs: a vendor cannot promote a shortlist they cannot
+        // see, and a co-host acts through their own consumer identity like anyone else.
+        if (!booking.getConsumerUserId().equals(actingUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only the person who saved this listing may send the inquiry");
+        }
+        requireStatus(booking, BookingStatus.SHORTLISTED);
+
+        String previousStatus = booking.getStatus().name();
+        booking.setStatus(BookingStatus.INQUIRY);
+
+        Booking saved = bookingRepo.save(booking);
+        eventPublisher.publish(saved, "INQUIRED", previousStatus, actingUserId);
+        log.info("Booking {} sent from shortlist: consumer={}", saved.getId(), actingUserId);
+        return BookingResponse.from(saved);
+    }
+
+    /**
+     * Removes a shortlisted booking outright.
+     *
+     * <p>A delete rather than a cancel, deliberately. Cancelling would stage a CANCELLED event for
+     * a conversation that never happened, and would leave a tombstone in the event's "completed or
+     * cancelled" list recording that somebody was considered and dropped — which is noise on the
+     * host's own page and, worse, a thing a vendor could eventually be shown. Only a shortlist may
+     * be deleted; everything past it is a real exchange and is cancelled, not erased.
+     */
+    @Transactional
+    public void removeShortlisted(UUID bookingId, UUID actingUserId) {
+        Booking booking = requireBooking(bookingId);
+        if (!booking.getConsumerUserId().equals(actingUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only the person who saved this listing may remove it");
+        }
+        if (booking.getStatus() != BookingStatus.SHORTLISTED) {
+            throw new PlatformException("ILLEGAL_TRANSITION",
+                    "Only a shortlisted listing can be removed; cancel it instead",
+                    HttpStatus.CONFLICT);
+        }
+
+        bookingRepo.delete(booking);
+        log.info("Shortlisted booking {} removed by {}", bookingId, actingUserId);
+    }
+
     public List<BookingResponse> listVendor(UUID vendorId) {
         if (vendorId == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No vendor org context");
         }
-        return bookingRepo.findByVendorIdOrderByCreatedAtDesc(vendorId).stream()
-                .map(BookingResponse::from).toList();
+        // Shortlisted rows are excluded at the query, not filtered after: this is the vendor's
+        // own view and a consumer considering them is not theirs to see.
+        return bookingRepo
+                .findByVendorIdAndStatusNotOrderByCreatedAtDesc(vendorId, BookingStatus.SHORTLISTED)
+                .stream().map(BookingResponse::from).toList();
     }
 
     @Transactional
@@ -208,6 +275,9 @@ public class BookingService {
     public BookingResponse cancel(UUID bookingId, CancelBookingRequest req, UUID actingUserId, UUID actingTenantId) {
         Booking booking = requireBooking(bookingId);
         requireEitherSide(booking, actingUserId, actingTenantId);
+        // SHORTLISTED is deliberately absent: it is removed rather than cancelled, so that no
+        // CANCELLED event is staged for an exchange the vendor never knew about. See
+        // removeShortlisted.
         if (booking.getStatus() != BookingStatus.INQUIRY
                 && booking.getStatus() != BookingStatus.QUOTED
                 && booking.getStatus() != BookingStatus.CONFIRMED) {

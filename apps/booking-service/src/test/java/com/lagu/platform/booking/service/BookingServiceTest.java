@@ -70,7 +70,7 @@ class BookingServiceTest {
     @Test
     void createSucceedsForPublishedListing() {
         when(listingClient.getSnapshot(listingRecordId)).thenReturn(Optional.of(publishedListing()));
-        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, "please");
+        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, null, "please", null);
 
         BookingResponse resp = service.create(req, consumerUserId);
 
@@ -80,10 +80,42 @@ class BookingServiceTest {
         verify(eventPublisher).publish(any(), eq("INQUIRED"), isNull(), eq(consumerUserId));
     }
 
+    /**
+     * The headcount is the first thing a vendor asks and had nowhere to go: before this field the
+     * number could only ride in the inquiry message, where nothing on the platform could read it
+     * as a quantity. events-ui was seeding that message with a sentence for exactly this reason.
+     */
+    @Test
+    void createCarriesTheGuestCountOntoTheBooking() {
+        when(listingClient.getSnapshot(listingRecordId)).thenReturn(Optional.of(publishedListing()));
+        CreateBookingRequest req = new CreateBookingRequest(
+                listingRecordId, LocalDate.now().plusDays(10), null, 250, null, null);
+
+        BookingResponse resp = service.create(req, consumerUserId);
+
+        assertThat(resp.guestCount()).isEqualTo(250);
+    }
+
+    /**
+     * Null is "not stated" and must not become zero on the way through — a marketplace inquiry
+     * raised with no event attached has no headcount to give, and a vendor reading 0 covers would
+     * quote nothing at all.
+     */
+    @Test
+    void createLeavesTheGuestCountUnsetWhenNoneWasStated() {
+        when(listingClient.getSnapshot(listingRecordId)).thenReturn(Optional.of(publishedListing()));
+        CreateBookingRequest req = new CreateBookingRequest(
+                listingRecordId, LocalDate.now().plusDays(10), null, null, "please", null);
+
+        BookingResponse resp = service.create(req, consumerUserId);
+
+        assertThat(resp.guestCount()).isNull();
+    }
+
     @Test
     void createFailsWhenListingNotFound() {
         when(listingClient.getSnapshot(listingRecordId)).thenReturn(Optional.empty());
-        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, null);
+        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, null, null, null);
 
         assertThatThrownBy(() -> service.create(req, consumerUserId))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -93,7 +125,7 @@ class BookingServiceTest {
     void createFailsWhenListingNotPublished() {
         ListingInfo unpublished = new ListingInfo(listingRecordId, vendorId, "VENUE", "UNPUBLISHED", "BASIC");
         when(listingClient.getSnapshot(listingRecordId)).thenReturn(Optional.of(unpublished));
-        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, null);
+        CreateBookingRequest req = new CreateBookingRequest(listingRecordId, LocalDate.now().plusDays(10), null, null, null, null);
 
         assertThatThrownBy(() -> service.create(req, consumerUserId))
                 .isInstanceOf(PlatformException.class);

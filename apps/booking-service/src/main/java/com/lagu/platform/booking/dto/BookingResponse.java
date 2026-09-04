@@ -17,6 +17,8 @@ public record BookingResponse(
         UUID eventId,
         LocalDate eventDate,
         String status,
+        /** Null when the consumer never stated one — not zero. See CreateBookingRequest. */
+        Integer guestCount,
         String inquiryMessage,
         BigDecimal quotedPrice,
         String currency,
@@ -43,6 +45,7 @@ public record BookingResponse(
                 .eventId(b.getEventId())
                 .eventDate(b.getEventDate())
                 .status(b.getStatus().name())
+                .guestCount(b.getGuestCount())
                 .inquiryMessage(b.getInquiryMessage())
                 .quotedPrice(b.getQuotedPrice())
                 .currency(b.getCurrency())

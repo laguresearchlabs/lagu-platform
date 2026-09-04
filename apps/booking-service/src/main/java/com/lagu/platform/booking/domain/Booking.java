@@ -38,6 +38,14 @@ public class Booking {
     @Column(nullable = false, length = 30)
     private BookingStatus status = BookingStatus.INQUIRY;
 
+    /**
+     * How many people the event expects, or null when it was never stated. Null and zero are not
+     * the same thing and the check constraint keeps them apart — a vendor reading 0 covers would
+     * quote nothing. Before this column the number could only ride in {@link #inquiryMessage}.
+     */
+    @Column(name = "guest_count")
+    private Integer guestCount;
+
     @Column(name = "inquiry_message", columnDefinition = "TEXT")
     private String inquiryMessage;
 
