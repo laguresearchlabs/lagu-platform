@@ -55,6 +55,7 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         seedCategories();
         seedRelationshipDefinitions();
         seedCardPresentation();
+        seedVendorCategories();
         log.info("SchemaRegistrySeeder complete");
     }
 
@@ -1144,5 +1145,59 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             seeded++;
         }
         if (seeded > 0) log.info("Seeded card presentation for {} listing type(s)", seeded);
+    }
+
+    // ── 11. Vendor categories (which suppliers an event type needs) ────────────
+
+    /**
+     * Seeds each event type's {@code config.vendorCategories} from
+     * {@code resources/seed/vendor-categories.json}.
+     *
+     * <p>It is the denominator behind an event's "still to find" list and its "1 of 5 booked"
+     * meter. A type declaring nothing falls back, client-side, to every listing type with a landing
+     * page — which is correct today only because every seeded vertical happens to suit a wedding,
+     * and becomes wrong the moment a sixth is published that does not. Declaring it pins the list
+     * instead of letting it widen with the marketplace.
+     *
+     * <p>Order is preserved, because it is the order the categories are offered in.
+     *
+     * <p>Same shape as {@link #seedCardPresentation()} and for the same reasons: held as JSON
+     * because that is how it is stored and served, layered onto a type an earlier step created,
+     * and skipped for any type that already carries the key — so an admin's edit in the portal
+     * survives a restart.
+     */
+    @SuppressWarnings("unchecked")
+    private void seedVendorCategories() {
+        Map<String, Map<String, Object>> byType;
+        try (InputStream in = new ClassPathResource("seed/vendor-categories.json").getInputStream()) {
+            byType = new ObjectMapper().readValue(in, new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("Could not read seed/vendor-categories.json — event types will fall back to "
+                    + "every landing-capable vendor type: {}", e.getMessage());
+            return;
+        }
+
+        int seeded = 0;
+        for (var entry : byType.entrySet()) {
+            // The file carries a leading `_comment` block; it names no listing type, so the
+            // lookup below simply finds nothing and it is skipped like any unknown key.
+            var existing = listingTypeRepo.findByNameAndTenantIdIsNull(entry.getKey());
+            if (existing.isEmpty()) continue;
+
+            ListingTypeDefinition def = existing.get();
+            if (def.getConfig() != null && def.getConfig().containsKey("vendorCategories")) continue;
+
+            Object categories = entry.getValue().get("vendorCategories");
+            if (!(categories instanceof List<?> list) || list.isEmpty()) continue;
+
+            Map<String, Object> config = def.getConfig() == null
+                    ? new LinkedHashMap<>() : new LinkedHashMap<>(def.getConfig());
+            config.put("vendorCategories", categories);
+            def.setConfig(config);
+
+            listingTypeRepo.save(def);
+            seeded++;
+        }
+        if (seeded > 0) log.info("Seeded vendor categories for {} listing type(s)", seeded);
     }
 }

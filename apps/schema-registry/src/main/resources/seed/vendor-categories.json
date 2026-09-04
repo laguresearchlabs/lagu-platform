@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Which vendor categories an event of each type typically needs, as listing-type names.",
+    "Read by events-ui through config.vendorCategories — see its lib/schema-form/vendorCategories.ts.",
+    "",
+    "It is the denominator behind 'still to find' on an event's Vendors tab and '1 of 5 booked' on",
+    "the host strip. A type that declares nothing falls back to every listing type with a landing",
+    "page, which is the behaviour this replaces: correct today only because every seeded vertical",
+    "happens to suit a wedding, and silently wrong the moment a sixth is published that does not.",
+    "",
+    "Order matters and is preserved: it is the order the categories are offered in, so the first",
+    "entry is the one the type says to sort out first.",
+    "",
+    "Only types listed here are pinned. Adding CORPORATE_EVENT or ANNIVERSARY_EVENT is one entry",
+    "each — but it is a product decision about what those events need, not a mechanical one, so",
+    "they are deliberately left on the fallback rather than guessed at."
+  ],
+
+  "WEDDING_EVENT": {
+    "vendorCategories": [
+      "VENUE",
+      "CATERER",
+      "PHOTOGRAPHER",
+      "DECORATOR",
+      "MAKEUP_ARTIST"
+    ]
+  }
+}
