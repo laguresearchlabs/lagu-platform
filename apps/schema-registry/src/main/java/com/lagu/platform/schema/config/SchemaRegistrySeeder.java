@@ -47,6 +47,9 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
         // these two: the split creates the `event_settings` section, and the audience pass is
         // what makes it HOST — run the other way round it would sit GUEST until the next boot.
         applyEventSectionSplit();
+        // Between the two for the same reason the split is before the audiences: it adds sections
+        // that arrive at the GUEST column default, and the pass below is what narrows them.
+        applyBudgetRelocation();
         applySectionAudiences();
         seedTierConfigurations();
         seedDocumentRequirements();
@@ -357,6 +360,118 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
     }
 
     /**
+     * The running order the planning workbench presents its tools in, once the budget total has
+     * joined them. Named here because both halves of the relocation have to agree on it: a fresh
+     * seed gets it from the group definition above, and a migrated database gets it from here.
+     */
+    private static final List<String> PLANNING_TOOL_ORDER =
+            List.of("planning_tasks", "budget_inr", "budget_items", "schedule_activities");
+
+    /**
+     * Moves {@code budget_inr} out of the two GUEST groups that held it and into the host-only
+     * planning group, on an installation seeded before that was true.
+     *
+     * <p>{@code ensureFieldGroup} is a no-op once its row exists, so editing the definitions above
+     * only ever reaches a database seeded from empty. Every other environment keeps rendering what
+     * an event costs in the invitation body, to every guest — which is the leak this exists for,
+     * and the same shape of gap {@link #applyEventSectionSplit()} was written to close.
+     *
+     * <p><strong>Records are untouched.</strong> A record's {@code data} is a flat map keyed by
+     * field name, so moving the field between groups does not move its value; nothing is migrated
+     * and no host loses a number they had entered.
+     *
+     * <p>Runs before {@link #applySectionAudiences()}, because the sections it adds arrive at the
+     * column default of GUEST and it is that pass which narrows them.
+     */
+    private void applyBudgetRelocation() {
+        var budget = fieldRepo.findByNameAndTenantIdIsNull("budget_inr");
+        var planning = fieldGroupRepo.findByNameAndTenantIdIsNull("event_planning_tools");
+        if (budget.isEmpty() || planning.isEmpty()) return;
+
+        // Before the move, not after: a host-only group that no section on the type composes is a
+        // field with nowhere to be read or written, so relocating first would take the budget off
+        // a corporate event's screens entirely rather than making it private.
+        ensureCorporateBackstage();
+
+        int removed = 0;
+        for (String groupName : List.of("wedding_details", "corporate_details")) {
+            var group = fieldGroupRepo.findByNameAndTenantIdIsNull(groupName);
+            if (group.isEmpty()) continue;
+            // orphanRemoval is on FieldGroup.entries, so dropping it from the list deletes the row.
+            if (group.get().getEntries().removeIf(e -> "budget_inr".equals(e.getField().getName()))) {
+                fieldGroupRepo.save(group.get());
+                removed++;
+            }
+        }
+
+        FieldGroup tools = planning.get();
+        boolean alreadyThere = tools.getEntries().stream()
+                .anyMatch(e -> "budget_inr".equals(e.getField().getName()));
+        if (!alreadyThere) {
+            FieldGroupEntry entry = new FieldGroupEntry();
+            entry.setFieldGroup(tools);
+            entry.setField(budget.get());
+            tools.getEntries().add(entry);
+        }
+
+        // Renumbered rather than appended, so a migrated database and a fresh one present the
+        // workbench identically. Inserting at a position another entry already holds leaves two
+        // tools tied on display_order, and a tie resolves to whatever order the join returned.
+        for (FieldGroupEntry entry : tools.getEntries()) {
+            int position = PLANNING_TOOL_ORDER.indexOf(entry.getField().getName());
+            if (position >= 0) entry.setDisplayOrder(position);
+        }
+        fieldGroupRepo.save(tools);
+
+        if (removed > 0 || !alreadyThere) {
+            log.info("Relocated budget_inr into event_planning_tools (dropped from {} guest group(s))", removed);
+        }
+    }
+
+    /**
+     * Gives CORPORATE_EVENT the two host-only sections every other seeded event type has.
+     *
+     * <p>It had neither — no plan, no settings, no backstage of any kind — which is the reason its
+     * budget was in a guest section to begin with: there was nowhere else on the type for a
+     * host-only field to be. Added at the end of the running order, like the settings section the
+     * split pass appends, so nothing above them shuffles under anyone mid-upgrade.
+     */
+    private void ensureCorporateBackstage() {
+        var found = listingTypeRepo.findByNameAndTenantIdIsNull("CORPORATE_EVENT");
+        if (found.isEmpty()) return;
+        ListingTypeDefinition corporate = found.get();
+
+        boolean dirty = false;
+        for (String sectionKey : List.of("event_planning_tools", "event_settings")) {
+            boolean present = corporate.getSections().stream()
+                    .anyMatch(s -> sectionKey.equals(s.getSectionKey()));
+            if (present) continue;
+
+            var group = fieldGroupRepo.findByNameAndTenantIdIsNull(sectionKey);
+            if (group.isEmpty()) continue;
+
+            int last = corporate.getSections().stream()
+                    .mapToInt(ListingTypeSection::getDisplayOrder)
+                    .max()
+                    .orElse(0);
+
+            ListingTypeSection section = new ListingTypeSection();
+            section.setListingType(corporate);
+            section.setFieldGroup(group.get());
+            section.setSectionKey(sectionKey);
+            section.setLabel(group.get().getLabel());
+            section.setDisplayOrder(last + 1);
+            corporate.getSections().add(section);
+            dirty = true;
+        }
+
+        if (dirty) {
+            listingTypeRepo.save(corporate);
+            log.info("Added the missing backstage sections to CORPORATE_EVENT");
+        }
+    }
+
+    /**
      * Backfills the audience on host-only sections, and <strong>only</strong> those.
      *
      * <p>This ran on every boot and wrote the full answer — HOST for the host-only keys, GUEST for
@@ -516,16 +631,19 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             List.of(fge("makeup_specializations",0,false), fge("home_service",1,false),
                     fge("brands_used",2,false)));
 
+        // No `budget_inr` in either of these two: both are GUEST sections, and what an event costs
+        // is not a fact it tells its guests. It moved to `event_planning_tools` — see the note
+        // there.
         ensureFieldGroup("wedding_details",     "Wedding Details",
             List.of(fge("event_date",0,true), fge("event_time",1,false),
                     fge("expected_guests",2,false), fge("event_sub_types",3,false),
-                    fge("budget_inr",4,false), fge("venue_ref",5,false)));
+                    fge("venue_ref",4,false)));
 
         ensureFieldGroup("corporate_details",   "Corporate Details",
             List.of(fge("company_name",0,false), fge("corporate_event_type",1,false),
                     fge("event_date",2,true), fge("expected_attendees",3,false),
-                    fge("budget_inr",4,false), fge("venue_ref",5,false),
-                    fge("requires_recording",6,false), fge("requires_streaming",7,false)));
+                    fge("venue_ref",4,false),
+                    fge("requires_recording",5,false), fge("requires_streaming",6,false)));
 
         // pan_number is NOT required here. record-service validates every record against the
         // flattened section->field schema (MetadataClient reads f.required() off these group
@@ -568,9 +686,16 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
             List.of(fge("event_theme",0,false), fge("dresscode",1,false),
                     fge("menu_preference",2,false), fge("rsvp_deadline",3,false)));
 
+        // `budget_inr` lives here rather than with the event's details, and the reason is an
+        // audience one. Audience is a property of the *section*, so a field is only as private as
+        // the group it sits in — and this is the one host-only group an event type already has.
+        // Held in `wedding_details`/`corporate_details` (both GUEST) the total was rendered in the
+        // invitation body to every guest, which is the exact case the audience filter in
+        // events-ui's promoted.ts was written to prevent. See applyBudgetRelocation() for the
+        // already-seeded half of this move.
         ensureFieldGroup("event_planning_tools","Planning Tools",
-            List.of(fge("planning_tasks",0,false), fge("budget_items",1,false),
-                    fge("schedule_activities",2,false)));
+            List.of(fge("planning_tasks",0,false), fge("budget_inr",1,false),
+                    fge("budget_items",2,false), fge("schedule_activities",3,false)));
 
         ensureFieldGroup("wish_list",           "Wish List",
             List.of(fge("wish_list",0,false)));
@@ -675,12 +800,20 @@ public class SchemaRegistrySeeder implements ApplicationRunner {
                 sec("event_settings",          "Event Settings",  10)
             ), false, false, ListingTypeKind.EVENT, "💍", "rose");
 
+        // Planning tools and settings are not decoration here: this type is where `budget_inr`
+        // now lands, and a host-only group with no section on the type is a field with nowhere
+        // to be read or written. A corporate event was also the only seeded event type with no
+        // backstage at all — no settings, no plan — which is why its budget had to live in a
+        // guest section to be reachable in the first place.
         ensureListingType("CORPORATE_EVENT","Corporate Event","Corporate and business event management",
             List.of(
-                sec("basic_details",     "Event Overview",    0),
-                sec("corporate_details", "Corporate Details", 1),
-                sec("contact_details",   "Contact",           2),
-                sec("media",             "Media",             3)
+                sec("basic_details",         "Event Overview",    0),
+                sec("corporate_details",     "Corporate Details", 1),
+                sec("contact_details",       "Contact",           2),
+                sec("media",                 "Media",             3),
+                sec("event_planning_tools",  "Planning Tools",    4),
+                // Last: policy is not what anyone opens an event to read.
+                sec("event_settings",        "Event Settings",    5)
             ), false, false, ListingTypeKind.EVENT, "🏢", "sky");
 
         ensureListingType("BIRTHDAY_EVENT", "Birthday Event", "Birthday party planning and management",

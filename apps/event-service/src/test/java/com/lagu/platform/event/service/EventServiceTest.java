@@ -60,8 +60,17 @@ class EventServiceTest {
         // listMine() batch-loads its events rather than one findById per membership row.
         when(eventRepo.findAllById(any())).thenReturn(java.util.List.of(event));
         // Where every listing type starts: no section marked PUBLIC, so no data is shareable.
-        when(schemaClient.publicFields(any())).thenReturn(new SchemaRegistryClient.PublicFields(Set.of(), null));
+        when(schemaClient.publicFields(any())).thenReturn(new SchemaRegistryClient.VisibleFields(Set.of(), null));
+        // A schema that admits everything these tests put in a record, so the tests that are not
+        // about the read filter are not written against it. The ones that are re-stub it.
+        when(schemaClient.visibleFields(any(), any()))
+                .thenReturn(Optional.of(new SchemaRegistryClient.VisibleFields(GUEST_READABLE, 1)));
     }
+
+    /** Every key these tests store on a record, other than the host-only one below. */
+    private static final Set<String> GUEST_READABLE =
+            Set.of("title", "name", "description", "visibility", "cover_image", "city",
+                   "is_virtual", "cake_preference", "dresscode");
 
     private EventMember memberWithRole(UUID userId, String role, String status) {
         EventMember m = new EventMember();
@@ -246,7 +255,7 @@ class EventServiceTest {
         // service, or the shape of a record, made for them.
         stubToken("live-token");
         when(schemaClient.publicFields("BIRTHDAY_EVENT"))
-                .thenReturn(new SchemaRegistryClient.PublicFields(Set.of("name", "cake_preference"), 3));
+                .thenReturn(new SchemaRegistryClient.VisibleFields(Set.of("name", "cake_preference"), 3));
         when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
                 "name", "Aarav's 5th Birthday",
                 "cake_preference", "Chocolate truffle",
@@ -284,7 +293,7 @@ class EventServiceTest {
         // has to render around.
         stubToken("live-token");
         when(schemaClient.publicFields("BIRTHDAY_EVENT"))
-                .thenReturn(new SchemaRegistryClient.PublicFields(Set.of("name", "dresscode"), 1));
+                .thenReturn(new SchemaRegistryClient.VisibleFields(Set.of("name", "dresscode"), 1));
         when(recordClient.getRecord(recordId, eventId))
                 .thenReturn(Map.of("data", Map.of("data", Map.of("name", "Aarav's 5th Birthday"))));
 
@@ -324,6 +333,91 @@ class EventServiceTest {
 
         assertThat(response.getMyRole()).isEqualTo("INVITEE");
         assertThat(response.getData()).containsEntry("title", "x");
+    }
+
+    // ── get() applies the section audience, which it did not use to ──────────
+
+    @Test
+    void getWithholdsHostOnlySectionsFromAGuest() {
+        // The whole point of the filter. This response used to carry the budget, the planning
+        // tasks and the event's own settings to every member — events-ui declined to render them,
+        // and the JSON behind the page had all three.
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
+                .thenReturn(Optional.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "name", "Aarav's 5th Birthday",
+                "budget_inr", 250000))));
+
+        var response = service.get(eventId, ownerId);
+
+        assertThat(response.getData()).containsEntry("name", "Aarav's 5th Birthday");
+        assertThat(response.getData()).doesNotContainKey("budget_inr");
+    }
+
+    @Test
+    void getGivesAManagerTheWholeRecordWithoutConsultingTheSchema() {
+        // A manager reads HOST by definition, so there is nothing for the schema to decide and no
+        // round trip worth making to be told so.
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
+                .thenReturn(Optional.of(memberWithRole(ownerId, "MAINTAINER", "ACCEPTED")));
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "name", "Aarav's 5th Birthday",
+                "budget_inr", 250000))));
+
+        var response = service.get(eventId, ownerId);
+
+        assertThat(response.getData()).containsEntry("budget_inr", 250000);
+        verify(schemaClient, never()).visibleFields(any(), any());
+    }
+
+    @Test
+    void getTreatsAnInvitedCoHostAsAGuestUntilTheyAccept() {
+        // canManage() answers what the row says the member is, and nothing about whether they have
+        // accepted. Every write path pairs it with requireMember for that half; read had to as
+        // well, or the whole record went to someone invited to co-host and still deciding.
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
+                .thenReturn(Optional.of(memberWithRole(ownerId, "MAINTAINER", "INVITED")));
+        when(recordClient.getRecord(recordId, eventId)).thenReturn(Map.of("data", Map.of("data", Map.of(
+                "name", "Aarav's 5th Birthday",
+                "budget_inr", 250000))));
+
+        var response = service.get(eventId, ownerId);
+
+        assertThat(response.getData()).containsEntry("name", "Aarav's 5th Birthday");
+        assertThat(response.getData()).doesNotContainKey("budget_inr");
+    }
+
+    @Test
+    void getRefusesRatherThanGuessWhenTheSchemaCannotBeResolved() {
+        // Serving what we cannot vouch for is the one answer that is not available. Handing back a
+        // stripped record instead would show a member an event with no name and no date and
+        // nothing to say why, which reads as data loss rather than as a service being unwell.
+        when(memberRepo.findByTenantIdAndUserId(eventId, ownerId))
+                .thenReturn(Optional.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
+        when(recordClient.getRecord(recordId, eventId))
+                .thenReturn(Map.of("data", Map.of("data", Map.of("name", "x"))));
+        when(schemaClient.visibleFields(any(), any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(eventId, ownerId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+    }
+
+    @Test
+    void listMineDropsOneEventsDataRatherThanFailingTheWholeList() {
+        // The opposite policy to get(), and deliberately: a list is many events, and one type the
+        // registry cannot resolve must not take every other card down with it.
+        when(memberRepo.findByUserId(ownerId))
+                .thenReturn(java.util.List.of(memberWithRole(ownerId, "INVITEE", "ACCEPTED")));
+        when(recordClient.getRecord(recordId, eventId))
+                .thenReturn(Map.of("data", Map.of("data", Map.of("name", "x"))));
+        when(schemaClient.visibleFields(any(), any())).thenReturn(Optional.empty());
+
+        var events = service.listMine(ownerId);
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).getData()).isEmpty();
     }
 
     // ── update() / transition() require ADMIN or MAINTAINER ────────────────────

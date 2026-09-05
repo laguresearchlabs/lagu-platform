@@ -54,12 +54,25 @@ public class EventMemberService {
     private final EventMemberRepository      memberRepo;
     private final EventJoinRequestRepository joinRequestRepo;
 
+    /**
+     * The event's roster, as this requester may have it.
+     *
+     * <p>Two things are withheld from a non-manager, and both used to be sent to everyone. A
+     * DECLINED row is the host's business — {@code canSeeDeclines} has said so on the client since
+     * the viewer model was written, while this endpoint shipped the rows anyway — and so is
+     * {@code guestNote}, free text the host writes <em>about</em> a guest at invite time. Neither
+     * was ever rendered to a guest, which is exactly why nobody noticed they were being sent.
+     */
     public List<EventMemberResponse> list(UUID eventId, UUID requesterId) {
         Event event = requireEvent(eventId);
-        requireMember(event, requesterId);
+        EventMember requester = requireMember(event, requesterId);
+        boolean manager = requester.canManage();
+
         return memberRepo.findByTenantId(event.getTenantId()).stream()
                 .filter(m -> !"REMOVED".equals(m.getStatus()))
-                .map(this::toResponse).toList();
+                .filter(m -> manager || !"DECLINED".equals(m.getStatus()))
+                .map(m -> manager ? toResponse(m) : toPeerResponse(m, requesterId))
+                .toList();
     }
 
     /**
@@ -154,7 +167,9 @@ public class EventMemberService {
         Event event = requireEvent(eventId);
         EventMember member = requireMember(event, requesterId); // a user mutes/unmutes themself
         member.setMuted(muted);
-        return toResponse(memberRepo.save(member));
+        // Their own row, which is not the same as a row that is theirs to read whole: guestNote is
+        // what the host wrote *about* them. See toPeerResponse.
+        return toPeerResponse(memberRepo.save(member), requesterId);
     }
 
     /**
@@ -189,7 +204,7 @@ public class EventMemberService {
                     memberRepo.findByTenantId(event.getTenantId()), userId, null, LAST_MANAGER_ROLES);
         }
         member.setStatus(target);
-        return toResponse(memberRepo.save(member));
+        return toPeerResponse(memberRepo.save(member), userId);
     }
 
     // ── join requests ────────────────────────────────────────────────────────
@@ -337,12 +352,35 @@ public class EventMemberService {
         return member;
     }
 
+    /**
+     * The whole row, for a manager who is entitled to it: {@code invite}, {@code updateRole} and
+     * {@code approve} are all actions only a manager could have taken, and the note comes back to
+     * whoever wrote it.
+     *
+     * <p>Deliberately <em>not</em> what the endpoints acting on your own membership return. "Your
+     * own row" and "a row that is yours to read whole" are different things — {@code guestNote} is
+     * what the host recorded about you — so accepting an invitation or muting an event goes
+     * through {@link #toPeerResponse}, which is how a guest was otherwise handed the note by
+     * pressing Accept.
+     */
     private EventMemberResponse toResponse(EventMember m) {
         return EventMemberResponse.builder()
                 .id(m.getId()).userId(m.getUserId()).role(m.getRole()).status(m.getStatus())
                 .guestNote(m.getGuestNote()).muted(m.isMuted()).invitedBy(m.getInvitedBy())
                 .joinedAt(m.getJoinedAt() != null ? m.getJoinedAt().atOffset(java.time.ZoneOffset.UTC) : null)
                 .build();
+    }
+
+    /**
+     * One member as another member may have them: who they are and whether they are coming, and
+     * nothing the host recorded about them. {@code muted} survives on the requester's own row —
+     * the roster is where the client reads its own notification setting from.
+     */
+    private EventMemberResponse toPeerResponse(EventMember m, UUID requesterId) {
+        EventMemberResponse response = toResponse(m);
+        response.setGuestNote(null);
+        response.setMuted(m.getUserId().equals(requesterId) ? m.isMuted() : null);
+        return response;
     }
 
     private JoinRequestResponse toResponse(EventJoinRequest jr) {

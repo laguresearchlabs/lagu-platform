@@ -125,9 +125,21 @@ public class EventService {
             if (!isPlatformAdmin) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this event");
             }
+            // Unfiltered, and the only read here that is: a platform admin reads any event whole,
+            // which is what the Admin Portal's event page renders. There is no membership to
+            // resolve a rung from, and inventing one would be a guess.
             return toResponse(event, null, data);
         }
-        return toResponse(event, member.get(), data);
+
+        EventMember viewer = member.get();
+        // Loudly rather than quietly: a member handed a stripped record would see an event with
+        // no name and no date and nothing saying why. A refusal they can retry is the honest
+        // answer to "we cannot currently tell what you are allowed to read".
+        Map<String, Object> visible = readableData(event, viewer, data)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Cannot determine what this event may show you right now"));
+
+        return toResponse(event, viewer, visible);
     }
 
     /**
@@ -156,7 +168,7 @@ public class EventService {
         Event event = requireEvent(link.getEventId());
         Map<String, Object> data = fetchData(event);
 
-        SchemaRegistryClient.PublicFields publicFields = schemaClient.publicFields(event.getObjectType());
+        SchemaRegistryClient.VisibleFields publicFields = schemaClient.publicFields(event.getObjectType());
 
         return SharePreviewResponse.builder()
                 .objectType(event.getObjectType())
@@ -166,13 +178,13 @@ public class EventService {
                 .startDatetime(str(data.get("start_datetime")))
                 .city(str(data.get("city")))
                 .state(str(data.get("state")))
-                .data(publicSubset(data, publicFields.keys()))
+                .data(allowedSubset(data, publicFields.keys()))
                 .schemaVersion(publicFields.version())
                 .build();
     }
 
     /**
-     * The record, reduced to the keys the schema says are public.
+     * The record, reduced to the keys the schema says this reader may have.
      *
      * <p>Built by walking the allowed keys rather than by filtering the record's entries: the
      * two produce the same map today, but only this direction stays correct if a record ever
@@ -180,7 +192,7 @@ public class EventService {
      * value nobody has decided the audience of. See events-ui's recordAudit for the other half
      * of that story.
      */
-    private Map<String, Object> publicSubset(Map<String, Object> data, Set<String> allowed) {
+    private Map<String, Object> allowedSubset(Map<String, Object> data, Set<String> allowed) {
         Map<String, Object> subset = new LinkedHashMap<>();
         for (String key : allowed) {
             Object value = data.get(key);
@@ -246,7 +258,14 @@ public class EventService {
         // would be starved by blocking IO.
         List<CompletableFuture<EventResponse>> futures = memberships.stream()
                 .map(m -> events.get(m.getTenantId()) == null ? null : CompletableFuture.supplyAsync(
-                        () -> toResponse(events.get(m.getTenantId()), m, fetchData(events.get(m.getTenantId()))),
+                        () -> {
+                            Event e = events.get(m.getTenantId());
+                            // Quietly rather than loudly, which is the opposite of get()'s policy
+                            // and deliberately so: one unresolvable type would otherwise fail the
+                            // whole list, taking every other event on it down with it. A card
+                            // short of its title still links to a page that can explain itself.
+                            return toResponse(e, m, readableData(e, m, fetchData(e)).orElse(Map.of()));
+                        },
                         listHydrationExecutor))
                 .filter(Objects::nonNull)
                 .toList();
@@ -316,6 +335,41 @@ public class EventService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Membership not accepted");
         }
         return member;
+    }
+
+    /**
+     * The record as this member may read it — the whole thing for a manager, and the fields of
+     * the schema's guest-or-wider sections for everyone else.
+     *
+     * <p>This is the server's half of an answer that used to be given only by the client. The
+     * section audience has always been carried on the schema and always been applied by events-ui,
+     * but {@code toResponse} shipped the entire {@code data} map to every membership row — so a
+     * guest's page hid the budget, the planning tasks and the event's own settings while the JSON
+     * behind it carried all three. What a client chooses to render is a presentation decision;
+     * what it is sent is this one.
+     *
+     * <p>Two rungs, not five. A manager reads HOST and needs no schema lookup to prove it, and
+     * everybody else reads GUEST — including the INVITED and DECLINED rows the read path
+     * deliberately admits, who see exactly what they saw before this existed. Narrowing an invitee
+     * further is a product decision about what someone needs in order to answer an invitation, not
+     * a leak to close, and it belongs with the work that gives them something to read instead.
+     *
+     * <p><strong>Status gates the rung, not role.</strong> {@code canManage()} answers only what
+     * the row says the member <em>is</em>, and every write path pairs it with {@code requireMember}
+     * for the other half — an invitation that has not been accepted is not membership. Read on its
+     * own it would hand the whole record to someone invited to co-host and still deciding, which is
+     * the same ordering events-ui's ladder is careful about for the same reason.
+     *
+     * <p>Empty {@code Optional} means the schema could not be resolved at all — not that nothing
+     * is visible. The callers differ on what to do about it, which is why this returns the
+     * distinction rather than resolving it here.
+     */
+    private Optional<Map<String, Object>> readableData(Event event, EventMember viewer, Map<String, Object> data) {
+        if (viewer != null && viewer.isActive() && viewer.canManage()) return Optional.of(data);
+
+        return schemaClient
+                .visibleFields(event.getObjectType(), SchemaRegistryClient.GUEST_AUDIENCE)
+                .map(fields -> allowedSubset(data, fields.keys()));
     }
 
     /** Only ADMIN/MAINTAINER may mutate. */

@@ -502,4 +502,85 @@ class EventMemberServiceTest {
                 && "ACCEPTED".equals(m.getStatus()) && "MAINTAINER".equals(m.getRole())));
         verify(joinRequestRepo).save(argThat(r -> "APPROVED".equals(r.getStatus())));
     }
+
+    // ── list() withholds what is the host's ──────────────────────────────────
+
+    /** A guest, a declined invitation, and a note the host wrote about one of them. */
+    private void stubRoster(UUID guestId, UUID declinedId) {
+        EventMember owner = memberWithRole(ownerId, "ADMIN");
+        EventMember guest = memberWithRole(guestId, "INVITEE");
+        guest.setGuestNote("Bride's uncle — seat away from the bar");
+        guest.setMuted(true);
+        EventMember declined = memberWithRole(declinedId, "INVITEE");
+        declined.setStatus("DECLINED");
+
+        when(memberRepo.findByTenantIdAndUserIdAndStatusNot(tenantId, ownerId, "REMOVED"))
+                .thenReturn(Optional.of(owner));
+        when(memberRepo.findByTenantIdAndUserIdAndStatusNot(tenantId, guestId, "REMOVED"))
+                .thenReturn(Optional.of(guest));
+        when(memberRepo.findByTenantId(tenantId)).thenReturn(List.of(owner, guest, declined));
+    }
+
+    @Test
+    void listHidesGuestNotesAndDeclinesFromAGuest() {
+        UUID guestId = UUID.randomUUID();
+        UUID declinedId = UUID.randomUUID();
+        stubRoster(guestId, declinedId);
+
+        var roster = service.list(eventId, guestId);
+
+        // canSeeDeclines has been a host capability on the client since the viewer model was
+        // written; this endpoint shipped the rows to everyone regardless.
+        assertThat(roster).extracting("userId").doesNotContain(declinedId);
+        assertThat(roster).allSatisfy(m -> assertThat(m.getGuestNote()).isNull());
+    }
+
+    @Test
+    void listGivesAGuestTheirOwnMutedFlagAndNobodyElses() {
+        UUID guestId = UUID.randomUUID();
+        UUID declinedId = UUID.randomUUID();
+        stubRoster(guestId, declinedId);
+
+        var roster = service.list(eventId, guestId);
+
+        // Their own preference is theirs to read — the roster is where the client picks it up.
+        // Null rather than false on everyone else, so "not yours to know" stays a different
+        // answer from "not muted".
+        assertThat(roster).filteredOn(m -> m.getUserId().equals(guestId))
+                .singleElement()
+                .satisfies(m -> assertThat(m.getMuted()).isTrue());
+        assertThat(roster).filteredOn(m -> !m.getUserId().equals(guestId))
+                .allSatisfy(m -> assertThat(m.getMuted()).isNull());
+    }
+
+    @Test
+    void acceptingAnInvitationDoesNotHandBackTheHostsNoteAboutYou() {
+        // The other door onto the same thing list() closes. Withholding the note from the roster
+        // and then returning it in the response to Accept would be one guard with a hole beside it.
+        UUID guestId = UUID.randomUUID();
+        EventMember invited = memberWithRole(guestId, "INVITEE");
+        invited.setStatus("INVITED");
+        invited.setGuestNote("Bride's uncle — seat away from the bar");
+        when(memberRepo.findByTenantIdAndUserId(tenantId, guestId)).thenReturn(Optional.of(invited));
+        when(memberRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var response = service.respondToInvite(eventId, guestId, true);
+
+        assertThat(response.getStatus()).isEqualTo("ACCEPTED");
+        assertThat(response.getGuestNote()).isNull();
+    }
+
+    @Test
+    void listKeepsEverythingForAManager() {
+        UUID guestId = UUID.randomUUID();
+        UUID declinedId = UUID.randomUUID();
+        stubRoster(guestId, declinedId);
+
+        var roster = service.list(eventId, ownerId);
+
+        assertThat(roster).extracting("userId").contains(declinedId);
+        assertThat(roster).filteredOn(m -> m.getUserId().equals(guestId))
+                .singleElement()
+                .satisfies(m -> assertThat(m.getGuestNote()).isEqualTo("Bride's uncle — seat away from the bar"));
+    }
 }
